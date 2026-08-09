@@ -7,12 +7,19 @@ import '../models/capture_item.dart';
 import 'database_service.dart';
 
 class StorageService {
-  /// Save image bytes to a custom location chosen by the user
+  /// Save image bytes to a custom location chosen by the user (defaults to Downloads directory)
   static Future<String?> exportImageDialog(List<int> bytes, String defaultName) async {
     try {
+      String? initialDir;
+      try {
+        final downloadsDir = await getDownloadsDirectory();
+        initialDir = downloadsDir?.path;
+      } catch (_) {}
+
       final result = await FilePicker.saveFile(
         dialogTitle: 'Save Screenshot As',
         fileName: defaultName.endsWith('.png') ? defaultName : '$defaultName.png',
+        initialDirectory: initialDir,
         type: FileType.custom,
         allowedExtensions: ['png', 'jpg', 'jpeg'],
       );
@@ -21,6 +28,21 @@ class StorageService {
         final file = File(result);
         await file.writeAsBytes(bytes);
         return result;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Direct save to user's Downloads folder
+  static Future<String?> saveToDownloads(List<int> bytes, String defaultName) async {
+    try {
+      final downloadsDir = await getDownloadsDirectory();
+      if (downloadsDir != null) {
+        final fileName = defaultName.endsWith('.png') ? defaultName : '$defaultName.png';
+        final targetPath = p.join(downloadsDir.path, fileName);
+        final file = File(targetPath);
+        await file.writeAsBytes(bytes);
+        return targetPath;
       }
     } catch (_) {}
     return null;

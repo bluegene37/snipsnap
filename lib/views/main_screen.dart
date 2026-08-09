@@ -283,14 +283,20 @@ class _MainScreenState extends State<MainScreen> {
   Future<Uint8List?> _renderAnnotatedBytes() async {
     try {
       final boundary = _repaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) return null;
+      if (boundary != null) {
+        final image = await boundary.toImage(pixelRatio: 2.0); // 2x Retina resolution
+        final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+        if (byteData != null) {
+          return byteData.buffer.asUint8List();
+        }
+      }
+    } catch (_) {}
 
-      final image = await boundary.toImage(pixelRatio: 2.0); // 2x Retina resolution
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      return byteData?.buffer.asUint8List();
-    } catch (_) {
-      return null;
+    // Fallback to source file bytes if repaint boundary is unavailable
+    if (_activeCapture != null && File(_activeCapture!.filePath).existsSync()) {
+      return File(_activeCapture!.filePath).readAsBytesSync();
     }
+    return null;
   }
 
   Future<void> _handleCopyToClipboard() async {

@@ -6,7 +6,8 @@ class ClipboardService {
   static Future<bool> copyImageToClipboard(String filePath) async {
     try {
       if (Platform.isMacOS) {
-        final script = 'set the clipboard to (read (POSIX file "$filePath") as «class PNGf»)';
+        final escapedPath = filePath.replaceAll('"', '\\"');
+        final script = 'set the clipboard to (read (POSIX file "$escapedPath") as «class PNGf»)';
         final result = await Process.run('osascript', ['-e', script]);
         return result.exitCode == 0;
       } else {
