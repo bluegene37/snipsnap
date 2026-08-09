@@ -24,12 +24,10 @@ class AboutSnipSnapDialog extends StatelessWidget {
           children: [
             // App Icon Logo
             Container(
-              padding: const EdgeInsets.all(16),
+              width: 68,
+              height: 68,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [AppColors.accent, Color(0xFFFF8E53)],
-                ),
-                shape: BoxShape.circle,
+                borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
                     color: AppColors.accent.withValues(alpha: 0.4),
@@ -38,7 +36,17 @@ class AboutSnipSnapDialog extends StatelessWidget {
                   ),
                 ],
               ),
-              child: const Icon(Icons.camera_rounded, color: Colors.white, size: 40),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Image.asset(
+                  'assets/images/app_logo.png',
+                  fit: BoxFit.cover,
+                  errorBuilder: (ctx, err, stack) => Container(
+                    color: AppColors.accent,
+                    child: const Icon(Icons.camera_rounded, color: Colors.white, size: 40),
+                  ),
+                ),
+              ),
             ),
 
             const SizedBox(height: 16),
