@@ -21,18 +21,27 @@ class CaptureService {
     return p.join(dir.path, 'snap_$timestamp.png');
   }
 
-  /// Perform interactive area capture using native macOS screencapture
+  /// Perform interactive area capture using native macOS screencapture.
+  /// If the user drags out a selection region, captures that region.
+  /// If the user just clicks (no selection region created), captures the full screen.
   Future<String?> captureInteractive() async {
     final targetPath = await _generateNewPath();
     try {
       if (Platform.isMacOS) {
         final result = await Process.run('/usr/sbin/screencapture', ['-i', targetPath]);
-        if (result.exitCode == 0 && await File(targetPath).exists()) {
-          final file = File(targetPath);
+        final file = File(targetPath);
+        if (result.exitCode == 0 && await file.exists()) {
           if (await file.length() > 0) {
             return targetPath;
+          } else {
+            try {
+              await file.delete();
+            } catch (_) {}
           }
         }
+
+        // If the user just clicked without dragging a selection region, capture full screen
+        return await captureFullScreen();
       }
     } catch (e) {
       debugPrint('SnipSnap capture error: $e');

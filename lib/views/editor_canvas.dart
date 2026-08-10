@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 import '../models/annotation.dart';
 import '../utils/constants.dart';
@@ -15,6 +16,7 @@ class EditorCanvas extends StatefulWidget {
   final bool isFilled;
   final int stepCounter;
   final ValueChanged<Annotation> onAnnotationAdded;
+  final ValueChanged<List<Annotation>>? onAnnotationsUpdated;
   final ValueChanged<int> onStepCounterIncremented;
   final GlobalKey repaintBoundaryKey;
   final bool isDarkMode;
@@ -31,6 +33,7 @@ class EditorCanvas extends StatefulWidget {
     required this.isFilled,
     required this.stepCounter,
     required this.onAnnotationAdded,
+    this.onAnnotationsUpdated,
     required this.onStepCounterIncremented,
     required this.repaintBoundaryKey,
     this.isDarkMode = true,
@@ -45,6 +48,10 @@ class _EditorCanvasState extends State<EditorCanvas> {
   final Uuid _uuid = const Uuid();
   bool _fileExists = false;
 
+  // Selection and Dragging State
+  String? _selectedAnnotationId;
+  bool _isDraggingAnnotation = false;
+
   @override
   void initState() {
     super.initState();
@@ -57,6 +64,16 @@ class _EditorCanvasState extends State<EditorCanvas> {
     if (oldWidget.imagePath != widget.imagePath) {
       _checkFileExists();
     }
+
+    // Live update selected annotation properties when controls change
+    if (_selectedAnnotationId != null &&
+        (oldWidget.activeColor != widget.activeColor ||
+            oldWidget.strokeWidth != widget.strokeWidth ||
+            oldWidget.opacity != widget.opacity ||
+            oldWidget.fontSize != widget.fontSize ||
+            oldWidget.isFilled != widget.isFilled)) {
+      _updateSelectedAnnotationProperties();
+    }
   }
 
   void _checkFileExists() {
@@ -65,14 +82,151 @@ class _EditorCanvasState extends State<EditorCanvas> {
     });
   }
 
+  void _updateSelectedAnnotationProperties() {
+    if (_selectedAnnotationId == null || widget.onAnnotationsUpdated == null) return;
+    final index = widget.annotations.indexWhere((a) => a.id == _selectedAnnotationId);
+    if (index != -1) {
+      final oldAnn = widget.annotations[index];
+      final updatedAnn = oldAnn.copyWith(
+        color: widget.activeColor,
+        strokeWidth: widget.strokeWidth,
+        opacity: widget.opacity,
+        fontSize: widget.fontSize,
+        fill: widget.isFilled,
+      );
+      final newList = List<Annotation>.from(widget.annotations);
+      newList[index] = updatedAnn;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          widget.onAnnotationsUpdated?.call(newList);
+        }
+      });
+    }
+  }
+
+  void _deleteSelectedAnnotation() {
+    if (_selectedAnnotationId == null || widget.onAnnotationsUpdated == null) return;
+    final updated = widget.annotations.where((a) => a.id != _selectedAnnotationId).toList();
+    setState(() {
+      _selectedAnnotationId = null;
+    });
+    widget.onAnnotationsUpdated!(updated);
+  }
+
   // Current drawing shape state
   Annotation? _currentAnnotation;
   List<Offset> _currentPoints = [];
 
+  Annotation? _hitTestAnnotation(Offset pos) {
+    for (int i = widget.annotations.length - 1; i >= 0; i--) {
+      final ann = widget.annotations[i];
+      if (_isPointInsideAnnotation(ann, pos)) {
+        return ann;
+      }
+    }
+    return null;
+  }
+
+  bool _isPointInsideAnnotation(Annotation ann, Offset point) {
+    const hitPadding = 14.0;
+
+    switch (ann.tool) {
+      case CanvasTool.rectangle:
+      case CanvasTool.oval:
+      case CanvasTool.crop:
+      case CanvasTool.blur:
+        if (ann.startPoint == null || ann.endPoint == null) return false;
+        final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!).inflate(hitPadding);
+        return rect.contains(point);
+
+      case CanvasTool.arrow:
+      case CanvasTool.line:
+        if (ann.startPoint == null || ann.endPoint == null) return false;
+        return _distanceToSegment(point, ann.startPoint!, ann.endPoint!) <= (ann.strokeWidth / 2 + hitPadding);
+
+      case CanvasTool.pen:
+      case CanvasTool.highlight:
+        if (ann.points.isEmpty) return false;
+        final strokeRadius = ann.tool == CanvasTool.highlight ? ann.strokeWidth * 3 : ann.strokeWidth;
+        for (int i = 0; i < ann.points.length - 1; i++) {
+          if (_distanceToSegment(point, ann.points[i], ann.points[i + 1]) <= (strokeRadius / 2 + hitPadding)) {
+            return true;
+          }
+        }
+        return false;
+
+      case CanvasTool.stepMarker:
+        if (ann.startPoint == null) return false;
+        return (point - ann.startPoint!).distance <= (16.0 + hitPadding);
+
+      case CanvasTool.text:
+        if (ann.startPoint == null || ann.text == null) return false;
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: ann.text,
+            style: TextStyle(fontSize: ann.fontSize, fontWeight: FontWeight.bold),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+        textPainter.layout();
+        final rect = Rect.fromLTWH(
+          ann.startPoint!.dx - 6,
+          ann.startPoint!.dy - 4,
+          textPainter.width + 12,
+          textPainter.height + 8,
+        ).inflate(hitPadding);
+        return rect.contains(point);
+
+      default:
+        if (ann.startPoint != null && ann.endPoint != null) {
+          final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!).inflate(hitPadding);
+          return rect.contains(point);
+        }
+        return false;
+    }
+  }
+
+  double _distanceToSegment(Offset p, Offset v, Offset w) {
+    final l2 = (v - w).distanceSquared;
+    if (l2 == 0) return (p - v).distance;
+    var t = ((p.dx - v.dx) * (w.dx - v.dx) + (p.dy - v.dy) * (w.dy - v.dy)) / l2;
+    t = t.clamp(0.0, 1.0);
+    final projection = Offset(v.dx + t * (w.dx - v.dx), v.dy + t * (w.dy - v.dy));
+    return (p - projection).distance;
+  }
+
+  Annotation _translateAnnotation(Annotation ann, Offset delta) {
+    return ann.copyWith(
+      startPoint: ann.startPoint != null ? ann.startPoint! + delta : null,
+      endPoint: ann.endPoint != null ? ann.endPoint! + delta : null,
+      points: ann.points.map((p) => p + delta).toList(),
+      rect: ann.rect?.shift(delta),
+    );
+  }
+
   void _onPanStart(DragStartDetails details) {
-    if (widget.imagePath == null || widget.activeTool == CanvasTool.select) return;
+    if (widget.imagePath == null) return;
 
     final pos = details.localPosition;
+    final hit = _hitTestAnnotation(pos);
+
+    // If Move tool is active OR hit an existing annotation -> select and start drag
+    if (widget.activeTool == CanvasTool.select || hit != null) {
+      final target = hit ?? (widget.annotations.isNotEmpty ? widget.annotations.last : null);
+      if (target != null) {
+        setState(() {
+          _selectedAnnotationId = target.id;
+          _isDraggingAnnotation = true;
+        });
+        return;
+      }
+    }
+
+    // Otherwise deselect item and start drawing new shape
+    setState(() {
+      _selectedAnnotationId = null;
+      _isDraggingAnnotation = false;
+    });
 
     if (widget.activeTool == CanvasTool.pen || widget.activeTool == CanvasTool.highlight) {
       _currentPoints = [pos];
@@ -84,7 +238,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
         opacity: widget.opacity,
         points: _currentPoints,
       );
-    } else {
+    } else if (widget.activeTool != CanvasTool.stepMarker && widget.activeTool != CanvasTool.text) {
       _currentAnnotation = Annotation(
         id: _uuid.v4(),
         tool: widget.activeTool,
@@ -100,6 +254,18 @@ class _EditorCanvasState extends State<EditorCanvas> {
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
+    if (_isDraggingAnnotation && _selectedAnnotationId != null) {
+      final delta = details.delta;
+      final index = widget.annotations.indexWhere((a) => a.id == _selectedAnnotationId);
+      if (index != -1 && widget.onAnnotationsUpdated != null) {
+        final updatedAnn = _translateAnnotation(widget.annotations[index], delta);
+        final newList = List<Annotation>.from(widget.annotations);
+        newList[index] = updatedAnn;
+        widget.onAnnotationsUpdated!(newList);
+      }
+      return;
+    }
+
     if (_currentAnnotation == null) return;
 
     final pos = details.localPosition;
@@ -117,6 +283,13 @@ class _EditorCanvasState extends State<EditorCanvas> {
   }
 
   void _onPanEnd(DragEndDetails details) {
+    if (_isDraggingAnnotation) {
+      setState(() {
+        _isDraggingAnnotation = false;
+      });
+      return;
+    }
+
     if (_currentAnnotation != null) {
       widget.onAnnotationAdded(_currentAnnotation!);
       setState(() {
@@ -130,6 +303,14 @@ class _EditorCanvasState extends State<EditorCanvas> {
     if (widget.imagePath == null) return;
 
     final pos = details.localPosition;
+    final hit = _hitTestAnnotation(pos);
+
+    if (hit != null) {
+      setState(() {
+        _selectedAnnotationId = hit.id;
+      });
+      return;
+    }
 
     if (widget.activeTool == CanvasTool.stepMarker) {
       final annotation = Annotation(
@@ -144,6 +325,10 @@ class _EditorCanvasState extends State<EditorCanvas> {
       widget.onStepCounterIncremented(widget.stepCounter + 1);
     } else if (widget.activeTool == CanvasTool.text) {
       _promptForText(pos);
+    } else {
+      setState(() {
+        _selectedAnnotationId = null;
+      });
     }
   }
 
@@ -237,38 +422,96 @@ class _EditorCanvasState extends State<EditorCanvas> {
       );
     }
 
-    return Center(
-      child: InteractiveViewer(
-        maxScale: 4.0,
-        minScale: 0.5,
-        panEnabled: widget.activeTool == CanvasTool.select,
-        child: RepaintBoundary(
-          key: widget.repaintBoundaryKey,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // Background Screenshot Image
-              Image.file(
-                File(widget.imagePath!),
-                fit: BoxFit.contain,
-              ),
+    Rect? selectedBounds;
+    if (_selectedAnnotationId != null) {
+      final selectedAnn = widget.annotations.firstWhere(
+        (a) => a.id == _selectedAnnotationId,
+        orElse: () => Annotation(id: '', tool: CanvasTool.pen, color: Colors.transparent),
+      );
+      if (selectedAnn.id.isNotEmpty) {
+        final b = _getAnnotationBoundingRect(selectedAnn);
+        if (b != Rect.zero) {
+          selectedBounds = b.inflate(8.0);
+        }
+      }
+    }
 
-              // Interactive Gesture Overlay + CustomPainter
-              Positioned.fill(
-                child: GestureDetector(
-                  onPanStart: _onPanStart,
-                  onPanUpdate: _onPanUpdate,
-                  onPanEnd: _onPanEnd,
-                  onTapUp: _onTapUp,
-                  child: CustomPaint(
-                    painter: _AnnotationPainter(
-                      annotations: widget.annotations,
-                      currentAnnotation: _currentAnnotation,
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.delete ||
+              event.logicalKey == LogicalKeyboardKey.backspace) {
+            if (_selectedAnnotationId != null) {
+              _deleteSelectedAnnotation();
+              return KeyEventResult.handled;
+            }
+          } else if (event.logicalKey == LogicalKeyboardKey.escape) {
+            if (_selectedAnnotationId != null) {
+              setState(() => _selectedAnnotationId = null);
+              return KeyEventResult.handled;
+            }
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Center(
+        child: InteractiveViewer(
+          maxScale: 4.0,
+          minScale: 0.5,
+          panEnabled: widget.activeTool == CanvasTool.select,
+          child: RepaintBoundary(
+            key: widget.repaintBoundaryKey,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Background Screenshot Image
+                Image.file(
+                  File(widget.imagePath!),
+                  fit: BoxFit.contain,
+                ),
+
+                // Interactive Gesture Overlay + CustomPainter
+                Positioned.fill(
+                  child: GestureDetector(
+                    onPanStart: _onPanStart,
+                    onPanUpdate: _onPanUpdate,
+                    onPanEnd: _onPanEnd,
+                    onTapUp: _onTapUp,
+                    child: CustomPaint(
+                      painter: _AnnotationPainter(
+                        annotations: widget.annotations,
+                        currentAnnotation: _currentAnnotation,
+                        selectedAnnotationId: _selectedAnnotationId,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+
+                // Floating Delete Chip overlay on selected annotation
+                if (selectedBounds != null)
+                  Positioned(
+                    left: math.max(0, selectedBounds.topRight.dx - 10),
+                    top: math.max(0, selectedBounds.topRight.dy - 14),
+                    child: Tooltip(
+                      message: 'Delete selected annotation (Delete / Backspace)',
+                      child: Material(
+                        color: Colors.redAccent,
+                        elevation: 4,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: _deleteSelectedAnnotation,
+                          child: const Padding(
+                            padding: EdgeInsets.all(5),
+                            child: Icon(Icons.close_rounded, size: 14, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -276,11 +519,77 @@ class _EditorCanvasState extends State<EditorCanvas> {
   }
 }
 
+Rect _getAnnotationBoundingRect(Annotation ann) {
+  switch (ann.tool) {
+    case CanvasTool.rectangle:
+    case CanvasTool.oval:
+    case CanvasTool.crop:
+    case CanvasTool.blur:
+    case CanvasTool.line:
+    case CanvasTool.arrow:
+      if (ann.startPoint != null && ann.endPoint != null) {
+        return Rect.fromPoints(ann.startPoint!, ann.endPoint!);
+      }
+      return Rect.zero;
+
+    case CanvasTool.pen:
+    case CanvasTool.highlight:
+      if (ann.points.isEmpty) return Rect.zero;
+      double minX = ann.points.first.dx;
+      double maxX = ann.points.first.dx;
+      double minY = ann.points.first.dy;
+      double maxY = ann.points.first.dy;
+      for (final p in ann.points) {
+        if (p.dx < minX) minX = p.dx;
+        if (p.dx > maxX) maxX = p.dx;
+        if (p.dy < minY) minY = p.dy;
+        if (p.dy > maxY) maxY = p.dy;
+      }
+      return Rect.fromLTRB(minX, minY, maxX, maxY);
+
+    case CanvasTool.stepMarker:
+      if (ann.startPoint != null) {
+        return Rect.fromCircle(center: ann.startPoint!, radius: 16.0);
+      }
+      return Rect.zero;
+
+    case CanvasTool.text:
+      if (ann.startPoint != null && ann.text != null) {
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: ann.text,
+            style: TextStyle(fontSize: ann.fontSize, fontWeight: FontWeight.bold),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+        textPainter.layout();
+        return Rect.fromLTWH(
+          ann.startPoint!.dx - 6,
+          ann.startPoint!.dy - 4,
+          textPainter.width + 12,
+          textPainter.height + 8,
+        );
+      }
+      return Rect.zero;
+
+    default:
+      if (ann.startPoint != null && ann.endPoint != null) {
+        return Rect.fromPoints(ann.startPoint!, ann.endPoint!);
+      }
+      return Rect.zero;
+  }
+}
+
 class _AnnotationPainter extends CustomPainter {
   final List<Annotation> annotations;
   final Annotation? currentAnnotation;
+  final String? selectedAnnotationId;
 
-  _AnnotationPainter({required this.annotations, this.currentAnnotation});
+  _AnnotationPainter({
+    required this.annotations,
+    this.currentAnnotation,
+    this.selectedAnnotationId,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -376,6 +685,47 @@ class _AnnotationPainter extends CustomPainter {
         default:
           break;
       }
+    }
+
+    // Render selection box around selected annotation
+    if (selectedAnnotationId != null) {
+      final selectedAnn = annotations.firstWhere(
+        (a) => a.id == selectedAnnotationId,
+        orElse: () => Annotation(id: '', tool: CanvasTool.pen, color: Colors.transparent),
+      );
+      if (selectedAnn.id.isNotEmpty) {
+        _drawSelectionFrame(canvas, selectedAnn);
+      }
+    }
+  }
+
+  void _drawSelectionFrame(Canvas canvas, Annotation ann) {
+    final rawBounds = _getAnnotationBoundingRect(ann);
+    if (rawBounds == Rect.zero) return;
+
+    final bounds = rawBounds.inflate(8.0);
+
+    final selPaint = Paint()
+      ..color = AppColors.accent
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    final rrect = RRect.fromRectAndRadius(bounds, const Radius.circular(6));
+    canvas.drawRRect(rrect, selPaint);
+
+    final corners = [
+      bounds.topLeft,
+      bounds.topRight,
+      bounds.bottomLeft,
+      bounds.bottomRight,
+    ];
+
+    final handleFill = Paint()..color = Colors.white..style = PaintingStyle.fill;
+    final handleBorder = Paint()..color = AppColors.accent..strokeWidth = 2.0..style = PaintingStyle.stroke;
+
+    for (final c in corners) {
+      canvas.drawCircle(c, 4.5, handleFill);
+      canvas.drawCircle(c, 4.5, handleBorder);
     }
   }
 
@@ -484,6 +834,8 @@ class _AnnotationPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _AnnotationPainter oldDelegate) {
-    return oldDelegate.annotations != annotations || oldDelegate.currentAnnotation != currentAnnotation;
+    return oldDelegate.annotations != annotations ||
+        oldDelegate.currentAnnotation != currentAnnotation ||
+        oldDelegate.selectedAnnotationId != selectedAnnotationId;
   }
 }

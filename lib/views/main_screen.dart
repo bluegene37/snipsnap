@@ -16,6 +16,7 @@ import '../services/storage_service.dart';
 import '../utils/constants.dart';
 import 'components/header_bar.dart';
 import 'components/style_picker.dart';
+import 'components/tool_sidebar.dart';
 import 'dialogs/about_dialog.dart';
 import 'dialogs/shortcut_settings_dialog.dart';
 import 'editor_canvas.dart';
@@ -180,6 +181,13 @@ class _MainScreenState extends State<MainScreen> {
     _pushUndoState();
     setState(() {
       _annotations.add(annotation);
+    });
+  }
+
+  void _onAnnotationsUpdated(List<Annotation> updatedList) {
+    _pushUndoState();
+    setState(() {
+      _annotations = List.from(updatedList);
     });
   }
 
@@ -423,6 +431,13 @@ class _MainScreenState extends State<MainScreen> {
                   children: [
                     Row(
                       children: [
+                        // Slim Left Sidebar Tools
+                        ToolSidebar(
+                          activeTool: _activeTool,
+                          onToolSelected: (tool) => setState(() => _activeTool = tool),
+                          isDarkMode: _isDarkMode,
+                        ),
+
                         // Editor Canvas
                         Expanded(
                           child: EditorCanvas(
@@ -436,6 +451,7 @@ class _MainScreenState extends State<MainScreen> {
                             isFilled: _isFilled,
                             stepCounter: _stepCounter,
                             onAnnotationAdded: _onAnnotationAdded,
+                            onAnnotationsUpdated: _onAnnotationsUpdated,
                             onStepCounterIncremented: (nextVal) => setState(() => _stepCounter = nextVal),
                             repaintBoundaryKey: _repaintKey,
                             isDarkMode: _isDarkMode,

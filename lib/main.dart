@@ -17,6 +17,14 @@ class SnipSnapApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MainScreen();
+    return MaterialApp(
+      title: 'SnipSnap',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        useMaterial3: true,
+      ),
+      home: const MainScreen(),
+    );
   }
 }
