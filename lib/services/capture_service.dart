@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -33,7 +34,9 @@ class CaptureService {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SnipSnap capture error: $e');
+    }
     return null;
   }
 
@@ -47,7 +50,9 @@ class CaptureService {
           return targetPath;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SnipSnap capture error: $e');
+    }
     return null;
   }
 
@@ -61,11 +66,13 @@ class CaptureService {
           return targetPath;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SnipSnap capture error: $e');
+    }
     return null;
   }
 
-  /// Copy external image file into SnapFlow capture library
+  /// Copy external image file into SnipSnap capture library
   Future<String?> importImage(String sourcePath) async {
     final targetPath = await _generateNewPath();
     try {
@@ -74,7 +81,9 @@ class CaptureService {
         await sourceFile.copy(targetPath);
         return targetPath;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SnipSnap capture error: $e');
+    }
     return null;
   }
 }

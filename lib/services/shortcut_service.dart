@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import '../models/app_shortcut.dart';
@@ -95,7 +96,9 @@ class ShortcutService {
         map.addAll(dbShortcuts);
       }
       return map;
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SnipSnap shortcut error: $e');
+    }
     return getDefaultShortcuts();
   }
 
@@ -112,6 +115,14 @@ class ShortcutService {
 
       for (final entry in shortcuts.entries) {
         final action = entry.key;
+
+        // Only register global OS-wide hotkeys for specific actions
+        if (action != AppShortcutAction.interactiveSnip &&
+            action != AppShortcutAction.fullScreenSnip &&
+            action != AppShortcutAction.timerSnip) {
+          continue;
+        }
+
         final custom = entry.value;
 
         final modifiers = <HotKeyModifier>[];
@@ -133,6 +144,8 @@ class ShortcutService {
           },
         );
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SnipSnap shortcut error: $e');
+    }
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -14,7 +15,9 @@ class StorageService {
       try {
         final downloadsDir = await getDownloadsDirectory();
         initialDir = downloadsDir?.path;
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('SnipSnap storage error: $e');
+      }
 
       final result = await FilePicker.saveFile(
         dialogTitle: 'Save Screenshot As',
@@ -29,7 +32,9 @@ class StorageService {
         await file.writeAsBytes(bytes);
         return result;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SnipSnap storage error: $e');
+    }
     return null;
   }
 
@@ -44,7 +49,9 @@ class StorageService {
         await file.writeAsBytes(bytes);
         return targetPath;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SnipSnap storage error: $e');
+    }
     return null;
   }
 
@@ -72,7 +79,7 @@ class StorageService {
       final snapDir = Directory(p.join(docsDir.path, 'SnipSnap', 'Captures'));
       if (await snapDir.exists()) {
         final existingPaths = items.map((i) => i.filePath).toSet();
-        final files = snapDir.listSync();
+        final files = await snapDir.list().toList();
         for (final f in files) {
           if (f is File && (f.path.endsWith('.png') || f.path.endsWith('.jpg') || f.path.endsWith('.jpeg'))) {
             if (!existingPaths.contains(f.path)) {
@@ -91,7 +98,9 @@ class StorageService {
       }
 
       items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('SnipSnap storage error: $e');
+    }
     return items;
   }
 

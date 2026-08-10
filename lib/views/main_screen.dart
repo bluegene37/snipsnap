@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../models/annotation.dart';
 import '../models/app_shortcut.dart';
 import '../models/capture_item.dart';
@@ -294,7 +295,7 @@ class _MainScreenState extends State<MainScreen> {
 
     // Fallback to source file bytes if repaint boundary is unavailable
     if (_activeCapture != null && File(_activeCapture!.filePath).existsSync()) {
-      return File(_activeCapture!.filePath).readAsBytesSync();
+      return await File(_activeCapture!.filePath).readAsBytes();
     }
     return null;
   }
@@ -355,9 +356,37 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _isDarkMode ? AppColors.canvasBg : AppColors.canvasBgLight,
-      body: CallbackShortcuts(
+    return MaterialApp(
+      title: 'SnipSnap - Screen Capture & Markup',
+      debugShowCheckedModeBanner: false,
+      theme: _isDarkMode
+          ? ThemeData(
+              brightness: Brightness.dark,
+              scaffoldBackgroundColor: AppColors.canvasBg,
+              colorScheme: const ColorScheme.dark(
+                primary: AppColors.accent,
+                surface: AppColors.darkSurface,
+              ),
+              textTheme: GoogleFonts.interTextTheme(
+                ThemeData.dark().textTheme,
+              ),
+              useMaterial3: true,
+            )
+          : ThemeData(
+              brightness: Brightness.light,
+              scaffoldBackgroundColor: AppColors.canvasBgLight,
+              colorScheme: const ColorScheme.light(
+                primary: AppColors.accent,
+                surface: AppColors.lightSurface,
+              ),
+              textTheme: GoogleFonts.interTextTheme(
+                ThemeData.light().textTheme,
+              ),
+              useMaterial3: true,
+            ),
+      home: Scaffold(
+        backgroundColor: _isDarkMode ? AppColors.canvasBg : AppColors.canvasBgLight,
+        body: CallbackShortcuts(
         bindings: _buildShortcutBindings(),
         child: Focus(
           autofocus: true,
@@ -471,30 +500,30 @@ class _MainScreenState extends State<MainScreen> {
                       _stepCounter = 1;
                     });
                   },
-                  onDeleteItem: (item) {
-                    setState(() {
-                      _captures.removeWhere((c) => c.id == item.id);
-                      if (_activeCapture?.id == item.id) {
-                        _activeCapture = _captures.isNotEmpty ? _captures.first : null;
-                        _annotations.clear();
-                        _undoStack.clear();
-                        _redoStack.clear();
-                      }
-                    });
-                    try {
-                      final file = File(item.filePath);
-                      if (file.existsSync()) {
-                        file.deleteSync();
-                      }
-                    } catch (_) {}
-                    StorageService.saveHistory(_captures);
-                  },
+                  onDeleteItem: (item) async {
+            setState(() {
+              _captures.removeWhere((c) => c.id == item.id);
+              if (_activeCapture?.id == item.id) {
+                _activeCapture = _captures.isNotEmpty ? _captures.first : null;
+                _annotations.clear();
+                _undoStack.clear();
+                _redoStack.clear();
+              }
+            });
+            try {
+              final file = File(item.filePath);
+              if (file.existsSync()) {
+                await file.delete();
+              }
+            } catch (_) {}
+            StorageService.saveHistory(_captures);
+          },
                   onClose: () => setState(() => _isSidebarOpen = false),
                 ),
             ],
           ),
         ),
       ),
-    );
+    ));
   }
 }

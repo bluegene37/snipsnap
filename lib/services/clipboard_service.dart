@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class ClipboardService {
@@ -14,7 +15,8 @@ class ClipboardService {
         await Clipboard.setData(ClipboardData(text: filePath));
         return true;
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('SnipSnap clipboard error: $e');
       return false;
     }
   }

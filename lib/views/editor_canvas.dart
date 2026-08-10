@@ -43,6 +43,27 @@ class EditorCanvas extends StatefulWidget {
 
 class _EditorCanvasState extends State<EditorCanvas> {
   final Uuid _uuid = const Uuid();
+  bool _fileExists = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFileExists();
+  }
+
+  @override
+  void didUpdateWidget(covariant EditorCanvas oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imagePath != widget.imagePath) {
+      _checkFileExists();
+    }
+  }
+
+  void _checkFileExists() {
+    setState(() {
+      _fileExists = widget.imagePath != null && File(widget.imagePath!).existsSync();
+    });
+  }
 
   // Current drawing shape state
   Annotation? _currentAnnotation;
@@ -85,7 +106,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
     if (widget.activeTool == CanvasTool.pen || widget.activeTool == CanvasTool.highlight) {
       setState(() {
-        _currentPoints = List.from(_currentPoints)..add(pos);
+        _currentPoints.add(pos);
         _currentAnnotation = _currentAnnotation!.copyWith(points: _currentPoints);
       });
     } else {
@@ -180,7 +201,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.imagePath == null || !File(widget.imagePath!).existsSync()) {
+    if (widget.imagePath == null || !_fileExists) {
       final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
       final subTextColor = widget.isDarkMode ? Colors.white54 : Colors.black54;
       final circleBg = widget.isDarkMode
@@ -241,10 +262,8 @@ class _EditorCanvasState extends State<EditorCanvas> {
                   onTapUp: _onTapUp,
                   child: CustomPaint(
                     painter: _AnnotationPainter(
-                      annotations: [
-                        ...widget.annotations,
-                        ...[_currentAnnotation].nonNulls,
-                      ],
+                      annotations: widget.annotations,
+                      currentAnnotation: _currentAnnotation,
                     ),
                   ),
                 ),
@@ -259,12 +278,14 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
 class _AnnotationPainter extends CustomPainter {
   final List<Annotation> annotations;
+  final Annotation? currentAnnotation;
 
-  _AnnotationPainter({required this.annotations});
+  _AnnotationPainter({required this.annotations, this.currentAnnotation});
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (final ann in annotations) {
+    final allAnnotations = [...annotations, ?currentAnnotation];
+    for (final ann in allAnnotations) {
       final effectiveAlpha = (ann.color.a * ann.opacity).clamp(0.0, 1.0);
       final paint = Paint()
         ..color = ann.color.withValues(alpha: effectiveAlpha)
@@ -462,5 +483,7 @@ class _AnnotationPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _AnnotationPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _AnnotationPainter oldDelegate) {
+    return oldDelegate.annotations != annotations || oldDelegate.currentAnnotation != currentAnnotation;
+  }
 }

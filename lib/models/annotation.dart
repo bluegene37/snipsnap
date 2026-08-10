@@ -29,8 +29,10 @@ class Annotation {
     this.stepNumber,
     this.fill = false,
     this.rect,
-    this.opacity = 1.0,
-  });
+    double opacity = 1.0,
+  })  : opacity = opacity.clamp(0.0, 1.0),
+        assert(strokeWidth > 0, 'strokeWidth must be > 0'),
+        assert(fontSize > 0, 'fontSize must be > 0');
 
   Annotation copyWith({
     String? id,

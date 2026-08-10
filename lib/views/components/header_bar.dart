@@ -68,8 +68,6 @@ class HeaderBar extends StatelessWidget {
       _HeaderToolItem(CanvasTool.arrow, Icons.call_made_rounded, 'Arrow', 'Draw directional arrow'),
       _HeaderToolItem(CanvasTool.highlight, Icons.brush_rounded, 'Highlighter', 'Freehand highlighter brush'),
       _HeaderToolItem(CanvasTool.text, Icons.text_format_rounded, 'Text', 'Add text annotation label'),
-      _HeaderToolItem(CanvasTool.text, Icons.forum_outlined, 'Callout', 'Speech bubble callout annotation'),
-      _HeaderToolItem(CanvasTool.stepMarker, Icons.workspace_premium_rounded, 'Stamp', 'Add stamp badge or ribbon'),
       _HeaderToolItem(CanvasTool.oval, Icons.palette_rounded, 'Fill', 'Fill shape or circle with color'),
       _HeaderToolItem(CanvasTool.crop, Icons.center_focus_strong_rounded, 'Selection', 'Area selection & canvas crop'),
       _HeaderToolItem(CanvasTool.select, Icons.pan_tool_alt_rounded, 'Move', 'Select & move annotations'),

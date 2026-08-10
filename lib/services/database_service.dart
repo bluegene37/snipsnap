@@ -43,10 +43,8 @@ class DatabaseService {
       height: Value(item.height),
     ));
 
-    if (item.annotations.isNotEmpty) {
-      final companions = item.annotations.map((a) => _convertAnnotationToCompanion(item.id, a)).toList();
-      await db.saveAnnotationsForCapture(item.id, companions);
-    }
+    final companions = item.annotations.map((a) => _convertAnnotationToCompanion(item.id, a)).toList();
+    await db.saveAnnotationsForCapture(item.id, companions);
   }
 
   /// Save list of captures to Drift SQLite DB
@@ -122,7 +120,9 @@ class DatabaseService {
       try {
         final List<dynamic> list = jsonDecode(a.pointsJson!);
         points = list.map((p) => Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble())).toList();
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('SnipSnap DB error: $e');
+      }
     }
 
     Rect? rect;
@@ -135,7 +135,9 @@ class DatabaseService {
           (map['r'] as num).toDouble(),
           (map['b'] as num).toDouble(),
         );
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('SnipSnap DB error: $e');
+      }
     }
 
     return Annotation(
@@ -149,6 +151,9 @@ class DatabaseService {
       stepNumber: a.stepNumber != 0 ? a.stepNumber : null,
       points: points,
       rect: rect,
+      startPoint: a.startX != null && a.startY != null ? Offset(a.startX!, a.startY!) : null,
+      endPoint: a.endX != null && a.endY != null ? Offset(a.endX!, a.endY!) : null,
+      opacity: a.opacity ?? 1.0,
     );
   }
 
@@ -176,6 +181,11 @@ class DatabaseService {
       pointsJson: Value(pointsJson),
       rectJson: Value(rectJson),
       createdAt: Value(DateTime.now()),
+      startX: Value(a.startPoint?.dx),
+      startY: Value(a.startPoint?.dy),
+      endX: Value(a.endPoint?.dx),
+      endY: Value(a.endPoint?.dy),
+      opacity: Value(a.opacity),
     );
   }
 }

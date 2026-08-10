@@ -583,6 +583,53 @@ class $AnnotationsTable extends Annotations
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _startXMeta = const VerificationMeta('startX');
+  @override
+  late final GeneratedColumn<double> startX = GeneratedColumn<double>(
+    'start_x',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _startYMeta = const VerificationMeta('startY');
+  @override
+  late final GeneratedColumn<double> startY = GeneratedColumn<double>(
+    'start_y',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _endXMeta = const VerificationMeta('endX');
+  @override
+  late final GeneratedColumn<double> endX = GeneratedColumn<double>(
+    'end_x',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _endYMeta = const VerificationMeta('endY');
+  @override
+  late final GeneratedColumn<double> endY = GeneratedColumn<double>(
+    'end_y',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _opacityMeta = const VerificationMeta(
+    'opacity',
+  );
+  @override
+  late final GeneratedColumn<double> opacity = GeneratedColumn<double>(
+    'opacity',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -597,6 +644,11 @@ class $AnnotationsTable extends Annotations
     rectJson,
     stepNumber,
     createdAt,
+    startX,
+    startY,
+    endX,
+    endY,
+    opacity,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -699,6 +751,36 @@ class $AnnotationsTable extends Annotations
     } else if (isInserting) {
       context.missing(_createdAtMeta);
     }
+    if (data.containsKey('start_x')) {
+      context.handle(
+        _startXMeta,
+        startX.isAcceptableOrUnknown(data['start_x']!, _startXMeta),
+      );
+    }
+    if (data.containsKey('start_y')) {
+      context.handle(
+        _startYMeta,
+        startY.isAcceptableOrUnknown(data['start_y']!, _startYMeta),
+      );
+    }
+    if (data.containsKey('end_x')) {
+      context.handle(
+        _endXMeta,
+        endX.isAcceptableOrUnknown(data['end_x']!, _endXMeta),
+      );
+    }
+    if (data.containsKey('end_y')) {
+      context.handle(
+        _endYMeta,
+        endY.isAcceptableOrUnknown(data['end_y']!, _endYMeta),
+      );
+    }
+    if (data.containsKey('opacity')) {
+      context.handle(
+        _opacityMeta,
+        opacity.isAcceptableOrUnknown(data['opacity']!, _opacityMeta),
+      );
+    }
     return context;
   }
 
@@ -756,6 +838,26 @@ class $AnnotationsTable extends Annotations
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      startX: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}start_x'],
+      ),
+      startY: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}start_y'],
+      ),
+      endX: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}end_x'],
+      ),
+      endY: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}end_y'],
+      ),
+      opacity: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}opacity'],
+      ),
     );
   }
 
@@ -778,6 +880,11 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
   final String? rectJson;
   final int stepNumber;
   final DateTime createdAt;
+  final double? startX;
+  final double? startY;
+  final double? endX;
+  final double? endY;
+  final double? opacity;
   const DbAnnotation({
     required this.id,
     required this.captureId,
@@ -791,6 +898,11 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     this.rectJson,
     required this.stepNumber,
     required this.createdAt,
+    this.startX,
+    this.startY,
+    this.endX,
+    this.endY,
+    this.opacity,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -813,6 +925,21 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     }
     map['step_number'] = Variable<int>(stepNumber);
     map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || startX != null) {
+      map['start_x'] = Variable<double>(startX);
+    }
+    if (!nullToAbsent || startY != null) {
+      map['start_y'] = Variable<double>(startY);
+    }
+    if (!nullToAbsent || endX != null) {
+      map['end_x'] = Variable<double>(endX);
+    }
+    if (!nullToAbsent || endY != null) {
+      map['end_y'] = Variable<double>(endY);
+    }
+    if (!nullToAbsent || opacity != null) {
+      map['opacity'] = Variable<double>(opacity);
+    }
     return map;
   }
 
@@ -836,6 +963,17 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
           : Value(rectJson),
       stepNumber: Value(stepNumber),
       createdAt: Value(createdAt),
+      startX: startX == null && nullToAbsent
+          ? const Value.absent()
+          : Value(startX),
+      startY: startY == null && nullToAbsent
+          ? const Value.absent()
+          : Value(startY),
+      endX: endX == null && nullToAbsent ? const Value.absent() : Value(endX),
+      endY: endY == null && nullToAbsent ? const Value.absent() : Value(endY),
+      opacity: opacity == null && nullToAbsent
+          ? const Value.absent()
+          : Value(opacity),
     );
   }
 
@@ -857,6 +995,11 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
       rectJson: serializer.fromJson<String?>(json['rectJson']),
       stepNumber: serializer.fromJson<int>(json['stepNumber']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      startX: serializer.fromJson<double?>(json['startX']),
+      startY: serializer.fromJson<double?>(json['startY']),
+      endX: serializer.fromJson<double?>(json['endX']),
+      endY: serializer.fromJson<double?>(json['endY']),
+      opacity: serializer.fromJson<double?>(json['opacity']),
     );
   }
   @override
@@ -875,6 +1018,11 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
       'rectJson': serializer.toJson<String?>(rectJson),
       'stepNumber': serializer.toJson<int>(stepNumber),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'startX': serializer.toJson<double?>(startX),
+      'startY': serializer.toJson<double?>(startY),
+      'endX': serializer.toJson<double?>(endX),
+      'endY': serializer.toJson<double?>(endY),
+      'opacity': serializer.toJson<double?>(opacity),
     };
   }
 
@@ -891,6 +1039,11 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     Value<String?> rectJson = const Value.absent(),
     int? stepNumber,
     DateTime? createdAt,
+    Value<double?> startX = const Value.absent(),
+    Value<double?> startY = const Value.absent(),
+    Value<double?> endX = const Value.absent(),
+    Value<double?> endY = const Value.absent(),
+    Value<double?> opacity = const Value.absent(),
   }) => DbAnnotation(
     id: id ?? this.id,
     captureId: captureId ?? this.captureId,
@@ -904,6 +1057,11 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     rectJson: rectJson.present ? rectJson.value : this.rectJson,
     stepNumber: stepNumber ?? this.stepNumber,
     createdAt: createdAt ?? this.createdAt,
+    startX: startX.present ? startX.value : this.startX,
+    startY: startY.present ? startY.value : this.startY,
+    endX: endX.present ? endX.value : this.endX,
+    endY: endY.present ? endY.value : this.endY,
+    opacity: opacity.present ? opacity.value : this.opacity,
   );
   DbAnnotation copyWithCompanion(AnnotationsCompanion data) {
     return DbAnnotation(
@@ -927,6 +1085,11 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
           ? data.stepNumber.value
           : this.stepNumber,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      startX: data.startX.present ? data.startX.value : this.startX,
+      startY: data.startY.present ? data.startY.value : this.startY,
+      endX: data.endX.present ? data.endX.value : this.endX,
+      endY: data.endY.present ? data.endY.value : this.endY,
+      opacity: data.opacity.present ? data.opacity.value : this.opacity,
     );
   }
 
@@ -944,7 +1107,12 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
           ..write('pointsJson: $pointsJson, ')
           ..write('rectJson: $rectJson, ')
           ..write('stepNumber: $stepNumber, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('startX: $startX, ')
+          ..write('startY: $startY, ')
+          ..write('endX: $endX, ')
+          ..write('endY: $endY, ')
+          ..write('opacity: $opacity')
           ..write(')'))
         .toString();
   }
@@ -963,6 +1131,11 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     rectJson,
     stepNumber,
     createdAt,
+    startX,
+    startY,
+    endX,
+    endY,
+    opacity,
   );
   @override
   bool operator ==(Object other) =>
@@ -979,7 +1152,12 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
           other.pointsJson == this.pointsJson &&
           other.rectJson == this.rectJson &&
           other.stepNumber == this.stepNumber &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.startX == this.startX &&
+          other.startY == this.startY &&
+          other.endX == this.endX &&
+          other.endY == this.endY &&
+          other.opacity == this.opacity);
 }
 
 class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
@@ -995,6 +1173,11 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
   final Value<String?> rectJson;
   final Value<int> stepNumber;
   final Value<DateTime> createdAt;
+  final Value<double?> startX;
+  final Value<double?> startY;
+  final Value<double?> endX;
+  final Value<double?> endY;
+  final Value<double?> opacity;
   final Value<int> rowid;
   const AnnotationsCompanion({
     this.id = const Value.absent(),
@@ -1009,6 +1192,11 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     this.rectJson = const Value.absent(),
     this.stepNumber = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.startX = const Value.absent(),
+    this.startY = const Value.absent(),
+    this.endX = const Value.absent(),
+    this.endY = const Value.absent(),
+    this.opacity = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   AnnotationsCompanion.insert({
@@ -1024,6 +1212,11 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     this.rectJson = const Value.absent(),
     this.stepNumber = const Value.absent(),
     required DateTime createdAt,
+    this.startX = const Value.absent(),
+    this.startY = const Value.absent(),
+    this.endX = const Value.absent(),
+    this.endY = const Value.absent(),
+    this.opacity = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        captureId = Value(captureId),
@@ -1045,6 +1238,11 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     Expression<String>? rectJson,
     Expression<int>? stepNumber,
     Expression<DateTime>? createdAt,
+    Expression<double>? startX,
+    Expression<double>? startY,
+    Expression<double>? endX,
+    Expression<double>? endY,
+    Expression<double>? opacity,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1060,6 +1258,11 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
       if (rectJson != null) 'rect_json': rectJson,
       if (stepNumber != null) 'step_number': stepNumber,
       if (createdAt != null) 'created_at': createdAt,
+      if (startX != null) 'start_x': startX,
+      if (startY != null) 'start_y': startY,
+      if (endX != null) 'end_x': endX,
+      if (endY != null) 'end_y': endY,
+      if (opacity != null) 'opacity': opacity,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1077,6 +1280,11 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     Value<String?>? rectJson,
     Value<int>? stepNumber,
     Value<DateTime>? createdAt,
+    Value<double?>? startX,
+    Value<double?>? startY,
+    Value<double?>? endX,
+    Value<double?>? endY,
+    Value<double?>? opacity,
     Value<int>? rowid,
   }) {
     return AnnotationsCompanion(
@@ -1092,6 +1300,11 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
       rectJson: rectJson ?? this.rectJson,
       stepNumber: stepNumber ?? this.stepNumber,
       createdAt: createdAt ?? this.createdAt,
+      startX: startX ?? this.startX,
+      startY: startY ?? this.startY,
+      endX: endX ?? this.endX,
+      endY: endY ?? this.endY,
+      opacity: opacity ?? this.opacity,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1135,6 +1348,21 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (startX.present) {
+      map['start_x'] = Variable<double>(startX.value);
+    }
+    if (startY.present) {
+      map['start_y'] = Variable<double>(startY.value);
+    }
+    if (endX.present) {
+      map['end_x'] = Variable<double>(endX.value);
+    }
+    if (endY.present) {
+      map['end_y'] = Variable<double>(endY.value);
+    }
+    if (opacity.present) {
+      map['opacity'] = Variable<double>(opacity.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1156,6 +1384,11 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
           ..write('rectJson: $rectJson, ')
           ..write('stepNumber: $stepNumber, ')
           ..write('createdAt: $createdAt, ')
+          ..write('startX: $startX, ')
+          ..write('startY: $startY, ')
+          ..write('endX: $endX, ')
+          ..write('endY: $endY, ')
+          ..write('opacity: $opacity, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2089,6 +2322,11 @@ typedef $$AnnotationsTableCreateCompanionBuilder =
       Value<String?> rectJson,
       Value<int> stepNumber,
       required DateTime createdAt,
+      Value<double?> startX,
+      Value<double?> startY,
+      Value<double?> endX,
+      Value<double?> endY,
+      Value<double?> opacity,
       Value<int> rowid,
     });
 typedef $$AnnotationsTableUpdateCompanionBuilder =
@@ -2105,6 +2343,11 @@ typedef $$AnnotationsTableUpdateCompanionBuilder =
       Value<String?> rectJson,
       Value<int> stepNumber,
       Value<DateTime> createdAt,
+      Value<double?> startX,
+      Value<double?> startY,
+      Value<double?> endX,
+      Value<double?> endY,
+      Value<double?> opacity,
       Value<int> rowid,
     });
 
@@ -2174,6 +2417,31 @@ class $$AnnotationsTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get startX => $composableBuilder(
+    column: $table.startX,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get startY => $composableBuilder(
+    column: $table.startY,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get endX => $composableBuilder(
+    column: $table.endX,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get endY => $composableBuilder(
+    column: $table.endY,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get opacity => $composableBuilder(
+    column: $table.opacity,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2246,6 +2514,31 @@ class $$AnnotationsTableOrderingComposer
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<double> get startX => $composableBuilder(
+    column: $table.startX,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get startY => $composableBuilder(
+    column: $table.startY,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get endX => $composableBuilder(
+    column: $table.endX,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get endY => $composableBuilder(
+    column: $table.endY,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get opacity => $composableBuilder(
+    column: $table.opacity,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$AnnotationsTableAnnotationComposer
@@ -2300,6 +2593,21 @@ class $$AnnotationsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<double> get startX =>
+      $composableBuilder(column: $table.startX, builder: (column) => column);
+
+  GeneratedColumn<double> get startY =>
+      $composableBuilder(column: $table.startY, builder: (column) => column);
+
+  GeneratedColumn<double> get endX =>
+      $composableBuilder(column: $table.endX, builder: (column) => column);
+
+  GeneratedColumn<double> get endY =>
+      $composableBuilder(column: $table.endY, builder: (column) => column);
+
+  GeneratedColumn<double> get opacity =>
+      $composableBuilder(column: $table.opacity, builder: (column) => column);
 }
 
 class $$AnnotationsTableTableManager
@@ -2345,6 +2653,11 @@ class $$AnnotationsTableTableManager
                 Value<String?> rectJson = const Value.absent(),
                 Value<int> stepNumber = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<double?> startX = const Value.absent(),
+                Value<double?> startY = const Value.absent(),
+                Value<double?> endX = const Value.absent(),
+                Value<double?> endY = const Value.absent(),
+                Value<double?> opacity = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AnnotationsCompanion(
                 id: id,
@@ -2359,6 +2672,11 @@ class $$AnnotationsTableTableManager
                 rectJson: rectJson,
                 stepNumber: stepNumber,
                 createdAt: createdAt,
+                startX: startX,
+                startY: startY,
+                endX: endX,
+                endY: endY,
+                opacity: opacity,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2375,6 +2693,11 @@ class $$AnnotationsTableTableManager
                 Value<String?> rectJson = const Value.absent(),
                 Value<int> stepNumber = const Value.absent(),
                 required DateTime createdAt,
+                Value<double?> startX = const Value.absent(),
+                Value<double?> startY = const Value.absent(),
+                Value<double?> endX = const Value.absent(),
+                Value<double?> endY = const Value.absent(),
+                Value<double?> opacity = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AnnotationsCompanion.insert(
                 id: id,
@@ -2389,6 +2712,11 @@ class $$AnnotationsTableTableManager
                 rectJson: rectJson,
                 stepNumber: stepNumber,
                 createdAt: createdAt,
+                startX: startX,
+                startY: startY,
+                endX: endX,
+                endY: endY,
+                opacity: opacity,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

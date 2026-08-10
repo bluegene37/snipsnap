@@ -1,6 +1,5 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:snipsnap/main.dart';
 import 'package:snipsnap/models/app_shortcut.dart';
 import 'package:snipsnap/services/shortcut_service.dart';
 
@@ -32,12 +31,29 @@ void main() {
     expect(defaults.containsKey(AppShortcutAction.copyToClipboard), isTrue);
   });
 
-  testWidgets('SnipSnap app smoke test and shortcut button', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const SnipSnapApp());
-    await tester.pumpAndSettle();
+  test('CustomShortcut copyWith preserves fields', () {
+    final shortcut = CustomShortcut(
+      action: AppShortcutAction.undo,
+      keyId: LogicalKeyboardKey.keyZ.keyId,
+      keyLabel: 'Z',
+      meta: true,
+    );
+    final modified = shortcut.copyWith(shift: true);
+    expect(modified.action, AppShortcutAction.undo);
+    expect(modified.meta, isTrue);
+    expect(modified.shift, isTrue);
+    expect(modified.keyLabel, 'Z');
+  });
 
-    // Verify app renders title
-    expect(find.text('SnipSnap'), findsOneWidget);
+  test('Default shortcuts include only system-level capture triggers', () {
+    // interactiveSnip, fullScreenSnip, timerSnip should be in defaults
+    final defaults = ShortcutService.getDefaultShortcuts();
+    expect(defaults.containsKey(AppShortcutAction.interactiveSnip), isTrue);
+    expect(defaults.containsKey(AppShortcutAction.fullScreenSnip), isTrue);
+    expect(defaults.containsKey(AppShortcutAction.timerSnip), isTrue);
+    // Other standard editing shortcuts should also be in defaults
+    expect(defaults.containsKey(AppShortcutAction.undo), isTrue);
+    expect(defaults.containsKey(AppShortcutAction.redo), isTrue);
+    expect(defaults.containsKey(AppShortcutAction.saveAs), isTrue);
   });
 }

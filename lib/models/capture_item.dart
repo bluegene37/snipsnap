@@ -35,6 +35,7 @@ class CaptureItem {
       createdAt: createdAt ?? this.createdAt,
       width: width ?? this.width,
       height: height ?? this.height,
+      annotations: annotations ?? this.annotations,
     );
   }
 

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import '../models/capture_item.dart';
 import '../utils/constants.dart';
 
@@ -73,13 +74,13 @@ class GallerySidebar extends StatelessWidget {
                     color: Colors.black26,
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
-                      Icon(Icons.zoom_in_rounded, color: Colors.white38, size: 13),
-                      SizedBox(width: 4),
+                      const Icon(Icons.zoom_in_rounded, color: Colors.white38, size: 13),
+                      const SizedBox(width: 4),
                       Text(
-                        '100% • 1920 x 1080',
-                        style: TextStyle(color: Colors.white54, fontSize: 11, fontFamily: 'monospace'),
+                        activeItem != null ? '${activeItem!.width} x ${activeItem!.height}' : 'No capture selected',
+                        style: const TextStyle(color: Colors.white54, fontSize: 11, fontFamily: 'monospace'),
                       ),
                     ],
                   ),
@@ -88,14 +89,7 @@ class GallerySidebar extends StatelessWidget {
                 const Spacer(),
 
                 // Right: Controls & Hide Button
-                IconButton(
-                  icon: const Icon(Icons.tune_rounded, color: Colors.white54, size: 15),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                  tooltip: 'Quick Effects',
-                  onPressed: () {},
-                ),
-                const SizedBox(width: 8),
+
                 IconButton(
                   icon: const Icon(Icons.close_rounded, color: Colors.white54, size: 16),
                   padding: EdgeInsets.zero,
@@ -187,9 +181,9 @@ class GallerySidebar extends StatelessWidget {
                                             color: Colors.black.withValues(alpha: 0.75),
                                             borderRadius: BorderRadius.circular(3),
                                           ),
-                                          child: const Text(
-                                            'png',
-                                            style: TextStyle(
+                                          child: Text(
+                                            p.extension(item.filePath).replaceAll('.', ''),
+                                            style: const TextStyle(
                                               color: Colors.white,
                                               fontSize: 9,
                                               fontWeight: FontWeight.bold,

@@ -33,6 +33,11 @@ class Annotations extends Table {
   TextColumn get rectJson => text().nullable()();
   IntColumn get stepNumber => integer().withDefault(const Constant(0))();
   DateTimeColumn get createdAt => dateTime()();
+  RealColumn get startX => real().nullable()();
+  RealColumn get startY => real().nullable()();
+  RealColumn get endX => real().nullable()();
+  RealColumn get endY => real().nullable()();
+  RealColumn get opacity => real().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -64,7 +69,22 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration {
+    return MigrationStrategy(
+      onUpgrade: (m, from, to) async {
+        if (from < 2) {
+          await m.addColumn(annotations, annotations.startX);
+          await m.addColumn(annotations, annotations.startY);
+          await m.addColumn(annotations, annotations.endX);
+          await m.addColumn(annotations, annotations.endY);
+          await m.addColumn(annotations, annotations.opacity);
+        }
+      },
+    );
+  }
 
   // Captures CRUD
   Future<List<Capture>> getAllCaptures() =>
@@ -72,7 +92,12 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> insertOrUpdateCapture(CapturesCompanion capture) => into(captures).insertOnConflictUpdate(capture);
 
-  Future<void> deleteCaptureItem(String id) => (delete(captures)..where((t) => t.id.equals(id))).go();
+  Future<void> deleteCaptureItem(String id) async {
+    await transaction(() async {
+      await (delete(annotations)..where((t) => t.captureId.equals(id))).go();
+      await (delete(captures)..where((t) => t.id.equals(id))).go();
+    });
+  }
 
   // Annotations CRUD
   Future<List<DbAnnotation>> getAnnotationsForCapture(String captureId) =>
