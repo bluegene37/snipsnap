@@ -82,6 +82,14 @@ class ShortcutService {
       meta: Platform.isMacOS,
       ctrl: !Platform.isMacOS,
     ),
+    AppShortcutAction.flattenCanvas: CustomShortcut(
+      action: AppShortcutAction.flattenCanvas,
+      keyId: LogicalKeyboardKey.keyF.keyId,
+      keyLabel: 'F',
+      meta: Platform.isMacOS,
+      ctrl: !Platform.isMacOS,
+      shift: true,
+    ),
   };
 
   static Map<AppShortcutAction, CustomShortcut> getDefaultShortcuts() {

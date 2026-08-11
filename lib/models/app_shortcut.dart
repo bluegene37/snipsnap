@@ -13,6 +13,7 @@ enum AppShortcutAction {
   redo,
   clearAnnotations,
   toggleHistory,
+  flattenCanvas,
 }
 
 extension AppShortcutActionExtension on AppShortcutAction {
@@ -37,7 +38,9 @@ extension AppShortcutActionExtension on AppShortcutAction {
       case AppShortcutAction.clearAnnotations:
         return 'Clear All Annotations';
       case AppShortcutAction.toggleHistory:
-        return 'Toggle History Panel';
+        return 'Toggle Screenshots Panel';
+      case AppShortcutAction.flattenCanvas:
+        return 'Flatten Annotations';
     }
   }
 
@@ -63,6 +66,8 @@ extension AppShortcutActionExtension on AppShortcutAction {
         return 'Remove all drawings from canvas';
       case AppShortcutAction.toggleHistory:
         return 'Show or hide bottom recent captures bar';
+      case AppShortcutAction.flattenCanvas:
+        return 'Bake all annotations into background image';
     }
   }
 }

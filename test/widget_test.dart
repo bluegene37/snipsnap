@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/models/app_shortcut.dart';
 import 'package:snipsnap/services/shortcut_service.dart';
+import 'package:snipsnap/utils/constants.dart';
 
 void main() {
   test('CustomShortcut model and JSON serialization', () {
@@ -55,5 +56,24 @@ void main() {
     expect(defaults.containsKey(AppShortcutAction.undo), isTrue);
     expect(defaults.containsKey(AppShortcutAction.redo), isTrue);
     expect(defaults.containsKey(AppShortcutAction.saveAs), isTrue);
+    expect(defaults.containsKey(AppShortcutAction.flattenCanvas), isTrue);
+  });
+
+  test('CanvasTool enum and stroke width presets verification', () {
+    expect(CanvasTool.values.length, 11);
+    expect(CanvasTool.values, contains(CanvasTool.pen));
+    expect(CanvasTool.values, contains(CanvasTool.line));
+    expect(CanvasTool.values, contains(CanvasTool.blur));
+    expect(CanvasTool.values, contains(CanvasTool.crop));
+
+    expect(AppDefaults.strokeWidthThin, 2.0);
+    expect(AppDefaults.strokeWidthMedium, 4.0);
+    expect(AppDefaults.strokeWidthThick, 8.0);
+    expect(AppDefaults.strokeWidthHeavy, 14.0);
+  });
+
+  test('Flatten shortcut display properties', () {
+    expect(AppShortcutAction.flattenCanvas.displayName, 'Flatten Annotations');
+    expect(AppShortcutAction.flattenCanvas.description, contains('Bake all annotations'));
   });
 }

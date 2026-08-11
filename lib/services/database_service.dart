@@ -126,15 +126,25 @@ class DatabaseService {
     }
 
     Rect? rect;
+    Color? backgroundColor;
+    double rotation = 0.0;
     if (a.rectJson != null && a.rectJson!.isNotEmpty) {
       try {
         final Map<String, dynamic> map = jsonDecode(a.rectJson!);
-        rect = Rect.fromLTRB(
-          (map['l'] as num).toDouble(),
-          (map['t'] as num).toDouble(),
-          (map['r'] as num).toDouble(),
-          (map['b'] as num).toDouble(),
-        );
+        if (map.containsKey('l') && map.containsKey('t') && map.containsKey('r') && map.containsKey('b')) {
+          rect = Rect.fromLTRB(
+            (map['l'] as num).toDouble(),
+            (map['t'] as num).toDouble(),
+            (map['r'] as num).toDouble(),
+            (map['b'] as num).toDouble(),
+          );
+        }
+        if (map.containsKey('bgColor')) {
+          backgroundColor = Color(map['bgColor'] as int);
+        }
+        if (map.containsKey('rot')) {
+          rotation = (map['rot'] as num).toDouble();
+        }
       } catch (e) {
         debugPrint('SnipSnap DB error: $e');
       }
@@ -144,6 +154,7 @@ class DatabaseService {
       id: a.id,
       tool: tool,
       color: Color(a.color),
+      backgroundColor: backgroundColor,
       strokeWidth: a.strokeWidth,
       fontSize: a.fontSize,
       fill: a.isFilled,
@@ -154,6 +165,7 @@ class DatabaseService {
       startPoint: a.startX != null && a.startY != null ? Offset(a.startX!, a.startY!) : null,
       endPoint: a.endX != null && a.endY != null ? Offset(a.endX!, a.endY!) : null,
       opacity: a.opacity ?? 1.0,
+      rotation: rotation,
     );
   }
 
@@ -164,8 +176,21 @@ class DatabaseService {
     }
 
     String? rectJson;
+    final map = <String, dynamic>{};
     if (a.rect != null) {
-      rectJson = jsonEncode({'l': a.rect!.left, 't': a.rect!.top, 'r': a.rect!.right, 'b': a.rect!.bottom});
+      map['l'] = a.rect!.left;
+      map['t'] = a.rect!.top;
+      map['r'] = a.rect!.right;
+      map['b'] = a.rect!.bottom;
+    }
+    if (a.backgroundColor != null) {
+      map['bgColor'] = a.backgroundColor!.toARGB32();
+    }
+    if (a.rotation != 0.0) {
+      map['rot'] = a.rotation;
+    }
+    if (map.isNotEmpty) {
+      rectJson = jsonEncode(map);
     }
 
     return AnnotationsCompanion(

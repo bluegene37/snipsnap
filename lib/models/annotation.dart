@@ -5,6 +5,7 @@ class Annotation {
   final String id;
   final CanvasTool tool;
   final Color color;
+  final Color? backgroundColor;
   final double strokeWidth;
   final List<Offset> points;
   final Offset? startPoint;
@@ -15,11 +16,13 @@ class Annotation {
   final bool fill;
   final Rect? rect;
   final double opacity;
+  final double rotation; // In radians (0.0 = 0 degrees)
 
   Annotation({
     required this.id,
     required this.tool,
     required this.color,
+    this.backgroundColor,
     this.strokeWidth = 4.0,
     this.points = const [],
     this.startPoint,
@@ -30,6 +33,7 @@ class Annotation {
     this.fill = false,
     this.rect,
     double opacity = 1.0,
+    this.rotation = 0.0,
   })  : opacity = opacity.clamp(0.0, 1.0),
         assert(strokeWidth > 0, 'strokeWidth must be > 0'),
         assert(fontSize > 0, 'fontSize must be > 0');
@@ -38,6 +42,7 @@ class Annotation {
     String? id,
     CanvasTool? tool,
     Color? color,
+    Color? backgroundColor,
     double? strokeWidth,
     List<Offset>? points,
     Offset? startPoint,
@@ -48,11 +53,13 @@ class Annotation {
     bool? fill,
     Rect? rect,
     double? opacity,
+    double? rotation,
   }) {
     return Annotation(
       id: id ?? this.id,
       tool: tool ?? this.tool,
       color: color ?? this.color,
+      backgroundColor: backgroundColor ?? this.backgroundColor,
       strokeWidth: strokeWidth ?? this.strokeWidth,
       points: points ?? this.points,
       startPoint: startPoint ?? this.startPoint,
@@ -63,6 +70,7 @@ class Annotation {
       fill: fill ?? this.fill,
       rect: rect ?? this.rect,
       opacity: opacity ?? this.opacity,
+      rotation: rotation ?? this.rotation,
     );
   }
 }

@@ -14,15 +14,20 @@ class HeaderBar extends StatelessWidget {
   final VoidCallback onClear;
   final VoidCallback onCopyToClipboard;
   final VoidCallback onSaveAs;
+  final VoidCallback? onFlattenCanvas;
   final VoidCallback onToggleSidebar;
   final VoidCallback onOpenShortcutSettings;
   final VoidCallback onToggleThemeMode;
   final VoidCallback onOpenAboutDialog;
   final bool canUndo;
   final bool canRedo;
+  final VoidCallback? onToggleProperties;
+  final bool isPropertiesOpen;
   final bool isSidebarOpen;
   final bool isDarkMode;
   final Map<AppShortcutAction, CustomShortcut>? shortcuts;
+  final double zoomScale;
+  final ValueChanged<double>? onZoomScaleChanged;
 
   const HeaderBar({
     super.key,
@@ -37,7 +42,10 @@ class HeaderBar extends StatelessWidget {
     required this.onClear,
     required this.onCopyToClipboard,
     required this.onSaveAs,
+    this.onFlattenCanvas,
     required this.onToggleSidebar,
+    this.onToggleProperties,
+    this.isPropertiesOpen = true,
     required this.onOpenShortcutSettings,
     required this.onToggleThemeMode,
     required this.onOpenAboutDialog,
@@ -46,6 +54,8 @@ class HeaderBar extends StatelessWidget {
     required this.isSidebarOpen,
     this.isDarkMode = true,
     this.shortcuts,
+    this.zoomScale = 1.0,
+    this.onZoomScaleChanged,
   });
 
   String _getShortcutText(AppShortcutAction action, String defaultText) {
@@ -76,7 +86,7 @@ class HeaderBar extends StatelessWidget {
           final content = Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Left: Branding Logo, History Toggle, File Open, Edit Actions (Undo, Redo, Clear), Export Actions (Copy, Save As) & Shortcuts
+              // Left: Logo, Capture, Export & History Actions (Left-Aligned Undo, Redo, Trash)
               Row(
                 children: [
                   Container(
@@ -116,19 +126,16 @@ class HeaderBar extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
 
-                  // History Gallery Toggle
-                  IconButton(
-                    icon: Icon(
-                      isSidebarOpen ? Icons.menu_open_rounded : Icons.photo_library_rounded,
-                      color: isSidebarOpen ? AppColors.accent : iconColor,
-                    ),
-                    tooltip: 'Toggle History Gallery (${_getShortcutText(AppShortcutAction.toggleHistory, 'Cmd+H')})',
-                    onPressed: onToggleSidebar,
+                  // Capture Actions: Snip & Open
+                  _HeaderButton(
+                    icon: Icons.crop_free_rounded,
+                    label: 'Snip',
+                    tooltip: 'Capture Screen Area (${_getShortcutText(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1')})',
+                    onPressed: onSnipInteractive,
+                    isDarkMode: isDarkMode,
+                    isAccent: true,
                   ),
-
-                  const SizedBox(width: 4),
-
-                  // Open Image File Button
+                  const SizedBox(width: 6),
                   _HeaderButton(
                     icon: Icons.file_open_rounded,
                     label: 'Open',
@@ -139,33 +146,9 @@ class HeaderBar extends StatelessWidget {
 
                   const SizedBox(width: 8),
                   Container(height: 24, width: 1, color: borderColor),
-                  const SizedBox(width: 4),
-
-                  // Edit Actions: Undo, Redo & Clear
-                  IconButton(
-                    icon: const Icon(Icons.undo_rounded, size: 18),
-                    color: canUndo ? (isDarkMode ? Colors.white : Colors.black87) : (isDarkMode ? Colors.white24 : Colors.black26),
-                    tooltip: 'Undo (${_getShortcutText(AppShortcutAction.undo, 'Cmd+Z')})',
-                    onPressed: canUndo ? onUndo : null,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.redo_rounded, size: 18),
-                    color: canRedo ? (isDarkMode ? Colors.white : Colors.black87) : (isDarkMode ? Colors.white24 : Colors.black26),
-                    tooltip: 'Redo (${_getShortcutText(AppShortcutAction.redo, 'Cmd+Shift+Z')})',
-                    onPressed: canRedo ? onRedo : null,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                    color: iconColor,
-                    tooltip: 'Clear Annotations (${_getShortcutText(AppShortcutAction.clearAnnotations, 'Cmd+Shift+K')})',
-                    onPressed: onClear,
-                  ),
-
-                  const SizedBox(width: 4),
-                  Container(height: 24, width: 1, color: borderColor),
                   const SizedBox(width: 8),
 
-                  // Export Actions: Copy & Save As
+                  // Export & Output Actions: Copy, Save As & Flatten
                   _HeaderButton(
                     icon: Icons.copy_rounded,
                     label: 'Copy',
@@ -181,8 +164,144 @@ class HeaderBar extends StatelessWidget {
                     onPressed: onSaveAs,
                     isDarkMode: isDarkMode,
                   ),
+                  if (onFlattenCanvas != null) ...[
+                    const SizedBox(width: 6),
+                    _HeaderButton(
+                      icon: Icons.layers_clear_rounded,
+                      label: 'Flatten',
+                      tooltip: 'Bake Annotations into Image (${_getShortcutText(AppShortcutAction.flattenCanvas, 'Cmd+Shift+F')})',
+                      onPressed: onFlattenCanvas!,
+                      isDarkMode: isDarkMode,
+                    ),
+                  ],
 
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 8),
+                  Container(height: 24, width: 1, color: borderColor),
+                  const SizedBox(width: 8),
+
+                  // LEFT-ALIGNED Edit & Undo/Redo/Trash Control Group
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: borderColor),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.undo_rounded, size: 18),
+                          color: canUndo ? (isDarkMode ? Colors.white : Colors.black87) : (isDarkMode ? Colors.white24 : Colors.black26),
+                          tooltip: 'Undo (${_getShortcutText(AppShortcutAction.undo, 'Cmd+Z')})',
+                          onPressed: canUndo ? onUndo : null,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.redo_rounded, size: 18),
+                          color: canRedo ? (isDarkMode ? Colors.white : Colors.black87) : (isDarkMode ? Colors.white24 : Colors.black26),
+                          tooltip: 'Redo (${_getShortcutText(AppShortcutAction.redo, 'Cmd+Shift+Z')})',
+                          onPressed: canRedo ? onRedo : null,
+                        ),
+                        Container(height: 18, width: 1, color: borderColor),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                          color: iconColor,
+                          tooltip: 'Clear Annotations (${_getShortcutText(AppShortcutAction.clearAnnotations, 'Cmd+Shift+K')})',
+                          onPressed: onClear,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              // Right: Slide to Zoom Control Bar + Preferences
+              Row(
+                children: [
+                  // Slide to Zoom & Percentage Display (Integrated into bar with no outer border)
+                  if (onZoomScaleChanged != null) ...[
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.remove_rounded, size: 16),
+                          color: zoomScale > 0.5 ? iconColor : (isDarkMode ? Colors.white24 : Colors.black26),
+                          tooltip: 'Zoom Out',
+                          onPressed: zoomScale > 0.5 ? () => onZoomScaleChanged!((zoomScale - 0.25).clamp(0.5, 4.0)) : null,
+                          constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                          padding: EdgeInsets.zero,
+                        ),
+                        SizedBox(
+                          width: 160,
+                          child: SliderTheme(
+                            data: SliderThemeData(
+                              activeTrackColor: AppColors.accent,
+                              inactiveTrackColor: isDarkMode ? Colors.white24 : Colors.black12,
+                              thumbColor: AppColors.accent,
+                              trackHeight: 3,
+                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                            ),
+                            child: Slider(
+                              value: zoomScale.clamp(0.5, 4.0),
+                              min: 0.5,
+                              max: 4.0,
+                              onChanged: onZoomScaleChanged,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.add_rounded, size: 16),
+                          color: zoomScale < 4.0 ? iconColor : (isDarkMode ? Colors.white24 : Colors.black26),
+                          tooltip: 'Zoom In',
+                          onPressed: zoomScale < 4.0 ? () => onZoomScaleChanged!((zoomScale + 0.25).clamp(0.5, 4.0)) : null,
+                          constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                          padding: EdgeInsets.zero,
+                        ),
+                        const SizedBox(width: 2),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: borderColor),
+                          ),
+                          child: Text(
+                            '${(zoomScale * 100).round()}%',
+                            style: TextStyle(
+                              color: isDarkMode ? Colors.white : Colors.black87,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        IconButton(
+                          icon: const Icon(Icons.center_focus_strong_rounded, size: 16),
+                          color: zoomScale == 1.0 ? AppColors.accent : iconColor,
+                          tooltip: 'Reset Zoom (100%)',
+                          onPressed: () => onZoomScaleChanged!(1.0),
+                          constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                          padding: EdgeInsets.zero,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+
+                  // Hide/Show Right Tool Properties Drawer
+                  if (onToggleProperties != null) ...[
+                    IconButton(
+                      icon: Icon(
+                        isPropertiesOpen ? Icons.tune_rounded : Icons.tune_outlined,
+                        color: isPropertiesOpen ? AppColors.accent : iconColor,
+                        size: 20,
+                      ),
+                      tooltip: isPropertiesOpen ? 'Hide Tool Properties Drawer' : 'Show Tool Properties Drawer',
+                      onPressed: onToggleProperties,
+                    ),
+                    const SizedBox(width: 2),
+                  ],
 
                   // Keyboard Shortcut Settings
                   IconButton(
@@ -190,14 +309,8 @@ class HeaderBar extends StatelessWidget {
                     tooltip: 'Configure Keyboard Shortcuts',
                     onPressed: onOpenShortcutSettings,
                   ),
-                ],
-              ),
+                  const SizedBox(width: 2),
 
-              const SizedBox(width: 16),
-
-              // Right: System Preferences (Theme & About)
-              Row(
-                children: [
                   // Theme Mode Toggle (Light/Dark)
                   IconButton(
                     icon: Icon(
@@ -210,7 +323,7 @@ class HeaderBar extends StatelessWidget {
                   ),
                   const SizedBox(width: 2),
 
-                  // About Dialog
+                  // About SnipSnap Info Dialog
                   IconButton(
                     icon: Icon(Icons.info_outline_rounded, color: iconColor, size: 20),
                     tooltip: 'About SnipSnap',
@@ -240,6 +353,7 @@ class _HeaderButton extends StatelessWidget {
   final VoidCallback onPressed;
   final String tooltip;
   final bool isDarkMode;
+  final bool isAccent;
 
   const _HeaderButton({
     required this.icon,
@@ -247,12 +361,15 @@ class _HeaderButton extends StatelessWidget {
     required this.onPressed,
     required this.tooltip,
     this.isDarkMode = true,
+    this.isAccent = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant;
-    final fgColor = isDarkMode ? Colors.white : Colors.black87;
+    final bgColor = isAccent
+        ? AppColors.accent
+        : (isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant);
+    final fgColor = isAccent ? Colors.white : (isDarkMode ? Colors.white : Colors.black87);
 
     return Tooltip(
       message: tooltip,
@@ -260,8 +377,8 @@ class _HeaderButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: bgColor,
           foregroundColor: fgColor,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          elevation: isAccent ? 2 : 0,
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
           ),
@@ -269,7 +386,10 @@ class _HeaderButton extends StatelessWidget {
         icon: Icon(icon, size: 15),
         label: Text(
           label,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: isAccent ? FontWeight.bold : FontWeight.w600,
+          ),
         ),
         onPressed: onPressed,
       ),

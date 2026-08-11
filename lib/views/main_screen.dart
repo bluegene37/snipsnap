@@ -1,10 +1,13 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image/image.dart' as img;
+import 'package:path/path.dart' as p;
 import '../models/annotation.dart';
 import '../models/app_shortcut.dart';
 import '../models/capture_item.dart';
@@ -18,6 +21,7 @@ import 'components/header_bar.dart';
 import 'components/style_picker.dart';
 import 'components/tool_sidebar.dart';
 import 'dialogs/about_dialog.dart';
+import 'dialogs/save_as_dialog.dart';
 import 'dialogs/shortcut_settings_dialog.dart';
 import 'editor_canvas.dart';
 import 'gallery_sidebar.dart';
@@ -41,16 +45,22 @@ class _MainScreenState extends State<MainScreen> {
   final List<List<Annotation>> _undoStack = [];
   final List<List<Annotation>> _redoStack = [];
 
-  CanvasTool _activeTool = CanvasTool.pen;
+  CanvasTool _activeTool = CanvasTool.select;
   Color _activeColor = AppDefaults.defaultColor;
+  Color? _textBackgroundColor;
   double _strokeWidth = AppDefaults.defaultStrokeWidth;
   double _opacity = 1.0;
   double _fontSize = AppDefaults.defaultFontSize;
   bool _isFilled = false;
+  double _rotation = 0.0;
+  double _zoomScale = 1.0;
   int _stepCounter = 1;
   bool _isSidebarOpen = true;
+  bool _isPropertiesOpen = true;
   bool _isCapturing = false;
   bool _isDarkMode = true;
+
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
   Map<AppShortcutAction, CustomShortcut> _shortcuts = ShortcutService.getDefaultShortcuts();
 
@@ -85,14 +95,49 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  int _findMaxStepNumber(List<Annotation> anns) {
+    int maxStep = 0;
+    for (final a in anns) {
+      if (a.tool == CanvasTool.stepMarker && a.stepNumber != null) {
+        if (a.stepNumber! > maxStep) maxStep = a.stepNumber!;
+      }
+    }
+    return maxStep;
+  }
+
+  void _syncCurrentCaptureAnnotations() {
+    if (_activeCapture != null) {
+      final updatedItem = _activeCapture!.copyWith(annotations: List.from(_annotations));
+      _activeCapture = updatedItem;
+
+      final idx = _captures.indexWhere((c) => c.id == updatedItem.id);
+      if (idx != -1) {
+        _captures[idx] = updatedItem;
+      }
+
+      StorageService.saveCaptureItem(updatedItem);
+    }
+  }
+
   Future<void> _loadHistory() async {
     final items = await StorageService.loadHistory();
+    final savedSelectedId = await DatabaseService.getSetting('active_capture_id');
+
     if (mounted) {
       setState(() {
         _captures.clear();
         _captures.addAll(items);
         if (_captures.isNotEmpty) {
-          _activeCapture = _captures.first;
+          CaptureItem targetItem = _captures.first;
+          if (savedSelectedId != null) {
+            final found = _captures.where((c) => c.id == savedSelectedId);
+            if (found.isNotEmpty) {
+              targetItem = found.first;
+            }
+          }
+          _activeCapture = targetItem;
+          _annotations = List.from(_activeCapture!.annotations);
+          _stepCounter = _findMaxStepNumber(_annotations) + 1;
         }
       });
     }
@@ -158,6 +203,8 @@ class _MainScreenState extends State<MainScreen> {
         return _annotations.isNotEmpty ? _clearAnnotations : null;
       case AppShortcutAction.toggleHistory:
         return () => setState(() => _isSidebarOpen = !_isSidebarOpen);
+      case AppShortcutAction.flattenCanvas:
+        return _annotations.isNotEmpty ? _handleFlattenCanvas : null;
     }
   }
 
@@ -182,6 +229,7 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       _annotations.add(annotation);
     });
+    _syncCurrentCaptureAnnotations();
   }
 
   void _onAnnotationsUpdated(List<Annotation> updatedList) {
@@ -189,6 +237,15 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       _annotations = List.from(updatedList);
     });
+    _syncCurrentCaptureAnnotations();
+  }
+
+  /// Live update during drag/resize/rotate – no undo push (undo is pushed once at gesture start)
+  void _onAnnotationsLiveUpdated(List<Annotation> updatedList) {
+    setState(() {
+      _annotations = List.from(updatedList);
+    });
+    _syncCurrentCaptureAnnotations();
   }
 
   void _undo() {
@@ -197,6 +254,7 @@ class _MainScreenState extends State<MainScreen> {
       setState(() {
         _annotations = _undoStack.removeLast();
       });
+      _syncCurrentCaptureAnnotations();
     }
   }
 
@@ -206,6 +264,7 @@ class _MainScreenState extends State<MainScreen> {
       setState(() {
         _annotations = _redoStack.removeLast();
       });
+      _syncCurrentCaptureAnnotations();
     }
   }
 
@@ -215,6 +274,7 @@ class _MainScreenState extends State<MainScreen> {
       setState(() {
         _annotations.clear();
       });
+      _syncCurrentCaptureAnnotations();
     }
   }
 
@@ -239,7 +299,7 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _handleTimerCapture() async {
     setState(() => _isCapturing = true);
-    ScaffoldMessenger.of(context).showSnackBar(
+    _scaffoldMessengerKey.currentState?.showSnackBar(
       const SnackBar(
         content: Text(
           'Capturing in 3 seconds... Prepare your screen!',
@@ -257,19 +317,25 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _handleImportImage() async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.image,
-      dialogTitle: 'Select Image File',
-    );
-    if (result != null && result.files.single.path != null) {
-      final path = await _captureService.importImage(result.files.single.path!);
-      if (path != null) {
-        _addCaptureFromPath(path);
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.image,
+        dialogTitle: 'Select Image File',
+      );
+      if (result != null && result.files.single.path != null) {
+        final path = await _captureService.importImage(result.files.single.path!);
+        if (path != null) {
+          _addCaptureFromPath(path);
+        }
       }
+    } catch (e) {
+      debugPrint('SnipSnap import image error: $e');
+      _showToast('Failed to pick image file: ${e.toString()}');
     }
   }
 
   void _addCaptureFromPath(String path) {
+    _syncCurrentCaptureAnnotations();
     final newItem = CaptureItem(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       filePath: path,
@@ -286,6 +352,7 @@ class _MainScreenState extends State<MainScreen> {
       _stepCounter = 1;
     });
     StorageService.saveHistory(_captures);
+    DatabaseService.setSetting('active_capture_id', newItem.id);
   }
 
   // Export & Copy Render
@@ -333,11 +400,128 @@ class _MainScreenState extends State<MainScreen> {
     }
 
     final bytes = await _renderAnnotatedBytes();
+    if (bytes == null) {
+      _showToast('Failed to render screenshot bytes');
+      return;
+    }
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => SaveAsDialog(
+        initialName: _activeCapture!.title,
+        isDarkMode: _isDarkMode,
+        onConfirm: (options) async {
+          await Future.delayed(const Duration(milliseconds: 150));
+          final savedPath = await StorageService.exportImageDialogWithFormat(
+            bytes: bytes,
+            fileName: options.fileName,
+            isJpg: options.format == SaveFormat.jpg,
+            jpgQuality: options.quality,
+            customFolderPath: options.customFolderPath,
+          );
+          if (savedPath != null) {
+            _showToast('Saved screenshot to: ${p.basename(savedPath)}');
+          } else {
+            _showToast('Save cancelled');
+          }
+        },
+      ),
+    );
+  }
+
+  Future<void> _handleFlattenCanvas() async {
+    if (_activeCapture == null) {
+      _showToast('No screenshot to flatten!');
+      return;
+    }
+    if (_annotations.isEmpty) {
+      _showToast('No annotations to flatten!');
+      return;
+    }
+
+    final bytes = await _renderAnnotatedBytes();
     if (bytes != null) {
-      final savedPath = await StorageService.exportImageDialog(bytes, _activeCapture!.title);
-      if (savedPath != null) {
-        _showToast('Saved screenshot to disk!');
+      final targetPath = _activeCapture!.filePath;
+      await File(targetPath).writeAsBytes(bytes);
+
+      setState(() {
+        _annotations.clear();
+        _undoStack.clear();
+        _redoStack.clear();
+        _stepCounter = 1;
+      });
+      _syncCurrentCaptureAnnotations();
+
+      _showToast('Canvas flattened! Annotations baked into image.');
+    }
+  }
+
+  Future<void> _handleApplyCrop(Rect cropRect) async {
+    if (_activeCapture == null || !File(_activeCapture!.filePath).existsSync()) return;
+
+    try {
+      final boundary = _repaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      final canvasSize = boundary?.size ?? Size.zero;
+
+      final fileBytes = await File(_activeCapture!.filePath).readAsBytes();
+      final decoded = img.decodeImage(fileBytes);
+      if (decoded == null) return;
+
+      double scaleX = 1.0;
+      double scaleY = 1.0;
+      if (canvasSize.width > 0 && canvasSize.height > 0) {
+        scaleX = decoded.width / canvasSize.width;
+        scaleY = decoded.height / canvasSize.height;
       }
+
+      final cropX = (cropRect.left * scaleX).round();
+      final cropY = (cropRect.top * scaleY).round();
+      final cropW = math.max(1, (cropRect.width * scaleX).round());
+      final cropH = math.max(1, (cropRect.height * scaleY).round());
+
+      // Create new target image of requested crop dimensions with transparent background (numChannels: 4 RGBA)
+      final targetImage = img.Image(
+        width: cropW,
+        height: cropH,
+        numChannels: 4,
+      );
+      img.fill(targetImage, color: img.ColorRgba8(0, 0, 0, 0));
+
+      // Composite original image onto transparent canvas at offset (-cropX, -cropY)
+      final dstX = -cropX;
+      final dstY = -cropY;
+
+      img.compositeImage(
+        targetImage,
+        decoded,
+        dstX: dstX,
+        dstY: dstY,
+      );
+
+      final croppedBytes = Uint8List.fromList(img.encodePng(targetImage));
+
+      final targetPath = _activeCapture!.filePath;
+      await File(targetPath).writeAsBytes(croppedBytes);
+
+      // Evict old cached image from memory so canvas updates immediately in real-time
+      await FileImage(File(targetPath)).evict();
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+
+      setState(() {
+        _annotations.clear();
+        _undoStack.clear();
+        _redoStack.clear();
+        _activeTool = CanvasTool.select;
+      });
+      _syncCurrentCaptureAnnotations();
+
+      _showToast('Image cropped & canvas adjusted!');
+    } catch (e) {
+      debugPrint('SnipSnap crop error: $e');
+      _showToast('Failed to crop image');
     }
   }
 
@@ -346,8 +530,8 @@ class _MainScreenState extends State<MainScreen> {
     final textColor = _isDarkMode ? Colors.white : Colors.black87;
     final borderColor = _isDarkMode ? Colors.white12 : Colors.black12;
 
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
+    _scaffoldMessengerKey.currentState?.hideCurrentSnackBar();
+    _scaffoldMessengerKey.currentState?.showSnackBar(
       SnackBar(
         content: Text(message, style: TextStyle(color: textColor, fontWeight: FontWeight.w600)),
         backgroundColor: toastBg,
@@ -365,6 +549,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      scaffoldMessengerKey: _scaffoldMessengerKey,
       title: 'SnipSnap - Screen Capture & Markup',
       debugShowCheckedModeBanner: false,
       theme: _isDarkMode
@@ -413,7 +598,10 @@ class _MainScreenState extends State<MainScreen> {
                 onClear: _clearAnnotations,
                 onCopyToClipboard: _handleCopyToClipboard,
                 onSaveAs: _handleSaveAs,
+                onFlattenCanvas: _annotations.isNotEmpty ? _handleFlattenCanvas : null,
                 onToggleSidebar: () => setState(() => _isSidebarOpen = !_isSidebarOpen),
+                onToggleProperties: () => setState(() => _isPropertiesOpen = !_isPropertiesOpen),
+                isPropertiesOpen: _isPropertiesOpen,
                 onOpenShortcutSettings: _openShortcutSettingsDialog,
                 onToggleThemeMode: _toggleThemeMode,
                 onOpenAboutDialog: _openAboutDialog,
@@ -422,6 +610,8 @@ class _MainScreenState extends State<MainScreen> {
                 isSidebarOpen: _isSidebarOpen,
                 isDarkMode: _isDarkMode,
                 shortcuts: _shortcuts,
+                zoomScale: _zoomScale,
+                onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
               ),
 
               // Main Work Area (Canvas + Right Properties Sidebar)
@@ -435,6 +625,8 @@ class _MainScreenState extends State<MainScreen> {
                         ToolSidebar(
                           activeTool: _activeTool,
                           onToolSelected: (tool) => setState(() => _activeTool = tool),
+                          isSidebarOpen: _isSidebarOpen,
+                          onToggleSidebar: () => setState(() => _isSidebarOpen = !_isSidebarOpen),
                           isDarkMode: _isDarkMode,
                         ),
 
@@ -444,38 +636,113 @@ class _MainScreenState extends State<MainScreen> {
                             imagePath: _activeCapture?.filePath,
                             annotations: _annotations,
                             activeTool: _activeTool,
+                            onToolSelected: (tool) => setState(() => _activeTool = tool),
+                            onSelectAnnotation: (ann) {
+                              if (ann != null) {
+                                setState(() {
+                                  _activeColor = ann.color;
+                                  _textBackgroundColor = ann.backgroundColor;
+                                  _strokeWidth = ann.strokeWidth;
+                                  _fontSize = ann.fontSize;
+                                  _opacity = ann.opacity;
+                                  _isFilled = ann.fill;
+                                  _rotation = ann.rotation;
+                                });
+                              }
+                            },
                             activeColor: _activeColor,
+                            textBackgroundColor: _textBackgroundColor,
                             strokeWidth: _strokeWidth,
                             opacity: _opacity,
+                            rotation: _rotation,
                             fontSize: _fontSize,
                             isFilled: _isFilled,
                             stepCounter: _stepCounter,
                             onAnnotationAdded: _onAnnotationAdded,
                             onAnnotationsUpdated: _onAnnotationsUpdated,
+                            onAnnotationsLiveUpdated: _onAnnotationsLiveUpdated,
                             onStepCounterIncremented: (nextVal) => setState(() => _stepCounter = nextVal),
+                            onApplyCrop: _handleApplyCrop,
                             repaintBoundaryKey: _repaintKey,
                             isDarkMode: _isDarkMode,
+                            zoomScale: _zoomScale,
+                            onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
                           ),
                         ),
 
-                        // Right Properties Sidebar Panel
-                        if (_activeCapture != null)
-                          StylePicker(
-                            selectedColor: _activeColor,
-                            onColorChanged: (color) => setState(() => _activeColor = color),
-                            strokeWidth: _strokeWidth,
-                            onStrokeWidthChanged: (val) => setState(() => _strokeWidth = val),
-                            opacity: _opacity,
-                            onOpacityChanged: (val) => setState(() => _opacity = val),
-                            fontSize: _fontSize,
-                            onFontSizeChanged: (val) => setState(() => _fontSize = val),
-                            isFilled: _isFilled,
-                            onFillChanged: (val) => setState(() => _isFilled = val),
-                            activeTool: _activeTool,
-                            isDarkMode: _isDarkMode,
+                        // Right Properties Sidebar Panel (Full Height & Collapsible Side Drawer)
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeInOut,
+                          width: (_activeCapture != null && _isPropertiesOpen) ? 250 : 0,
+                          height: double.infinity,
+                          child: ClipRect(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              physics: const NeverScrollableScrollPhysics(),
+                              child: SizedBox(
+                                width: 250,
+                                height: double.infinity,
+                                child: StylePicker(
+                                  selectedColor: _activeColor,
+                                  onColorChanged: (color) => setState(() => _activeColor = color),
+                                  textBackgroundColor: _textBackgroundColor,
+                                  onTextBackgroundColorChanged: (c) => setState(() => _textBackgroundColor = c),
+                                  strokeWidth: _strokeWidth,
+                                  onStrokeWidthChanged: (val) => setState(() => _strokeWidth = val),
+                                  opacity: _opacity,
+                                  onOpacityChanged: (val) => setState(() => _opacity = val),
+                                  fontSize: _fontSize,
+                                  onFontSizeChanged: (val) => setState(() => _fontSize = val),
+                                  isFilled: _isFilled,
+                                  onFillChanged: (val) => setState(() => _isFilled = val),
+                                  rotation: _rotation,
+                                  onRotationChanged: (r) => setState(() => _rotation = r),
+                                  activeTool: _activeTool,
+                                  isDarkMode: _isDarkMode,
+                                  onFlattenCanvas: _annotations.isNotEmpty ? _handleFlattenCanvas : null,
+                                  onCloseDrawer: () => setState(() => _isPropertiesOpen = false),
+                                ),
+                              ),
+                            ),
                           ),
+                        ),
                       ],
                     ),
+
+                    // Floating Properties Drawer Open Pill Button (when drawer is collapsed)
+                    if (_activeCapture != null && !_isPropertiesOpen)
+                      Positioned(
+                        top: 12,
+                        right: 12,
+                        child: Tooltip(
+                          message: 'Show Tool Properties Drawer',
+                          child: Material(
+                            color: _isDarkMode ? AppColors.darkSurface : AppColors.lightSurface,
+                            elevation: 6,
+                            borderRadius: BorderRadius.circular(20),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(20),
+                              onTap: () => setState(() => _isPropertiesOpen = true),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(color: AppColors.accent, width: 1.2),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.tune_rounded, size: 16, color: AppColors.accent),
+                                    SizedBox(width: 6),
+                                    Text('Properties', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.accent)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
 
                     // Capturing Overlay Spinner
                     if (_isCapturing)
@@ -508,32 +775,41 @@ class _MainScreenState extends State<MainScreen> {
                   activeItem: _activeCapture,
                   isDarkMode: _isDarkMode,
                   onSelectItem: (item) {
+                    _syncCurrentCaptureAnnotations();
                     setState(() {
                       _activeCapture = item;
-                      _annotations.clear();
+                      _annotations = List.from(item.annotations);
                       _undoStack.clear();
                       _redoStack.clear();
-                      _stepCounter = 1;
+                      _stepCounter = _findMaxStepNumber(item.annotations) + 1;
                     });
+                    DatabaseService.setSetting('active_capture_id', item.id);
                   },
                   onDeleteItem: (item) async {
-            setState(() {
-              _captures.removeWhere((c) => c.id == item.id);
-              if (_activeCapture?.id == item.id) {
-                _activeCapture = _captures.isNotEmpty ? _captures.first : null;
-                _annotations.clear();
-                _undoStack.clear();
-                _redoStack.clear();
-              }
-            });
-            try {
-              final file = File(item.filePath);
-              if (file.existsSync()) {
-                await file.delete();
-              }
-            } catch (_) {}
-            StorageService.saveHistory(_captures);
-          },
+                    if (_activeCapture?.id == item.id) {
+                      _syncCurrentCaptureAnnotations();
+                    }
+                    setState(() {
+                      _captures.removeWhere((c) => c.id == item.id);
+                      if (_activeCapture?.id == item.id) {
+                        _activeCapture = _captures.isNotEmpty ? _captures.first : null;
+                        _annotations = _activeCapture != null ? List.from(_activeCapture!.annotations) : [];
+                        _undoStack.clear();
+                        _redoStack.clear();
+                        _stepCounter = _activeCapture != null ? _findMaxStepNumber(_annotations) + 1 : 1;
+                      }
+                    });
+                    if (_activeCapture != null) {
+                      DatabaseService.setSetting('active_capture_id', _activeCapture!.id);
+                    }
+                    try {
+                      final file = File(item.filePath);
+                      if (file.existsSync()) {
+                        await file.delete();
+                      }
+                    } catch (_) {}
+                    StorageService.saveHistory(_captures);
+                  },
                   onClose: () => setState(() => _isSidebarOpen = false),
                 ),
             ],

@@ -1,7 +1,5 @@
 name: snipsnap
-description: "A simple Snagit clone Flutter desktop app."
-# The following line prevents the package from being accidentally published to
-# pub.dev using `flutter pub publish`. This is preferred for private packages.
+description: "SnipSnap - Powerful screen capture & annotation desktop app."
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 version: 1.0.0+1

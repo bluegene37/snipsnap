@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../models/capture_item.dart';
@@ -8,34 +9,113 @@ import '../models/capture_item.dart';
 import 'database_service.dart';
 
 class StorageService {
-  /// Save image bytes to a custom location chosen by the user (defaults to Downloads directory)
-  static Future<String?> exportImageDialog(List<int> bytes, String defaultName) async {
-    try {
-      String? initialDir;
-      try {
-        final downloadsDir = await getDownloadsDirectory();
-        initialDir = downloadsDir?.path;
-      } catch (e) {
-        debugPrint('SnipSnap storage error: $e');
-      }
+  /// Save image bytes with specific format (.png or .jpg) to user selected location
+  static Future<String?> exportImageDialogWithFormat({
+    required List<int> bytes,
+    required String fileName,
+    required bool isJpg,
+    int jpgQuality = 90,
+    String? customFolderPath,
+  }) async {
+    final ext = isJpg ? 'jpg' : 'png';
+    String cleanName = fileName
+        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '-')
+        .replaceAll(' ', '_')
+        .trim();
+    if (cleanName.isEmpty) cleanName = 'screenshot';
+    final targetFileName = cleanName.toLowerCase().endsWith('.$ext') ? cleanName : '$cleanName.$ext';
 
+    List<int> bytesToSave = bytes;
+
+    if (isJpg) {
+      try {
+        final decoded = img.decodeImage(Uint8List.fromList(bytes));
+        if (decoded != null) {
+          bytesToSave = img.encodeJpg(decoded, quality: jpgQuality);
+        }
+      } catch (e) {
+        debugPrint('SnipSnap JPG encode error: $e');
+      }
+    }
+
+    // Direct save if specific folder preset or custom directory is selected
+    if (customFolderPath != null && customFolderPath.isNotEmpty) {
+      try {
+        Directory? targetDir;
+        if (customFolderPath == 'downloads') {
+          targetDir = await getDownloadsDirectory();
+        } else if (customFolderPath == 'desktop') {
+          final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+          if (home != null) targetDir = Directory(p.join(home, 'Desktop'));
+        } else if (customFolderPath == 'documents') {
+          targetDir = await getApplicationDocumentsDirectory();
+        } else {
+          targetDir = Directory(customFolderPath);
+        }
+
+        if (targetDir != null && await targetDir.exists()) {
+          final targetPath = p.join(targetDir.path, targetFileName);
+          final file = File(targetPath);
+          await file.writeAsBytes(bytesToSave);
+          return targetPath;
+        }
+      } catch (e) {
+        debugPrint('SnipSnap customFolderPath save error: $e');
+      }
+    }
+
+    // 1. Try native save file dialog with target filename
+    try {
       final result = await FilePicker.saveFile(
         dialogTitle: 'Save Screenshot As',
-        fileName: defaultName.endsWith('.png') ? defaultName : '$defaultName.png',
-        initialDirectory: initialDir,
-        type: FileType.custom,
-        allowedExtensions: ['png', 'jpg', 'jpeg'],
+        fileName: targetFileName,
+        type: FileType.any,
       );
 
-      if (result != null) {
-        final file = File(result);
-        await file.writeAsBytes(bytes);
-        return result;
+      if (result != null && result.isNotEmpty) {
+        final finalPath = result.toLowerCase().endsWith('.$ext') ? result : '$result.$ext';
+        final file = File(finalPath);
+        await file.writeAsBytes(bytesToSave);
+        return finalPath;
       }
     } catch (e) {
-      debugPrint('SnipSnap storage error: $e');
+      debugPrint('SnipSnap FilePicker.saveFile primary error: $e');
     }
+
+    // 2. Secondary fallback: Prompt user to choose target folder if saveFile fails or returns null
+    try {
+      final dirPath = await FilePicker.getDirectoryPath(
+        dialogTitle: 'Select Folder to Save Screenshot',
+      );
+      if (dirPath != null && dirPath.trim().isNotEmpty) {
+        final targetPath = p.join(dirPath, targetFileName);
+        final file = File(targetPath);
+        await file.writeAsBytes(bytesToSave);
+        return targetPath;
+      }
+    } catch (e) {
+      debugPrint('SnipSnap getDirectoryPath fallback error: $e');
+    }
+
+    // 3. Ultimate Fallback: Save directly to user's Downloads directory if native file pickers fail
+    try {
+      final downloadsDir = await getDownloadsDirectory();
+      if (downloadsDir != null && downloadsDir.existsSync()) {
+        final targetPath = p.join(downloadsDir.path, targetFileName);
+        final file = File(targetPath);
+        await file.writeAsBytes(bytesToSave);
+        return targetPath;
+      }
+    } catch (e) {
+      debugPrint('SnipSnap downloads directory fallback error: $e');
+    }
+
     return null;
+  }
+
+  /// Save image bytes to a custom location chosen by the user (defaults to Downloads directory)
+  static Future<String?> exportImageDialog(List<int> bytes, String defaultName) async {
+    return exportImageDialogWithFormat(bytes: bytes, fileName: defaultName, isJpg: false);
   }
 
   /// Direct save to user's Downloads folder

@@ -57,34 +57,29 @@ class GallerySidebar extends StatelessWidget {
             ),
             child: Row(
               children: [
-                // History Gallery Header
+                // Screenshots Gallery Header
                 const Icon(Icons.photo_library_rounded, color: AppColors.accent, size: 15),
                 const SizedBox(width: 6),
                 Text(
-                  'History',
+                  'Screenshots',
                   style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.bold),
                 ),
 
                 const Spacer(),
 
-                // Middle: Resolution / Info Indicator
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.black26,
-                    borderRadius: BorderRadius.circular(4),
+                // Middle: Resolution / Info Indicator (Only shown when width & height > 0)
+                if (activeItem != null && activeItem!.width > 0 && activeItem!.height > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black26,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${activeItem!.width} x ${activeItem!.height}',
+                      style: const TextStyle(color: Colors.white54, fontSize: 11, fontFamily: 'monospace'),
+                    ),
                   ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.zoom_in_rounded, color: Colors.white38, size: 13),
-                      const SizedBox(width: 4),
-                      Text(
-                        activeItem != null ? '${activeItem!.width} x ${activeItem!.height}' : 'No capture selected',
-                        style: const TextStyle(color: Colors.white54, fontSize: 11, fontFamily: 'monospace'),
-                      ),
-                    ],
-                  ),
-                ),
 
                 const Spacer(),
 
@@ -94,7 +89,7 @@ class GallerySidebar extends StatelessWidget {
                   icon: const Icon(Icons.close_rounded, color: Colors.white54, size: 16),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                  tooltip: 'Hide History Tray',
+                  tooltip: 'Hide Screenshots Tray',
                   onPressed: onClose,
                 ),
               ],

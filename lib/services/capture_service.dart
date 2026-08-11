@@ -21,9 +21,7 @@ class CaptureService {
     return p.join(dir.path, 'snap_$timestamp.png');
   }
 
-  /// Perform interactive area capture using native macOS screencapture.
-  /// If the user drags out a selection region, captures that region.
-  /// If the user just clicks (no selection region created), captures the full screen.
+  /// Perform interactive area capture across macOS, Windows, and Linux
   Future<String?> captureInteractive() async {
     final targetPath = await _generateNewPath();
     try {
@@ -39,8 +37,23 @@ class CaptureService {
             } catch (_) {}
           }
         }
-
-        // If the user just clicked without dragging a selection region, capture full screen
+        return await captureFullScreen();
+      } else if (Platform.isWindows) {
+        // Launch Windows Snipping Tool / Snip & Sketch
+        await Process.run('snippingtool', ['/clip']);
+        return await captureFullScreen();
+      } else if (Platform.isLinux) {
+        var result = await Process.run('gnome-screenshot', ['-a', '-f', targetPath]);
+        if (result.exitCode != 0) {
+          result = await Process.run('maim', ['-s', targetPath]);
+        }
+        if (result.exitCode != 0) {
+          result = await Process.run('scrot', ['-s', targetPath]);
+        }
+        final file = File(targetPath);
+        if (await file.exists() && await file.length() > 0) {
+          return targetPath;
+        }
         return await captureFullScreen();
       }
     } catch (e) {
@@ -49,13 +62,38 @@ class CaptureService {
     return null;
   }
 
-  /// Perform full screen capture
+  /// Perform full screen capture across macOS, Windows, and Linux
   Future<String?> captureFullScreen() async {
     final targetPath = await _generateNewPath();
     try {
       if (Platform.isMacOS) {
         final result = await Process.run('/usr/sbin/screencapture', [targetPath]);
         if (result.exitCode == 0 && await File(targetPath).exists()) {
+          return targetPath;
+        }
+      } else if (Platform.isWindows) {
+        final winPath = targetPath.replaceAll('/', '\\').replaceAll('"', '\\"');
+        final script = '''
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+\$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+\$img = New-Object System.Drawing.Bitmap(\$b.Width, \$b.Height)
+\$g = [System.Drawing.Graphics]::FromImage(\$img)
+\$g.CopyFromScreen(\$b.Location, [System.Drawing.Point]::Empty, \$b.Size)
+\$img.Save("$winPath", [System.Drawing.Imaging.ImageFormat]::Png)
+''';
+        final result = await Process.run('powershell', ['-NoProfile', '-Command', script]);
+        if (result.exitCode == 0 && await File(targetPath).exists()) {
+          return targetPath;
+        }
+      } else if (Platform.isLinux) {
+        var result = await Process.run('gnome-screenshot', ['-f', targetPath]);
+        if (result.exitCode != 0) {
+          result = await Process.run('maim', [targetPath]);
+        }
+        if (result.exitCode != 0) {
+          result = await Process.run('scrot', [targetPath]);
+        }
+        if (await File(targetPath).exists()) {
           return targetPath;
         }
       }
@@ -65,7 +103,7 @@ class CaptureService {
     return null;
   }
 
-  /// Perform delayed capture with countdown
+  /// Perform delayed capture with countdown across macOS, Windows, and Linux
   Future<String?> captureTimer(int seconds) async {
     final targetPath = await _generateNewPath();
     try {
@@ -74,6 +112,9 @@ class CaptureService {
         if (result.exitCode == 0 && await File(targetPath).exists()) {
           return targetPath;
         }
+      } else {
+        await Future.delayed(Duration(seconds: seconds));
+        return await captureFullScreen();
       }
     } catch (e) {
       debugPrint('SnipSnap capture error: $e');
