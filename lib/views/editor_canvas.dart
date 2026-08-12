@@ -1002,22 +1002,25 @@ class _EditorCanvasState extends State<EditorCanvas> {
             // 2. Interactive Zoom & Editing Layer with 2-Finger Trackpad & Scroll Wheel Support
             SizedBox.expand(
               child: Listener(
-                onPointerSignal: (pointerSignal) {
-                  if (pointerSignal is PointerScrollEvent) {
-                    final dy = pointerSignal.scrollDelta.dy;
-                    if (dy != 0) {
-                      final zoomDelta = dy > 0 ? -0.05 : 0.05;
-                      final newScale = (widget.zoomScale + zoomDelta).clamp(0.2, 4.0);
-                      widget.onZoomScaleChanged?.call(newScale);
-                    }
+              onPointerSignal: (pointerSignal) {
+                if (pointerSignal is PointerScrollEvent) {
+                  final dy = pointerSignal.scrollDelta.dy;
+                  if (dy != 0) {
+                    final currentScale = _transformationController.value.getMaxScaleOnAxis();
+                    final zoomDelta = dy > 0 ? -0.05 : 0.05;
+                    final newScale = (currentScale + zoomDelta).clamp(0.2, 4.0);
+                    _updateZoomMatrix(newScale);
+                    widget.onZoomScaleChanged?.call(newScale);
                   }
-                },
-                child: InteractiveViewer(
-                  transformationController: _transformationController,
-                  maxScale: 4.0,
-                  minScale: 0.2,
-                  panEnabled: false,
-                  clipBehavior: Clip.hardEdge,
+                }
+              },
+              child: InteractiveViewer(
+                transformationController: _transformationController,
+                maxScale: 4.0,
+                minScale: 0.2,
+                boundaryMargin: const EdgeInsets.all(double.infinity),
+                panEnabled: false,
+                clipBehavior: Clip.hardEdge,
                 onInteractionStart: (details) {
                   _isInteractiveZooming = true;
                 },
