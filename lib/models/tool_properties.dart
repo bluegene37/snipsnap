@@ -10,6 +10,10 @@ class ToolProperties {
   final Color textBackgroundColor;
   final int stepCounter;
   final double blurRadius;
+  final double borderRadius;
+  final LineStyle lineStyle;
+  final BlurType blurType;
+  final bool isDoubleArrow;
 
   const ToolProperties({
     required this.activeColor,
@@ -20,6 +24,10 @@ class ToolProperties {
     this.textBackgroundColor = Colors.transparent,
     this.stepCounter = 1,
     this.blurRadius = 12.0,
+    this.borderRadius = 8.0,
+    this.lineStyle = LineStyle.solid,
+    this.blurType = BlurType.gaussian,
+    this.isDoubleArrow = false,
   });
 
   ToolProperties copyWith({
@@ -31,6 +39,10 @@ class ToolProperties {
     Color? textBackgroundColor,
     int? stepCounter,
     double? blurRadius,
+    double? borderRadius,
+    LineStyle? lineStyle,
+    BlurType? blurType,
+    bool? isDoubleArrow,
   }) {
     return ToolProperties(
       activeColor: activeColor ?? this.activeColor,
@@ -41,6 +53,10 @@ class ToolProperties {
       textBackgroundColor: textBackgroundColor ?? this.textBackgroundColor,
       stepCounter: stepCounter ?? this.stepCounter,
       blurRadius: blurRadius ?? this.blurRadius,
+      borderRadius: borderRadius ?? this.borderRadius,
+      lineStyle: lineStyle ?? this.lineStyle,
+      blurType: blurType ?? this.blurType,
+      isDoubleArrow: isDoubleArrow ?? this.isDoubleArrow,
     );
   }
 

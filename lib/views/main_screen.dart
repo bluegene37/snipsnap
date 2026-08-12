@@ -77,6 +77,10 @@ class _MainScreenState extends State<MainScreen> {
     double? fontSize,
     bool? isFilled,
     Color? textBackgroundColor,
+    double? borderRadius,
+    LineStyle? lineStyle,
+    BlurType? blurType,
+    bool? isDoubleArrow,
   }) {
     setState(() {
       final currentProps = _currentToolProperties;
@@ -87,6 +91,10 @@ class _MainScreenState extends State<MainScreen> {
         fontSize: fontSize,
         isFilled: isFilled,
         textBackgroundColor: textBackgroundColor,
+        borderRadius: borderRadius,
+        lineStyle: lineStyle,
+        blurType: blurType,
+        isDoubleArrow: isDoubleArrow,
       );
     });
   }
@@ -727,6 +735,10 @@ class _MainScreenState extends State<MainScreen> {
                                   fontSize: ann.fontSize,
                                   opacity: ann.opacity,
                                   isFilled: ann.fill,
+                                  borderRadius: ann.borderRadius,
+                                  lineStyle: ann.lineStyle,
+                                  blurType: ann.blurType,
+                                  isDoubleArrow: ann.isDoubleArrow,
                                 );
                                 setState(() {
                                   _rotation = ann.rotation;
@@ -740,6 +752,10 @@ class _MainScreenState extends State<MainScreen> {
                             rotation: _rotation,
                             fontSize: _currentToolProperties.fontSize,
                             isFilled: _currentToolProperties.isFilled,
+                            borderRadius: _currentToolProperties.borderRadius,
+                            lineStyle: _currentToolProperties.lineStyle,
+                            blurType: _currentToolProperties.blurType,
+                            isDoubleArrow: _currentToolProperties.isDoubleArrow,
                             stepCounter: _stepCounter,
                             onAnnotationAdded: _onAnnotationAdded,
                             onAnnotationsUpdated: _onAnnotationsUpdated,
@@ -798,6 +814,14 @@ class _MainScreenState extends State<MainScreen> {
                                   onFillChanged: (val) => _updateActiveToolProperty(isFilled: val),
                                   rotation: _rotation,
                                   onRotationChanged: (r) => setState(() => _rotation = r),
+                                  borderRadius: _currentToolProperties.borderRadius,
+                                  onBorderRadiusChanged: (r) => _updateActiveToolProperty(borderRadius: r),
+                                  lineStyle: _currentToolProperties.lineStyle,
+                                  onLineStyleChanged: (s) => _updateActiveToolProperty(lineStyle: s),
+                                  blurType: _currentToolProperties.blurType,
+                                  onBlurTypeChanged: (b) => _updateActiveToolProperty(blurType: b),
+                                  isDoubleArrow: _currentToolProperties.isDoubleArrow,
+                                  onDoubleArrowChanged: (d) => _updateActiveToolProperty(isDoubleArrow: d),
                                   activeTool: _activeTool,
                                   isDarkMode: _isDarkMode,
                                   stepCounter: _stepCounter,

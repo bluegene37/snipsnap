@@ -17,6 +17,16 @@ enum CanvasTool {
   colorPicker,
 }
 
+enum LineStyle {
+  solid,
+  dashed,
+}
+
+enum BlurType {
+  gaussian,
+  pixelate,
+}
+
 class AppColors {
   // Electric Violet Theme (Shottr-style Pro Theme)
   static const Color accent = Color(0xFF8B5CF6);

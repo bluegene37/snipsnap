@@ -35,6 +35,10 @@ class EditorCanvas extends StatefulWidget {
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
   final int imageRevision;
+  final double borderRadius;
+  final LineStyle lineStyle;
+  final BlurType blurType;
+  final bool isDoubleArrow;
 
   const EditorCanvas({
     super.key,
@@ -63,6 +67,10 @@ class EditorCanvas extends StatefulWidget {
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
     this.imageRevision = 0,
+    this.borderRadius = 8.0,
+    this.lineStyle = LineStyle.solid,
+    this.blurType = BlurType.gaussian,
+    this.isDoubleArrow = false,
   });
 
   @override
@@ -209,7 +217,11 @@ class _EditorCanvasState extends State<EditorCanvas> {
             oldWidget.fontSize != widget.fontSize ||
             oldWidget.isFilled != widget.isFilled ||
             oldWidget.rotation != widget.rotation ||
-            oldWidget.textBackgroundColor != widget.textBackgroundColor)) {
+            oldWidget.textBackgroundColor != widget.textBackgroundColor ||
+            oldWidget.borderRadius != widget.borderRadius ||
+            oldWidget.lineStyle != widget.lineStyle ||
+            oldWidget.blurType != widget.blurType ||
+            oldWidget.isDoubleArrow != widget.isDoubleArrow)) {
       _updateSelectedAnnotationProperties();
     }
   }
@@ -235,6 +247,10 @@ class _EditorCanvasState extends State<EditorCanvas> {
         fontSize: widget.fontSize,
         fill: widget.isFilled,
         rotation: widget.rotation,
+        borderRadius: widget.borderRadius,
+        lineStyle: widget.lineStyle,
+        blurType: widget.blurType,
+        isDoubleArrow: widget.isDoubleArrow,
       );
       final newList = List<Annotation>.from(widget.annotations);
       newList[index] = updatedAnn;
@@ -1620,20 +1636,24 @@ class _AnnotationPainter extends CustomPainter {
 
         case CanvasTool.arrow:
           if (ann.startPoint != null && ann.endPoint != null) {
-            _drawArrow(canvas, ann.startPoint!, ann.endPoint!, paint);
+            _drawArrow(canvas, ann, paint);
           }
           break;
 
         case CanvasTool.line:
           if (ann.startPoint != null && ann.endPoint != null) {
-            canvas.drawLine(ann.startPoint!, ann.endPoint!, paint);
+            if (ann.lineStyle == LineStyle.dashed) {
+              _drawDashedLine(canvas, ann.startPoint!, ann.endPoint!, paint);
+            } else {
+              canvas.drawLine(ann.startPoint!, ann.endPoint!, paint);
+            }
           }
           break;
 
         case CanvasTool.rectangle:
           if (ann.startPoint != null && ann.endPoint != null) {
             final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!);
-            final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(4));
+            final rrect = RRect.fromRectAndRadius(rect, Radius.circular(ann.borderRadius));
             canvas.drawRRect(rrect, paint);
           }
           break;
@@ -1769,19 +1789,26 @@ class _AnnotationPainter extends CustomPainter {
     }
   }
 
-  void _drawArrow(Canvas canvas, Offset start, Offset end, Paint paint) {
+  void _drawArrow(Canvas canvas, Annotation ann, Paint paint) {
+    final start = ann.startPoint;
+    final end = ann.endPoint;
+    if (start == null || end == null) return;
+
     final strokeW = paint.strokeWidth;
     final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
     final arrowSize = math.max(16.0, strokeW * 3.2);
 
-    // Shorten line shaft slightly for thick strokes so line cap does not protrude past sharp arrowhead tip
     final lineEndOffset = strokeW > 4.0 ? (strokeW * 0.5) : 0.0;
     final lineEnd = Offset(
       end.dx - lineEndOffset * math.cos(angle),
       end.dy - lineEndOffset * math.sin(angle),
     );
 
-    canvas.drawLine(start, lineEnd, paint);
+    if (ann.lineStyle == LineStyle.dashed) {
+      _drawDashedLine(canvas, start, lineEnd, paint);
+    } else {
+      canvas.drawLine(start, lineEnd, paint);
+    }
 
     final path = Path();
     path.moveTo(end.dx, end.dy);
@@ -1800,6 +1827,38 @@ class _AnnotationPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     canvas.drawPath(path, headPaint);
+
+    if (ann.isDoubleArrow) {
+      final startPath = Path();
+      startPath.moveTo(start.dx, start.dy);
+      startPath.lineTo(
+        start.dx + arrowSize * math.cos(angle - math.pi / 6),
+        start.dy + arrowSize * math.sin(angle - math.pi / 6),
+      );
+      startPath.lineTo(
+        start.dx + arrowSize * math.cos(angle + math.pi / 6),
+        start.dy + arrowSize * math.sin(angle + math.pi / 6),
+      );
+      startPath.close();
+      canvas.drawPath(startPath, headPaint);
+    }
+  }
+
+  void _drawDashedLine(Canvas canvas, Offset p1, Offset p2, Paint paint) {
+    final distance = (p2 - p1).distance;
+    if (distance == 0) return;
+
+    final direction = (p2 - p1) / distance;
+    const dashWidth = 8.0;
+    const dashSpace = 6.0;
+
+    double currentDistance = 0.0;
+    while (currentDistance < distance) {
+      final start = p1 + direction * currentDistance;
+      final end = p1 + direction * math.min(currentDistance + dashWidth, distance);
+      canvas.drawLine(start, end, paint);
+      currentDistance += dashWidth + dashSpace;
+    }
   }
 
   void _drawStepMarker(Canvas canvas, Offset center, int step, Color color, double fontSize) {

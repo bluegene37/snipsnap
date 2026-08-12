@@ -17,6 +17,10 @@ class Annotation {
   final Rect? rect;
   final double opacity;
   final double rotation; // In radians (0.0 = 0 degrees)
+  final double borderRadius;
+  final LineStyle lineStyle;
+  final BlurType blurType;
+  final bool isDoubleArrow;
 
   Annotation({
     required this.id,
@@ -34,6 +38,10 @@ class Annotation {
     this.rect,
     double opacity = 1.0,
     this.rotation = 0.0,
+    this.borderRadius = 8.0,
+    this.lineStyle = LineStyle.solid,
+    this.blurType = BlurType.gaussian,
+    this.isDoubleArrow = false,
   })  : opacity = opacity.clamp(0.0, 1.0),
         assert(strokeWidth > 0, 'strokeWidth must be > 0'),
         assert(fontSize > 0, 'fontSize must be > 0');
@@ -54,6 +62,10 @@ class Annotation {
     Rect? rect,
     double? opacity,
     double? rotation,
+    double? borderRadius,
+    LineStyle? lineStyle,
+    BlurType? blurType,
+    bool? isDoubleArrow,
   }) {
     return Annotation(
       id: id ?? this.id,
@@ -71,6 +83,10 @@ class Annotation {
       rect: rect ?? this.rect,
       opacity: opacity ?? this.opacity,
       rotation: rotation ?? this.rotation,
+      borderRadius: borderRadius ?? this.borderRadius,
+      lineStyle: lineStyle ?? this.lineStyle,
+      blurType: blurType ?? this.blurType,
+      isDoubleArrow: isDoubleArrow ?? this.isDoubleArrow,
     );
   }
 }

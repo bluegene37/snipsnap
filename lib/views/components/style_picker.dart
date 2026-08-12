@@ -24,6 +24,14 @@ class StylePicker extends StatelessWidget {
   final int stepCounter;
   final VoidCallback? onResetStepCounter;
   final VoidCallback? onActivateEyedropper;
+  final double borderRadius;
+  final ValueChanged<double>? onBorderRadiusChanged;
+  final LineStyle lineStyle;
+  final ValueChanged<LineStyle>? onLineStyleChanged;
+  final BlurType blurType;
+  final ValueChanged<BlurType>? onBlurTypeChanged;
+  final bool isDoubleArrow;
+  final ValueChanged<bool>? onDoubleArrowChanged;
 
   const StylePicker({
     super.key,
@@ -48,6 +56,14 @@ class StylePicker extends StatelessWidget {
     this.stepCounter = 1,
     this.onResetStepCounter,
     this.onActivateEyedropper,
+    this.borderRadius = 8.0,
+    this.onBorderRadiusChanged,
+    this.lineStyle = LineStyle.solid,
+    this.onLineStyleChanged,
+    this.blurType = BlurType.gaussian,
+    this.onBlurTypeChanged,
+    this.isDoubleArrow = false,
+    this.onDoubleArrowChanged,
   });
 
   void _showColorPickerDialog(BuildContext context) {
@@ -511,7 +527,195 @@ class StylePicker extends StatelessWidget {
                 onChanged: onOpacityChanged,
               ),
             ),
-            const SizedBox(height: 16),
+            // Corner Radius (for Rectangle)
+            if (activeTool == CanvasTool.rectangle) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'CORNER RADIUS',
+                    style: TextStyle(
+                      color: subTextColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${borderRadius.toInt()} px',
+                      style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _RadiusPresetChip(
+                    label: '0px',
+                    radius: 0.0,
+                    isSelected: borderRadius == 0.0,
+                    onSelect: (r) => onBorderRadiusChanged?.call(r),
+                    cardBg: cardBg,
+                    textColor: textColor,
+                  ),
+                  _RadiusPresetChip(
+                    label: '8px',
+                    radius: 8.0,
+                    isSelected: borderRadius == 8.0,
+                    onSelect: (r) => onBorderRadiusChanged?.call(r),
+                    cardBg: cardBg,
+                    textColor: textColor,
+                  ),
+                  _RadiusPresetChip(
+                    label: '16px',
+                    radius: 16.0,
+                    isSelected: borderRadius == 16.0,
+                    onSelect: (r) => onBorderRadiusChanged?.call(r),
+                    cardBg: cardBg,
+                    textColor: textColor,
+                  ),
+                  _RadiusPresetChip(
+                    label: '24px',
+                    radius: 24.0,
+                    isSelected: borderRadius == 24.0,
+                    onSelect: (r) => onBorderRadiusChanged?.call(r),
+                    cardBg: cardBg,
+                    textColor: textColor,
+                  ),
+                ],
+              ),
+              SliderTheme(
+                data: SliderThemeData(
+                  activeTrackColor: AppColors.accent,
+                  inactiveTrackColor: borderColor,
+                  thumbColor: AppColors.accent,
+                  trackHeight: 3,
+                ),
+                child: Slider(
+                  value: borderRadius.clamp(0.0, 30.0),
+                  min: 0.0,
+                  max: 30.0,
+                  onChanged: (val) => onBorderRadiusChanged?.call(val),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Line Style (Solid vs Dashed)
+            if (activeTool == CanvasTool.line || activeTool == CanvasTool.arrow) ...[
+              Text(
+                'LINE STYLE',
+                style: TextStyle(
+                  color: subTextColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilterChip(
+                      label: const Center(child: Text('Solid', style: TextStyle(fontSize: 11))),
+                      selected: lineStyle == LineStyle.solid,
+                      selectedColor: AppColors.accent.withValues(alpha: 0.3),
+                      checkmarkColor: AppColors.accent,
+                      onSelected: (selected) {
+                        if (selected) onLineStyleChanged?.call(LineStyle.solid);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilterChip(
+                      label: const Center(child: Text('Dashed', style: TextStyle(fontSize: 11))),
+                      selected: lineStyle == LineStyle.dashed,
+                      selectedColor: AppColors.accent.withValues(alpha: 0.3),
+                      checkmarkColor: AppColors.accent,
+                      onSelected: (selected) {
+                        if (selected) onLineStyleChanged?.call(LineStyle.dashed);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Double Arrowhead Switch
+            if (activeTool == CanvasTool.arrow) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'DOUBLE ARROWHEAD',
+                    style: TextStyle(
+                      color: subTextColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  Switch(
+                    value: isDoubleArrow,
+                    activeTrackColor: AppColors.accent,
+                    onChanged: (val) => onDoubleArrowChanged?.call(val),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Blur Mode (Gaussian Blur vs Pixelate Mosaic)
+            if (activeTool == CanvasTool.blur) ...[
+              Text(
+                'BLUR MODE',
+                style: TextStyle(
+                  color: subTextColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilterChip(
+                      label: const Center(child: Text('Gaussian', style: TextStyle(fontSize: 11))),
+                      selected: blurType == BlurType.gaussian,
+                      selectedColor: AppColors.accent.withValues(alpha: 0.3),
+                      checkmarkColor: AppColors.accent,
+                      onSelected: (selected) {
+                        if (selected) onBlurTypeChanged?.call(BlurType.gaussian);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilterChip(
+                      label: const Center(child: Text('Pixelate', style: TextStyle(fontSize: 11))),
+                      selected: blurType == BlurType.pixelate,
+                      selectedColor: AppColors.accent.withValues(alpha: 0.3),
+                      checkmarkColor: AppColors.accent,
+                      onSelected: (selected) {
+                        if (selected) onBlurTypeChanged?.call(BlurType.pixelate);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // Font Size Slider
             if (showFont) ...[
@@ -802,6 +1006,50 @@ class _StrokePresetChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () => onSelect(width),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.accent : cardBg,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isSelected ? AppColors.accent : Colors.transparent,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : textColor,
+            fontSize: 11,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RadiusPresetChip extends StatelessWidget {
+  final String label;
+  final double radius;
+  final bool isSelected;
+  final ValueChanged<double> onSelect;
+  final Color cardBg;
+  final Color textColor;
+
+  const _RadiusPresetChip({
+    required this.label,
+    required this.radius,
+    required this.isSelected,
+    required this.onSelect,
+    required this.cardBg,
+    required this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => onSelect(radius),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
