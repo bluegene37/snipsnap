@@ -240,7 +240,9 @@ class StylePicker extends StatelessWidget {
 
             // Selection Color Swatches Grid
             Text(
-              activeTool == CanvasTool.text ? 'TEXT COLOR' : 'SELECTION COLOR',
+              activeTool == CanvasTool.text
+                  ? 'TEXT COLOR'
+                  : (activeTool == CanvasTool.highlight ? 'HIGHLIGHTER TINT' : 'SELECTION COLOR'),
               style: TextStyle(
                 color: subTextColor,
                 fontSize: 11,
@@ -253,7 +255,17 @@ class StylePicker extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: [
-                ...AppColors.palette.map((color) {
+                ...(activeTool == CanvasTool.highlight
+                        ? const [
+                            Color(0xFFFDE047),
+                            Color(0xFF34D399),
+                            Color(0xFF22D3EE),
+                            Color(0xFFF472B6),
+                            Color(0xFFFB923C),
+                            Color(0xFFC084FC),
+                          ]
+                        : AppColors.palette)
+                    .map((color) {
                   final isSelected = selectedColor.toARGB32() == color.toARGB32();
                   return GestureDetector(
                     onTap: () => onColorChanged(color),

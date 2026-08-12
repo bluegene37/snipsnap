@@ -47,15 +47,15 @@ class ToolProperties {
   static Map<CanvasTool, ToolProperties> createDefaults() {
     return {
       CanvasTool.select: const ToolProperties(activeColor: AppColors.accent),
-      CanvasTool.pen: const ToolProperties(activeColor: Colors.redAccent, strokeWidth: 3.0, opacity: 1.0),
+      CanvasTool.pen: const ToolProperties(activeColor: Color(0xFFEF4444), strokeWidth: 3.0, opacity: 1.0),
       CanvasTool.arrow: const ToolProperties(activeColor: AppColors.accent, strokeWidth: 3.5, opacity: 1.0),
-      CanvasTool.rectangle: const ToolProperties(activeColor: Colors.blueAccent, strokeWidth: 3.0, isFilled: false, opacity: 1.0),
-      CanvasTool.oval: const ToolProperties(activeColor: Colors.purpleAccent, strokeWidth: 3.0, isFilled: false, opacity: 1.0),
+      CanvasTool.rectangle: const ToolProperties(activeColor: Color(0xFF0EA5E9), strokeWidth: 3.0, isFilled: false, opacity: 1.0),
+      CanvasTool.oval: const ToolProperties(activeColor: Color(0xFF8B5CF6), strokeWidth: 3.0, isFilled: false, opacity: 1.0),
       CanvasTool.text: const ToolProperties(activeColor: Colors.white, fontSize: 18.0, textBackgroundColor: Color(0xCC000000), opacity: 1.0),
       CanvasTool.stepMarker: const ToolProperties(activeColor: AppColors.accent, fontSize: 16.0, stepCounter: 1, opacity: 1.0),
-      CanvasTool.highlight: const ToolProperties(activeColor: Colors.yellowAccent, strokeWidth: 18.0, opacity: 0.45),
-      CanvasTool.blur: const ToolProperties(activeColor: Colors.grey, blurRadius: 12.0, opacity: 1.0),
-      CanvasTool.ruler: const ToolProperties(activeColor: Colors.orangeAccent, strokeWidth: 2.0, opacity: 1.0),
+      CanvasTool.highlight: const ToolProperties(activeColor: Color(0x99FFEB3B), strokeWidth: 22.0, opacity: 0.6),
+      CanvasTool.blur: const ToolProperties(activeColor: Colors.grey, blurRadius: 14.0, opacity: 1.0),
+      CanvasTool.ruler: const ToolProperties(activeColor: Color(0xFFF59E0B), strokeWidth: 2.5, opacity: 1.0),
       CanvasTool.crop: const ToolProperties(activeColor: AppColors.accent),
     };
   }
