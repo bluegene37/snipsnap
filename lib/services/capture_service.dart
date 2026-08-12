@@ -29,7 +29,8 @@ class CaptureService {
         final result = await Process.run('/usr/sbin/screencapture', ['-i', targetPath]);
         final file = File(targetPath);
         if (result.exitCode == 0 && await file.exists()) {
-          if (await file.length() > 0) {
+          final len = await file.length();
+          if (len > 0) {
             return targetPath;
           } else {
             try {
@@ -37,11 +38,12 @@ class CaptureService {
             } catch (_) {}
           }
         }
-        return await captureFullScreen();
+        // User pressed ESC or cancelled region capture: Return null cleanly!
+        return null;
       } else if (Platform.isWindows) {
         // Launch Windows Snipping Tool / Snip & Sketch
         await Process.run('snippingtool', ['/clip']);
-        return await captureFullScreen();
+        return null;
       } else if (Platform.isLinux) {
         var result = await Process.run('gnome-screenshot', ['-a', '-f', targetPath]);
         if (result.exitCode != 0) {
@@ -54,7 +56,7 @@ class CaptureService {
         if (await file.exists() && await file.length() > 0) {
           return targetPath;
         }
-        return await captureFullScreen();
+        return null;
       }
     } catch (e) {
       debugPrint('SnipSnap capture error: $e');
