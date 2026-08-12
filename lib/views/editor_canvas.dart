@@ -605,7 +605,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
     final hit = _hitTestAnnotation(pos);
 
-    // If hit an existing annotation -> select item, park tool to what item it is, and sync properties
+    // If hit an existing annotation -> select item and sync properties
     if (hit != null) {
       // Push undo state once at start of drag gesture
       widget.onAnnotationsUpdated?.call(List.from(widget.annotations));
@@ -613,7 +613,6 @@ class _EditorCanvasState extends State<EditorCanvas> {
         _selectedAnnotationId = hit.id;
         _isDraggingAnnotation = true;
       });
-      widget.onToolSelected?.call(hit.tool);
       widget.onSelectAnnotation?.call(hit);
       return;
     }
@@ -636,27 +635,8 @@ class _EditorCanvasState extends State<EditorCanvas> {
       _currentAnnHandle = _AnnHandle.none;
     });
 
-    if (widget.activeTool == CanvasTool.stepMarker) {
-      final annotation = Annotation(
-        id: _uuid.v4(),
-        tool: CanvasTool.stepMarker,
-        color: widget.activeColor,
-        opacity: widget.opacity,
-        startPoint: pos,
-        stepNumber: widget.stepCounter,
-      );
-      widget.onAnnotationAdded(annotation);
-      widget.onStepCounterIncremented(widget.stepCounter + 1);
-      setState(() {
-        _selectedAnnotationId = annotation.id;
-        _isDraggingAnnotation = true;
-      });
-      return;
-    }
-
-    if (widget.activeTool == CanvasTool.text) {
-      _promptForText(pos);
-      return;
+    if (widget.activeTool == CanvasTool.stepMarker || widget.activeTool == CanvasTool.text) {
+      return; // Handled exclusively in _onTapUp to avoid duplicate double-creations
     }
 
     if (widget.activeTool == CanvasTool.pen || widget.activeTool == CanvasTool.highlight) {
@@ -848,6 +828,10 @@ class _EditorCanvasState extends State<EditorCanvas> {
       );
       widget.onAnnotationAdded(annotation);
       widget.onStepCounterIncremented(widget.stepCounter + 1);
+      setState(() {
+        _selectedAnnotationId = annotation.id;
+      });
+      widget.onSelectAnnotation?.call(annotation);
     } else if (widget.activeTool == CanvasTool.text) {
       _promptForText(pos);
     } else if (widget.activeTool == CanvasTool.select) {
