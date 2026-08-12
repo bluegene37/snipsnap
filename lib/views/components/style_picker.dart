@@ -202,6 +202,22 @@ class StylePicker extends StatelessWidget {
                       'Click any shape or canvas region to flood-fill with the selected color below.',
                       style: TextStyle(color: subTextColor, fontSize: 11),
                     ),
+                    if (onActivateEyedropper != null) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.colorize_rounded, size: 14),
+                          label: const Text('Pick Color from Screen', style: TextStyle(fontSize: 11)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.accent,
+                            side: const BorderSide(color: AppColors.accent),
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                          ),
+                          onPressed: onActivateEyedropper,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -343,8 +359,8 @@ class StylePicker extends StatelessWidget {
                     ),
                   ),
                 ),
-                // Eyedropper Color Picker Tool
-                if (onActivateEyedropper != null)
+                // Eyedropper Color Picker Tool (ONLY visible for Fill tool)
+                if (activeTool == CanvasTool.fill && onActivateEyedropper != null)
                   Tooltip(
                     message: 'Pick color from screen/image',
                     child: GestureDetector(
