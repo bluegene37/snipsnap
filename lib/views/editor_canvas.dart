@@ -119,12 +119,42 @@ class _EditorCanvasState extends State<EditorCanvas> {
     }
   }
 
+  void _updateZoomMatrix(double targetScale) {
+    if (targetScale == 1.0) {
+      _transformationController.value = Matrix4.zero();
+      _transformationController.value = Matrix4.identity();
+      return;
+    }
+
+    final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
+    double vpW = 800.0;
+    double vpH = 600.0;
+    if (renderObj is RenderBox && renderObj.hasSize) {
+      vpW = renderObj.size.width;
+      vpH = renderObj.size.height;
+    }
+
+    final cx = vpW / 2;
+    final cy = vpH / 2;
+
+    final matrix = Matrix4.identity();
+    final storage = matrix.storage;
+    storage[0] = targetScale;
+    storage[5] = targetScale;
+    storage[12] = (1.0 - targetScale) * cx;
+    storage[13] = (1.0 - targetScale) * cy;
+
+    _transformationController.value = matrix;
+  }
+
   @override
   void initState() {
     super.initState();
     _checkFileExists();
     _transformationController = TransformationController();
-    _transformationController.value = Matrix4.diagonal3Values(widget.zoomScale, widget.zoomScale, 1.0);
+    if (widget.zoomScale != 1.0) {
+      _updateZoomMatrix(widget.zoomScale);
+    }
     _ensureCropRectInitialized();
   }
 
@@ -144,7 +174,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
     if (oldWidget.zoomScale != widget.zoomScale) {
       final currentScale = _transformationController.value.getMaxScaleOnAxis();
       if ((currentScale - widget.zoomScale).abs() > 0.01) {
-        _transformationController.value = Matrix4.diagonal3Values(widget.zoomScale, widget.zoomScale, 1.0);
+        _updateZoomMatrix(widget.zoomScale);
       }
     }
 
