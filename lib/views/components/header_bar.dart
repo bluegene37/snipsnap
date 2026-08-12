@@ -126,14 +126,166 @@ class HeaderBar extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
 
-                  // Capture Actions: Snip & Open
-                  _HeaderButton(
-                    icon: Icons.crop_free_rounded,
-                    label: 'Snip',
-                    tooltip: 'Capture Screen Area (${_getShortcutText(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1')})',
-                    onPressed: onSnipInteractive,
-                    isDarkMode: isDarkMode,
-                    isAccent: true,
+                  // Pro Split Capture Button (Area Capture + Mode Dropdown)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: onSnipInteractive,
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(8),
+                            bottomLeft: Radius.circular(8),
+                          ),
+                          child: Container(
+                            height: 36,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: const BoxDecoration(
+                              color: AppColors.accent,
+                              borderRadius: BorderRadius.only(
+                                topLeft: Radius.circular(8),
+                                bottomLeft: Radius.circular(8),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.crop_free_rounded, color: Colors.white, size: 16),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  'Snip',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Container(height: 36, width: 1, color: Colors.white24),
+                      PopupMenuButton<String>(
+                        tooltip: 'Capture Modes',
+                        offset: const Offset(0, 42),
+                        color: isDarkMode ? AppColors.darkSurfaceVariant : Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: BorderSide(color: isDarkMode ? Colors.white12 : Colors.black12),
+                        ),
+                        onSelected: (val) {
+                          if (val == 'area') {
+                            onSnipInteractive();
+                          } else if (val == 'full') {
+                            onSnipFullScreen?.call();
+                          } else if (val == 'timer') {
+                            onSnipTimer?.call();
+                          }
+                        },
+                        itemBuilder: (ctx) => [
+                          PopupMenuItem(
+                            value: 'area',
+                            child: Row(
+                              children: [
+                                const Icon(Icons.crop_free_rounded, color: AppColors.accent, size: 18),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Capture Area',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13,
+                                          color: isDarkMode ? Colors.white : Colors.black87,
+                                        ),
+                                      ),
+                                      Text(
+                                        _getShortcutText(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1'),
+                                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'full',
+                            child: Row(
+                              children: [
+                                const Icon(Icons.fullscreen_rounded, color: AppColors.accent, size: 18),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Capture Full Screen',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13,
+                                          color: isDarkMode ? Colors.white : Colors.black87,
+                                        ),
+                                      ),
+                                      Text(
+                                        _getShortcutText(AppShortcutAction.fullScreenSnip, 'Cmd+Shift+2'),
+                                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'timer',
+                            child: Row(
+                              children: [
+                                const Icon(Icons.timer_rounded, color: AppColors.accent, size: 18),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Timed Capture (3s)',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13,
+                                          color: isDarkMode ? Colors.white : Colors.black87,
+                                        ),
+                                      ),
+                                      Text(
+                                        _getShortcutText(AppShortcutAction.timerSnip, 'Cmd+Shift+5'),
+                                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        child: Container(
+                          height: 36,
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          decoration: const BoxDecoration(
+                            color: AppColors.accent,
+                            borderRadius: BorderRadius.only(
+                              topRight: Radius.circular(8),
+                              bottomRight: Radius.circular(8),
+                            ),
+                          ),
+                          child: const Icon(Icons.arrow_drop_down_rounded, color: Colors.white, size: 20),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(width: 6),
                   _HeaderButton(
@@ -284,7 +436,6 @@ class _HeaderButton extends StatelessWidget {
   final VoidCallback onPressed;
   final String tooltip;
   final bool isDarkMode;
-  final bool isAccent;
 
   const _HeaderButton({
     required this.icon,
@@ -292,15 +443,12 @@ class _HeaderButton extends StatelessWidget {
     required this.onPressed,
     required this.tooltip,
     this.isDarkMode = true,
-    this.isAccent = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = isAccent
-        ? AppColors.accent
-        : (isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant);
-    final fgColor = isAccent ? Colors.white : (isDarkMode ? Colors.white : Colors.black87);
+    final bgColor = isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant;
+    final fgColor = isDarkMode ? Colors.white : Colors.black87;
 
     return Tooltip(
       message: tooltip,
@@ -308,7 +456,7 @@ class _HeaderButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: bgColor,
           foregroundColor: fgColor,
-          elevation: isAccent ? 2 : 0,
+          elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
@@ -317,9 +465,9 @@ class _HeaderButton extends StatelessWidget {
         icon: Icon(icon, size: 15),
         label: Text(
           label,
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 12,
-            fontWeight: isAccent ? FontWeight.bold : FontWeight.w600,
+            fontWeight: FontWeight.w600,
           ),
         ),
         onPressed: onPressed,

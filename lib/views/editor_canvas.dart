@@ -976,14 +976,49 @@ class _EditorCanvasState extends State<EditorCanvas> {
               return KeyEventResult.handled;
             }
           } else if (event.logicalKey == LogicalKeyboardKey.escape) {
-            if (_selectedAnnotationId != null || _activeCropRect != null) {
-              setState(() {
-                _selectedAnnotationId = null;
-                _activeCropRect = null;
-              });
-              widget.onToolSelected?.call(CanvasTool.select);
-              return KeyEventResult.handled;
-            }
+            setState(() {
+              _selectedAnnotationId = null;
+              _activeCropRect = null;
+            });
+            widget.onToolSelected?.call(CanvasTool.select);
+            return KeyEventResult.handled;
+          }
+
+          // Single-key tool shortcuts (Shottr / Figma / Photoshop standard)
+          final key = event.logicalKey;
+          if (key == LogicalKeyboardKey.keyV || key == LogicalKeyboardKey.keyS) {
+            widget.onToolSelected?.call(CanvasTool.select);
+            return KeyEventResult.handled;
+          } else if (key == LogicalKeyboardKey.keyA) {
+            widget.onToolSelected?.call(CanvasTool.arrow);
+            return KeyEventResult.handled;
+          } else if (key == LogicalKeyboardKey.keyR) {
+            widget.onToolSelected?.call(CanvasTool.rectangle);
+            return KeyEventResult.handled;
+          } else if (key == LogicalKeyboardKey.keyO) {
+            widget.onToolSelected?.call(CanvasTool.oval);
+            return KeyEventResult.handled;
+          } else if (key == LogicalKeyboardKey.keyP) {
+            widget.onToolSelected?.call(CanvasTool.pen);
+            return KeyEventResult.handled;
+          } else if (key == LogicalKeyboardKey.keyH) {
+            widget.onToolSelected?.call(CanvasTool.highlight);
+            return KeyEventResult.handled;
+          } else if (key == LogicalKeyboardKey.keyT) {
+            widget.onToolSelected?.call(CanvasTool.text);
+            return KeyEventResult.handled;
+          } else if (key == LogicalKeyboardKey.keyB) {
+            widget.onToolSelected?.call(CanvasTool.blur);
+            return KeyEventResult.handled;
+          } else if (key == LogicalKeyboardKey.keyC) {
+            widget.onToolSelected?.call(CanvasTool.crop);
+            return KeyEventResult.handled;
+          } else if (key == LogicalKeyboardKey.keyN || key == LogicalKeyboardKey.digit1) {
+            widget.onToolSelected?.call(CanvasTool.stepMarker);
+            return KeyEventResult.handled;
+          } else if (key == LogicalKeyboardKey.keyM) {
+            widget.onToolSelected?.call(CanvasTool.ruler);
+            return KeyEventResult.handled;
           }
         }
         return KeyEventResult.ignored;
