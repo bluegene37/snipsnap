@@ -191,13 +191,18 @@ class _EditorCanvasState extends State<EditorCanvas> {
     }
 
     if (oldWidget.activeTool != widget.activeTool) {
-      setState(() {
-        _selectedAnnotationId = null;
-        if (widget.activeTool != CanvasTool.crop) {
-          _activeCropRect = null;
-        }
-      });
-      widget.onSelectAnnotation?.call(null);
+      _selectedAnnotationId = null;
+      if (widget.activeTool != CanvasTool.crop) {
+        _activeCropRect = null;
+      }
+      final callback = widget.onSelectAnnotation;
+      if (callback != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            callback(null);
+          }
+        });
+      }
 
       if (widget.activeTool == CanvasTool.crop) {
         _ensureCropRectInitialized();

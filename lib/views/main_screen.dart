@@ -67,8 +67,20 @@ class _MainScreenState extends State<MainScreen> {
   bool _isCapturing = false;
   bool _isDarkMode = true;
 
-  ToolProperties get _currentToolProperties =>
-      _toolPropertiesMap[_activeTool] ?? const ToolProperties(activeColor: AppColors.accent);
+  String? _selectedAnnotationId;
+
+  Annotation? get _selectedAnnotation {
+    if (_selectedAnnotationId == null) return null;
+    for (final a in _annotations) {
+      if (a.id == _selectedAnnotationId) return a;
+    }
+    return null;
+  }
+
+  ToolProperties get _currentToolProperties {
+    final targetTool = _selectedAnnotation?.tool ?? _activeTool;
+    return _toolPropertiesMap[targetTool] ?? const ToolProperties(activeColor: AppColors.accent);
+  }
 
   void _updateActiveToolProperty({
     Color? activeColor,
@@ -83,8 +95,11 @@ class _MainScreenState extends State<MainScreen> {
     bool? isDoubleArrow,
   }) {
     setState(() {
-      final currentProps = _currentToolProperties;
-      _toolPropertiesMap[_activeTool] = currentProps.copyWith(
+      final selectedAnn = _selectedAnnotation;
+      final targetTool = selectedAnn?.tool ?? _activeTool;
+      final currentProps = _toolPropertiesMap[targetTool] ?? const ToolProperties(activeColor: AppColors.accent);
+
+      _toolPropertiesMap[targetTool] = currentProps.copyWith(
         activeColor: activeColor,
         strokeWidth: strokeWidth,
         opacity: opacity,
@@ -96,6 +111,26 @@ class _MainScreenState extends State<MainScreen> {
         blurType: blurType,
         isDoubleArrow: isDoubleArrow,
       );
+
+      // If an annotation is selected, mutate its properties directly in _annotations!
+      if (_selectedAnnotationId != null) {
+        final idx = _annotations.indexWhere((a) => a.id == _selectedAnnotationId);
+        if (idx != -1) {
+          final oldAnn = _annotations[idx];
+          _annotations[idx] = oldAnn.copyWith(
+            color: activeColor ?? oldAnn.color,
+            strokeWidth: strokeWidth ?? oldAnn.strokeWidth,
+            opacity: opacity ?? oldAnn.opacity,
+            fontSize: fontSize ?? oldAnn.fontSize,
+            fill: isFilled ?? oldAnn.fill,
+            backgroundColor: textBackgroundColor ?? oldAnn.backgroundColor,
+            borderRadius: borderRadius ?? oldAnn.borderRadius,
+            lineStyle: lineStyle ?? oldAnn.lineStyle,
+            blurType: blurType ?? oldAnn.blurType,
+            isDoubleArrow: isDoubleArrow ?? oldAnn.isDoubleArrow,
+          );
+        }
+      }
     });
   }
 
@@ -727,6 +762,12 @@ class _MainScreenState extends State<MainScreen> {
                             activeTool: _activeTool,
                             onToolSelected: (tool) => setState(() => _activeTool = tool),
                             onSelectAnnotation: (ann) {
+                              setState(() {
+                                _selectedAnnotationId = ann?.id;
+                                if (ann != null) {
+                                  _isPropertiesOpen = true;
+                                }
+                              });
                               if (ann != null) {
                                 _updateActiveToolProperty(
                                   activeColor: ann.color,
@@ -829,6 +870,45 @@ class _MainScreenState extends State<MainScreen> {
                                   onActivateEyedropper: () => setState(() => _activeTool = CanvasTool.colorPicker),
                                   onFlattenCanvas: _annotations.isNotEmpty ? _handleFlattenCanvas : null,
                                   onCloseDrawer: () => setState(() => _isPropertiesOpen = false),
+                                  selectedAnnotation: _selectedAnnotation,
+                                  onDeleteSelected: () {
+                                    if (_selectedAnnotationId != null) {
+                                      _pushUndoState();
+                                      setState(() {
+                                        _annotations.removeWhere((a) => a.id == _selectedAnnotationId);
+                                        _selectedAnnotationId = null;
+                                      });
+                                    }
+                                  },
+                                  onBringToFront: () {
+                                    if (_selectedAnnotationId != null) {
+                                      _pushUndoState();
+                                      setState(() {
+                                        final idx = _annotations.indexWhere((a) => a.id == _selectedAnnotationId);
+                                        if (idx != -1 && idx < _annotations.length - 1) {
+                                          final item = _annotations.removeAt(idx);
+                                          _annotations.add(item);
+                                        }
+                                      });
+                                    }
+                                  },
+                                  onSendToBack: () {
+                                    if (_selectedAnnotationId != null) {
+                                      _pushUndoState();
+                                      setState(() {
+                                        final idx = _annotations.indexWhere((a) => a.id == _selectedAnnotationId);
+                                        if (idx > 0) {
+                                          final item = _annotations.removeAt(idx);
+                                          _annotations.insert(0, item);
+                                        }
+                                      });
+                                    }
+                                  },
+                                  onDeselect: () {
+                                    setState(() {
+                                      _selectedAnnotationId = null;
+                                    });
+                                  },
                                 ),
                               ),
                             ),

@@ -60,7 +60,7 @@ void main() {
   });
 
   test('CanvasTool enum and stroke width presets verification', () {
-    expect(CanvasTool.values.length, 12);
+    expect(CanvasTool.values.length, 14);
     expect(CanvasTool.values, contains(CanvasTool.pen));
     expect(CanvasTool.values, contains(CanvasTool.line));
     expect(CanvasTool.values, contains(CanvasTool.blur));

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import '../../models/annotation.dart';
 import '../../utils/constants.dart';
 
 class StylePicker extends StatelessWidget {
@@ -32,6 +33,11 @@ class StylePicker extends StatelessWidget {
   final ValueChanged<BlurType>? onBlurTypeChanged;
   final bool isDoubleArrow;
   final ValueChanged<bool>? onDoubleArrowChanged;
+  final Annotation? selectedAnnotation;
+  final VoidCallback? onDeleteSelected;
+  final VoidCallback? onBringToFront;
+  final VoidCallback? onSendToBack;
+  final VoidCallback? onDeselect;
 
   const StylePicker({
     super.key,
@@ -64,6 +70,11 @@ class StylePicker extends StatelessWidget {
     this.onBlurTypeChanged,
     this.isDoubleArrow = false,
     this.onDoubleArrowChanged,
+    this.selectedAnnotation,
+    this.onDeleteSelected,
+    this.onBringToFront,
+    this.onSendToBack,
+    this.onDeselect,
   });
 
   void _showColorPickerDialog(BuildContext context) {
@@ -123,6 +134,8 @@ class StylePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final effectiveTool = selectedAnnotation?.tool ?? activeTool;
+
     final showStroke = [
       CanvasTool.pen,
       CanvasTool.arrow,
@@ -130,10 +143,10 @@ class StylePicker extends StatelessWidget {
       CanvasTool.rectangle,
       CanvasTool.oval,
       CanvasTool.highlight
-    ].contains(activeTool);
+    ].contains(effectiveTool);
 
-    final showFont = activeTool == CanvasTool.text || activeTool == CanvasTool.stepMarker;
-    final showFill = [CanvasTool.rectangle, CanvasTool.oval, CanvasTool.text].contains(activeTool);
+    final showFont = effectiveTool == CanvasTool.text || effectiveTool == CanvasTool.stepMarker;
+    final showFill = [CanvasTool.rectangle, CanvasTool.oval, CanvasTool.text].contains(effectiveTool);
 
     final bgColor = isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
     final textColor = isDarkMode ? Colors.white : Colors.black87;
@@ -166,7 +179,7 @@ class StylePicker extends StatelessWidget {
                     const Icon(Icons.tune_rounded, color: AppColors.accent, size: 18),
                     const SizedBox(width: 8),
                     Text(
-                      'Tool Properties',
+                      selectedAnnotation != null ? 'Item Properties' : 'Tool Properties',
                       style: TextStyle(
                         color: textColor,
                         fontSize: 15,
@@ -188,6 +201,81 @@ class StylePicker extends StatelessWidget {
             const SizedBox(height: 12),
             Divider(color: borderColor, height: 1),
             const SizedBox(height: 16),
+
+            // Selected Item Info & Layer Actions Card
+            if (selectedAnnotation != null) ...[
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.accent.withValues(alpha: 0.4)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.check_circle_rounded, color: AppColors.accent, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              'SELECTED: ${selectedAnnotation!.tool.name.toUpperCase()}',
+                              style: const TextStyle(
+                                color: AppColors.accent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (onDeselect != null)
+                          GestureDetector(
+                            onTap: onDeselect,
+                            child: Icon(Icons.close_rounded, size: 16, color: subTextColor),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        if (onBringToFront != null)
+                          IconButton(
+                            icon: const Icon(Icons.flip_to_front_rounded, size: 18),
+                            tooltip: 'Bring to Front',
+                            color: textColor,
+                            onPressed: onBringToFront,
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.all(6),
+                          ),
+                        if (onSendToBack != null)
+                          IconButton(
+                            icon: const Icon(Icons.flip_to_back_rounded, size: 18),
+                            tooltip: 'Send to Back',
+                            color: textColor,
+                            onPressed: onSendToBack,
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.all(6),
+                          ),
+                        if (onDeleteSelected != null)
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
+                            tooltip: 'Delete Item',
+                            onPressed: onDeleteSelected,
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.all(6),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // Dedicated Fill Tool Info Card
             if (activeTool == CanvasTool.fill) ...[
@@ -528,7 +616,7 @@ class StylePicker extends StatelessWidget {
               ),
             ),
             // Corner Radius (for Rectangle)
-            if (activeTool == CanvasTool.rectangle) ...[
+            if (effectiveTool == CanvasTool.rectangle) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -610,7 +698,7 @@ class StylePicker extends StatelessWidget {
             ],
 
             // Line Style (Solid vs Dashed)
-            if (activeTool == CanvasTool.line || activeTool == CanvasTool.arrow) ...[
+            if (effectiveTool == CanvasTool.line || effectiveTool == CanvasTool.arrow) ...[
               Text(
                 'LINE STYLE',
                 style: TextStyle(
@@ -652,7 +740,7 @@ class StylePicker extends StatelessWidget {
             ],
 
             // Double Arrowhead Switch
-            if (activeTool == CanvasTool.arrow) ...[
+            if (effectiveTool == CanvasTool.arrow) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -676,7 +764,7 @@ class StylePicker extends StatelessWidget {
             ],
 
             // Blur Mode (Gaussian Blur vs Pixelate Mosaic)
-            if (activeTool == CanvasTool.blur) ...[
+            if (effectiveTool == CanvasTool.blur) ...[
               Text(
                 'BLUR MODE',
                 style: TextStyle(
@@ -768,7 +856,7 @@ class StylePicker extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    activeTool == CanvasTool.text ? 'TEXT BACKGROUND BOX' : 'SHAPE FILL',
+                    effectiveTool == CanvasTool.text ? 'TEXT BACKGROUND BOX' : 'SHAPE FILL',
                     style: TextStyle(
                       color: subTextColor,
                       fontSize: 11,
@@ -782,15 +870,16 @@ class StylePicker extends StatelessWidget {
                     onChanged: (val) {
                       onFillChanged(val);
                       if (!val && onTextBackgroundColorChanged != null) {
-                        onTextBackgroundColorChanged!(null);
+                        onTextBackgroundColorChanged!(Colors.transparent);
                       }
                     },
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
 
-              // Text Background Color Palette Swatches (when activeTool is Text)
-              if (activeTool == CanvasTool.text) ...[
+              // Text Background Color Palette Swatches (when effectiveTool is Text)
+              if (effectiveTool == CanvasTool.text) ...[
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
