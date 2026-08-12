@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
@@ -120,12 +121,6 @@ class _EditorCanvasState extends State<EditorCanvas> {
   }
 
   void _updateZoomMatrix(double targetScale) {
-    if (targetScale == 1.0) {
-      _transformationController.value = Matrix4.zero();
-      _transformationController.value = Matrix4.identity();
-      return;
-    }
-
     final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
     double vpW = 800.0;
     double vpH = 600.0;
@@ -138,11 +133,13 @@ class _EditorCanvasState extends State<EditorCanvas> {
     final cy = vpH / 2;
 
     final matrix = Matrix4.identity();
-    final storage = matrix.storage;
-    storage[0] = targetScale;
-    storage[5] = targetScale;
-    storage[12] = (1.0 - targetScale) * cx;
-    storage[13] = (1.0 - targetScale) * cy;
+    if ((targetScale - 1.0).abs() > 0.001) {
+      final storage = matrix.storage;
+      storage[0] = targetScale;
+      storage[5] = targetScale;
+      storage[12] = (1.0 - targetScale) * cx;
+      storage[13] = (1.0 - targetScale) * cy;
+    }
 
     _transformationController.value = matrix;
   }
@@ -164,6 +161,8 @@ class _EditorCanvasState extends State<EditorCanvas> {
     super.dispose();
   }
 
+  bool _isInteractiveZooming = false;
+
   @override
   void didUpdateWidget(covariant EditorCanvas oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -171,11 +170,8 @@ class _EditorCanvasState extends State<EditorCanvas> {
       _checkFileExists();
     }
 
-    if (oldWidget.zoomScale != widget.zoomScale) {
-      final currentScale = _transformationController.value.getMaxScaleOnAxis();
-      if ((currentScale - widget.zoomScale).abs() > 0.01) {
-        _updateZoomMatrix(widget.zoomScale);
-      }
+    if (oldWidget.zoomScale != widget.zoomScale && !_isInteractiveZooming) {
+      _updateZoomMatrix(widget.zoomScale);
     }
 
     // Live update selected annotation properties when controls change
@@ -993,29 +989,49 @@ class _EditorCanvasState extends State<EditorCanvas> {
         }
         return KeyEventResult.ignored;
       },
-      child: Stack(
-        children: [
-          // 1. STEADY Full-Viewport Checkerboard Background (Never shrinks or leaves black gaps on zoom out!)
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _SteadyCheckerboardPainter(isDarkMode: widget.isDarkMode),
+      child: ClipRect(
+        child: Stack(
+          children: [
+            // 1. STEADY Full-Viewport Checkerboard Background (Never shrinks or leaves black gaps on zoom out!)
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _SteadyCheckerboardPainter(isDarkMode: widget.isDarkMode),
+              ),
             ),
-          ),
 
-          // 2. Interactive Zoom & Editing Layer
-          SizedBox.expand(
-            child: InteractiveViewer(
-              transformationController: _transformationController,
-              maxScale: 4.0,
-              minScale: 0.2,
-              panEnabled: false,
-              clipBehavior: Clip.none,
-              onInteractionUpdate: (details) {
-                final scale = _transformationController.value.getMaxScaleOnAxis();
-                if ((scale - widget.zoomScale).abs() > 0.02) {
-                  widget.onZoomScaleChanged?.call(scale);
-                }
-              },
+            // 2. Interactive Zoom & Editing Layer with 2-Finger Trackpad & Scroll Wheel Support
+            SizedBox.expand(
+              child: Listener(
+                onPointerSignal: (pointerSignal) {
+                  if (pointerSignal is PointerScrollEvent) {
+                    final dy = pointerSignal.scrollDelta.dy;
+                    if (dy != 0) {
+                      final zoomDelta = dy > 0 ? -0.05 : 0.05;
+                      final newScale = (widget.zoomScale + zoomDelta).clamp(0.2, 4.0);
+                      widget.onZoomScaleChanged?.call(newScale);
+                    }
+                  }
+                },
+                child: InteractiveViewer(
+                  transformationController: _transformationController,
+                  maxScale: 4.0,
+                  minScale: 0.2,
+                  panEnabled: false,
+                  clipBehavior: Clip.hardEdge,
+                onInteractionStart: (details) {
+                  _isInteractiveZooming = true;
+                },
+                onInteractionUpdate: (details) {
+                  final scale = _transformationController.value.getMaxScaleOnAxis();
+                  if ((scale - widget.zoomScale).abs() > 0.02) {
+                    widget.onZoomScaleChanged?.call(scale);
+                  }
+                },
+                onInteractionEnd: (details) {
+                  _isInteractiveZooming = false;
+                  final finalScale = _transformationController.value.getMaxScaleOnAxis();
+                  widget.onZoomScaleChanged?.call(finalScale);
+                },
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 0),
                 child: RepaintBoundary(
@@ -1185,7 +1201,9 @@ class _EditorCanvasState extends State<EditorCanvas> {
         ),
       ),
     ),
-  ],
+  ),
+],
+),
 ),
 );
   }
