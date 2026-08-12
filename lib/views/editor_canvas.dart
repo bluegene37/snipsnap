@@ -963,36 +963,43 @@ class _EditorCanvasState extends State<EditorCanvas> {
         }
         return KeyEventResult.ignored;
       },
-      child: Center(
-        child: InteractiveViewer(
-          transformationController: _transformationController,
-          maxScale: 4.0,
-          minScale: 0.5,
-          panEnabled: false,
-          clipBehavior: Clip.none,
-          onInteractionUpdate: (details) {
-            final scale = _transformationController.value.getMaxScaleOnAxis();
-            if ((scale - widget.zoomScale).abs() > 0.02) {
-              widget.onZoomScaleChanged?.call(scale);
-            }
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(100),
-            child: RepaintBoundary(
-              key: widget.repaintBoundaryKey,
-              child: Stack(
-                alignment: Alignment.center,
-                clipBehavior: Clip.none,
-                children: [
-                  // Background Screenshot Image with Checkerboard Pattern for transparent padding
-                  CustomPaint(
-                    painter: _CheckerboardPainter(isDarkMode: widget.isDarkMode, cropRect: _activeCropRect),
-                    child: Image.file(
-                      File(widget.imagePath!),
-                      key: ValueKey('${widget.imagePath!}_${File(widget.imagePath!).existsSync() ? File(widget.imagePath!).lastModifiedSync().millisecondsSinceEpoch : 0}'),
-                      fit: BoxFit.contain,
-                    ),
-                  ),
+      child: Stack(
+        children: [
+          // 1. STEADY Full-Viewport Checkerboard Background (Never shrinks or leaves black gaps on zoom out!)
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _SteadyCheckerboardPainter(isDarkMode: widget.isDarkMode),
+            ),
+          ),
+
+          // 2. Interactive Zoom & Editing Layer
+          SizedBox.expand(
+            child: InteractiveViewer(
+              transformationController: _transformationController,
+              maxScale: 4.0,
+              minScale: 0.2,
+              panEnabled: false,
+              clipBehavior: Clip.none,
+              onInteractionUpdate: (details) {
+                final scale = _transformationController.value.getMaxScaleOnAxis();
+                if ((scale - widget.zoomScale).abs() > 0.02) {
+                  widget.onZoomScaleChanged?.call(scale);
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 0),
+                child: RepaintBoundary(
+                  key: widget.repaintBoundaryKey,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    clipBehavior: Clip.none,
+                    children: [
+                      // Base Screenshot Image
+                      Image.file(
+                        File(widget.imagePath!),
+                        key: ValueKey('${widget.imagePath!}_${File(widget.imagePath!).existsSync() ? File(widget.imagePath!).lastModifiedSync().millisecondsSinceEpoch : 0}'),
+                        fit: BoxFit.contain,
+                      ),
 
                 // Real-time BackdropFilter Blur Overlay for Blur Annotations
                 ...[...widget.annotations, ?_currentAnnotation]
@@ -1148,39 +1155,35 @@ class _EditorCanvasState extends State<EditorCanvas> {
         ),
       ),
     ),
-  );
+  ],
+),
+);
   }
 }
 
-class _CheckerboardPainter extends CustomPainter {
+class _SteadyCheckerboardPainter extends CustomPainter {
   final bool isDarkMode;
-  final Rect? cropRect;
 
-  _CheckerboardPainter({required this.isDarkMode, this.cropRect});
+  _SteadyCheckerboardPainter({required this.isDarkMode});
 
   @override
   void paint(Canvas canvas, Size size) {
-    const squareSize = 12.0;
-    final color1 = isDarkMode ? const Color(0xFF1E1C1A) : const Color(0xFFE8E2D9);
-    final color2 = isDarkMode ? const Color(0xFF2B2825) : const Color(0xFFF5EFE6);
+    const squareSize = 14.0;
+    final color1 = isDarkMode ? const Color(0xFF1B1917) : const Color(0xFFE8E2D9);
+    final color2 = isDarkMode ? const Color(0xFF262320) : const Color(0xFFF5EFE6);
 
     final paint1 = Paint()..color = color1;
     final paint2 = Paint()..color = color2;
 
-    Rect drawBounds = Rect.fromLTWH(0, 0, size.width, size.height);
-    if (cropRect != null) {
-      drawBounds = drawBounds.expandToInclude(cropRect!).inflate(100.0);
-    }
-
     int row = 0;
-    for (double y = drawBounds.top; y < drawBounds.bottom; y += squareSize) {
+    for (double y = 0; y < size.height; y += squareSize) {
       int col = 0;
-      for (double x = drawBounds.left; x < drawBounds.right; x += squareSize) {
+      for (double x = 0; x < size.width; x += squareSize) {
         final rect = Rect.fromLTWH(
           x,
           y,
-          math.min(squareSize, drawBounds.right - x),
-          math.min(squareSize, drawBounds.bottom - y),
+          math.min(squareSize, size.width - x),
+          math.min(squareSize, size.height - y),
         );
         canvas.drawRect(rect, ((row + col) % 2 == 0) ? paint1 : paint2);
         col++;
@@ -1190,8 +1193,8 @@ class _CheckerboardPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _CheckerboardPainter oldDelegate) {
-    return oldDelegate.isDarkMode != isDarkMode || oldDelegate.cropRect != cropRect;
+  bool shouldRepaint(covariant _SteadyCheckerboardPainter oldDelegate) {
+    return oldDelegate.isDarkMode != isDarkMode;
   }
 }
 

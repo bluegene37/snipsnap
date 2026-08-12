@@ -774,6 +774,8 @@ class _MainScreenState extends State<MainScreen> {
                   items: _captures,
                   activeItem: _activeCapture,
                   isDarkMode: _isDarkMode,
+                  zoomScale: _zoomScale,
+                  onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
                   onSelectItem: (item) {
                     _syncCurrentCaptureAnnotations();
                     setState(() {
