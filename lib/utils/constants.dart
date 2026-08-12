@@ -11,6 +11,7 @@ enum CanvasTool {
   stepMarker,
   text,
   blur,
+  ruler,
   crop,
 }
 
@@ -47,6 +48,35 @@ class AppColors {
     Color(0xFFFFFFFF), // Pure White
     Color(0xFF000000), // Pure Black
   ];
+
+  // Shottr & CleanShot Style Canvas Framing Background Gradients
+  static const List<Gradient> framingGradients = [
+    LinearGradient(
+      colors: [Color(0xFF8B5CF6), Color(0xFFEC4899)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    ),
+    LinearGradient(
+      colors: [Color(0xFF0EA5E9), Color(0xFF6366F1)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    ),
+    LinearGradient(
+      colors: [Color(0xFFF59E0B), Color(0xFFEF4444)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    ),
+    LinearGradient(
+      colors: [Color(0xFF10B981), Color(0xFF0EA5E9)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    ),
+    LinearGradient(
+      colors: [Color(0xFF1E1B2E), Color(0xFF0F0D17)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    ),
+  ];
 }
 
 class AppDefaults {
@@ -60,4 +90,5 @@ class AppDefaults {
   static const double strokeWidthThick = 8.0;
   static const double strokeWidthHeavy = 14.0;
 }
+
 

@@ -12,6 +12,9 @@ class GallerySidebar extends StatelessWidget {
   final VoidCallback onClose;
   final bool isDarkMode;
 
+  final double zoomScale;
+  final ValueChanged<double>? onZoomScaleChanged;
+
   const GallerySidebar({
     super.key,
     required this.items,
@@ -20,6 +23,8 @@ class GallerySidebar extends StatelessWidget {
     required this.onDeleteItem,
     required this.onClose,
     this.isDarkMode = true,
+    this.zoomScale = 1.0,
+    this.onZoomScaleChanged,
   });
 
   String _formatTime(DateTime date) {
@@ -67,7 +72,89 @@ class GallerySidebar extends StatelessWidget {
 
                 const Spacer(),
 
-                // Middle: Resolution / Info Indicator (Only shown when width & height > 0)
+                // Middle: Zoom Slider Controls in the Sub-Header Bar of Screenshot History Tray
+                if (onZoomScaleChanged != null) ...[
+                  IconButton(
+                    icon: const Icon(Icons.remove_rounded, size: 14),
+                    color: zoomScale > 0.2 ? textColor : subTextColor,
+                    tooltip: 'Zoom Out',
+                    onPressed: zoomScale > 0.2
+                        ? () => onZoomScaleChanged!((zoomScale - 0.25).clamp(0.2, 4.0))
+                        : null,
+                    constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                    padding: EdgeInsets.zero,
+                  ),
+                  SizedBox(
+                    width: 240,
+                    child: SliderTheme(
+                      data: SliderThemeData(
+                        activeTrackColor: AppColors.accent,
+                        inactiveTrackColor: isDarkMode ? Colors.white24 : Colors.black12,
+                        thumbColor: AppColors.accent,
+                        trackHeight: 3,
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                      ),
+                      child: Slider(
+                        value: zoomScale.clamp(0.2, 4.0),
+                        min: 0.2,
+                        max: 4.0,
+                        onChanged: onZoomScaleChanged,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add_rounded, size: 14),
+                    color: zoomScale < 4.0 ? textColor : subTextColor,
+                    tooltip: 'Zoom In',
+                    onPressed: zoomScale < 4.0
+                        ? () => onZoomScaleChanged!((zoomScale + 0.25).clamp(0.2, 4.0))
+                        : null,
+                    constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                    padding: EdgeInsets.zero,
+                  ),
+                  const SizedBox(width: 4),
+                  Tooltip(
+                    message: 'Reset Zoom to 100%',
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () => onZoomScaleChanged!(1.0),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: zoomScale == 1.0
+                              ? AppColors.accent.withValues(alpha: 0.2)
+                              : (isDarkMode ? Colors.white10 : Colors.black12),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: zoomScale == 1.0 ? AppColors.accent : borderColor,
+                          ),
+                        ),
+                        child: Text(
+                          '${(zoomScale * 100).round()}%',
+                          style: TextStyle(
+                            color: zoomScale == 1.0 ? AppColors.accent : textColor,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  IconButton(
+                    icon: const Icon(Icons.center_focus_strong_rounded, size: 14),
+                    color: zoomScale == 1.0 ? AppColors.accent : subTextColor,
+                    tooltip: 'Reset Zoom (100%)',
+                    onPressed: () => onZoomScaleChanged!(1.0),
+                    constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                    padding: EdgeInsets.zero,
+                  ),
+                ],
+
+                const Spacer(),
+
+                // Right: Resolution & Close Button
                 if (activeItem != null && activeItem!.width > 0 && activeItem!.height > 0)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -80,8 +167,7 @@ class GallerySidebar extends StatelessWidget {
                       style: const TextStyle(color: Colors.white54, fontSize: 11, fontFamily: 'monospace'),
                     ),
                   ),
-
-                const Spacer(),
+                const SizedBox(width: 8),
 
                 // Right: Controls & Hide Button
 

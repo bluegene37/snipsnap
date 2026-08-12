@@ -218,76 +218,7 @@ class HeaderBar extends StatelessWidget {
               // Right: Slide to Zoom Control Bar + Preferences
               Row(
                 children: [
-                  // Slide to Zoom & Percentage Display (Integrated into bar with no outer border)
-                  if (onZoomScaleChanged != null) ...[
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.remove_rounded, size: 16),
-                          color: zoomScale > 0.5 ? iconColor : (isDarkMode ? Colors.white24 : Colors.black26),
-                          tooltip: 'Zoom Out',
-                          onPressed: zoomScale > 0.5 ? () => onZoomScaleChanged!((zoomScale - 0.25).clamp(0.5, 4.0)) : null,
-                          constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-                          padding: EdgeInsets.zero,
-                        ),
-                        SizedBox(
-                          width: 160,
-                          child: SliderTheme(
-                            data: SliderThemeData(
-                              activeTrackColor: AppColors.accent,
-                              inactiveTrackColor: isDarkMode ? Colors.white24 : Colors.black12,
-                              thumbColor: AppColors.accent,
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                            ),
-                            child: Slider(
-                              value: zoomScale.clamp(0.5, 4.0),
-                              min: 0.5,
-                              max: 4.0,
-                              onChanged: onZoomScaleChanged,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.add_rounded, size: 16),
-                          color: zoomScale < 4.0 ? iconColor : (isDarkMode ? Colors.white24 : Colors.black26),
-                          tooltip: 'Zoom In',
-                          onPressed: zoomScale < 4.0 ? () => onZoomScaleChanged!((zoomScale + 0.25).clamp(0.5, 4.0)) : null,
-                          constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-                          padding: EdgeInsets.zero,
-                        ),
-                        const SizedBox(width: 2),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: borderColor),
-                          ),
-                          child: Text(
-                            '${(zoomScale * 100).round()}%',
-                            style: TextStyle(
-                              color: isDarkMode ? Colors.white : Colors.black87,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 2),
-                        IconButton(
-                          icon: const Icon(Icons.center_focus_strong_rounded, size: 16),
-                          color: zoomScale == 1.0 ? AppColors.accent : iconColor,
-                          tooltip: 'Reset Zoom (100%)',
-                          onPressed: () => onZoomScaleChanged!(1.0),
-                          constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-                          padding: EdgeInsets.zero,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(width: 12),
-                  ],
+
 
                   // Hide/Show Right Tool Properties Drawer
                   if (onToggleProperties != null) ...[

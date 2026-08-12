@@ -37,6 +37,7 @@ class ToolSidebar extends StatelessWidget {
     ToolSidebarItem(CanvasTool.text, Icons.text_fields_rounded, 'Text', 'Add text annotation label'),
     ToolSidebarItem(CanvasTool.stepMarker, Icons.pin_drop_rounded, 'Step', 'Numbered step pins (1, 2, 3...)'),
     ToolSidebarItem(CanvasTool.blur, Icons.blur_on_rounded, 'Blur', 'Obfuscate / Blur sensitive area'),
+    ToolSidebarItem(CanvasTool.ruler, Icons.straighten_rounded, 'Ruler', 'Measure pixel distance'),
     ToolSidebarItem(CanvasTool.crop, Icons.crop_rounded, 'Crop', 'Crop canvas & image area'),
   ];
 

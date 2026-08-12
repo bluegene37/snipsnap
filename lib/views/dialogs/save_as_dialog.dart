@@ -10,12 +10,20 @@ class SaveOptions {
   final SaveFormat format;
   final int quality;
   final String? customFolderPath;
+  final double framingPadding;
+  final double cornerRadius;
+  final double shadowBlur;
+  final int? gradientIndex;
 
   SaveOptions({
     required this.fileName,
     required this.format,
     this.quality = 90,
     this.customFolderPath,
+    this.framingPadding = 0.0,
+    this.cornerRadius = 0.0,
+    this.shadowBlur = 0.0,
+    this.gradientIndex,
   });
 }
 
@@ -42,6 +50,10 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
   String _selectedLocationKey = 'downloads';
   String? _customFolderPath;
   String _customFolderDisplay = '';
+  final double _framingPadding = 0.0;
+  final double _cornerRadius = 0.0;
+  final bool _enableShadow = false;
+  final int _selectedGradientIndex = 0;
 
   @override
   void initState() {
@@ -332,6 +344,10 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                         customFolderPath: _selectedLocationKey == 'custom'
                             ? _customFolderPath
                             : _selectedLocationKey,
+                        framingPadding: _framingPadding,
+                        cornerRadius: _cornerRadius,
+                        shadowBlur: _enableShadow ? 24.0 : 0.0,
+                        gradientIndex: _framingPadding > 0 ? _selectedGradientIndex : null,
                       ));
                     },
                     child: const Text('Save', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),

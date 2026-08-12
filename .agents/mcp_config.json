@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "dart-mcp-server": {
+      "command": "dart",
+      "args": [
+        "pub",
+        "global",
+        "run",
+        "dart_mcp_server"
+      ],
+      "env": {
+        "DART_SDK": ""
+      }
+    }
+  }
+}
