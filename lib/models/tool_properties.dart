@@ -56,6 +56,8 @@ class ToolProperties {
       CanvasTool.highlight: const ToolProperties(activeColor: Color(0x99FFEB3B), strokeWidth: 22.0, opacity: 0.6),
       CanvasTool.blur: const ToolProperties(activeColor: Colors.grey, blurRadius: 14.0, opacity: 1.0),
       CanvasTool.ruler: const ToolProperties(activeColor: Color(0xFFF59E0B), strokeWidth: 2.5, opacity: 1.0),
+      CanvasTool.fill: const ToolProperties(activeColor: AppColors.accent, isFilled: true),
+      CanvasTool.colorPicker: const ToolProperties(activeColor: AppColors.accent),
       CanvasTool.crop: const ToolProperties(activeColor: AppColors.accent),
     };
   }

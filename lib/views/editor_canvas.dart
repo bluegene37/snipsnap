@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 import 'package:uuid/uuid.dart';
 import '../models/annotation.dart';
 import '../utils/constants.dart';
@@ -24,6 +25,8 @@ class EditorCanvas extends StatefulWidget {
   final ValueChanged<int> onStepCounterIncremented;
   final ValueChanged<Annotation?>? onSelectAnnotation;
   final ValueChanged<Rect>? onApplyCrop;
+  final ValueChanged<Color>? onSampleColor;
+  final ValueChanged<Offset>? onPerformCanvasFill;
   final GlobalKey repaintBoundaryKey;
   final bool isDarkMode;
   final double opacity;
@@ -51,6 +54,8 @@ class EditorCanvas extends StatefulWidget {
     this.onAnnotationsLiveUpdated,
     required this.onStepCounterIncremented,
     this.onApplyCrop,
+    this.onSampleColor,
+    this.onPerformCanvasFill,
     required this.repaintBoundaryKey,
     this.isDarkMode = false,
     this.opacity = 1.0,
@@ -94,6 +99,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
   // Selection, Dragging, Resizing, and Rotating State
   String? _selectedAnnotationId;
+  String? _prevSelectedAnnotationId;
   bool _isDraggingAnnotation = false;
   bool _isResizingAnnotation = false;
   bool _isRotatingAnnotation = false;
@@ -190,9 +196,13 @@ class _EditorCanvasState extends State<EditorCanvas> {
       }
     }
 
-    // Live update selected annotation properties when controls change (ONLY in Select Mode!)
+    final isSameSelection = _prevSelectedAnnotationId == _selectedAnnotationId;
+    _prevSelectedAnnotationId = _selectedAnnotationId;
+
+    // Live update selected annotation properties when controls change (ONLY if same item remains selected!)
     if (widget.activeTool == CanvasTool.select &&
         _selectedAnnotationId != null &&
+        isSameSelection &&
         (oldWidget.activeColor != widget.activeColor ||
             oldWidget.strokeWidth != widget.strokeWidth ||
             oldWidget.opacity != widget.opacity ||
@@ -809,7 +819,33 @@ class _EditorCanvasState extends State<EditorCanvas> {
     final pos = details.localPosition;
     final hit = _hitTestAnnotation(pos);
 
-    if (hit != null && widget.activeTool == CanvasTool.select) {
+    if (widget.activeTool == CanvasTool.fill) {
+      if (hit != null) {
+        final updated = hit.copyWith(
+          fill: true,
+          color: widget.activeColor,
+        );
+        final list = List<Annotation>.from(widget.annotations);
+        final idx = list.indexWhere((a) => a.id == hit.id);
+        if (idx != -1) {
+          list[idx] = updated;
+          widget.onAnnotationsUpdated?.call(list);
+          setState(() {
+            _selectedAnnotationId = updated.id;
+          });
+        }
+      } else {
+        _performCanvasFloodFill(pos);
+      }
+      return;
+    }
+
+    if (widget.activeTool == CanvasTool.colorPicker) {
+      _sampleColorAt(pos);
+      return;
+    }
+
+    if (hit != null) {
       setState(() {
         _selectedAnnotationId = hit.id;
       });
@@ -887,6 +923,10 @@ class _EditorCanvasState extends State<EditorCanvas> {
                   fill: widget.isFilled,
                 );
                 widget.onAnnotationAdded(annotation);
+                setState(() {
+                  _selectedAnnotationId = annotation.id;
+                });
+                widget.onSelectAnnotation?.call(annotation);
               }
               Navigator.pop(ctx);
             },
@@ -895,6 +935,105 @@ class _EditorCanvasState extends State<EditorCanvas> {
         ],
       ),
     );
+  }
+
+  Future<void> _sampleColorAt(Offset localPos) async {
+    if (widget.imagePath == null || !File(widget.imagePath!).existsSync()) return;
+    try {
+      final fileBytes = await File(widget.imagePath!).readAsBytes();
+      final decoded = img.decodeImage(fileBytes);
+      if (decoded == null) return;
+
+      final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
+      if (renderObj is! RenderBox || !renderObj.hasSize) return;
+
+      final canvasSize = renderObj.size;
+      final inputSize = Size(decoded.width.toDouble(), decoded.height.toDouble());
+      final fittedSizes = applyBoxFit(BoxFit.contain, inputSize, canvasSize);
+      final destSize = fittedSizes.destination;
+
+      final offsetX = (canvasSize.width - destSize.width) / 2.0;
+      final offsetY = (canvasSize.height - destSize.height) / 2.0;
+
+      final relX = localPos.dx - offsetX;
+      final relY = localPos.dy - offsetY;
+
+      if (relX < 0 || relY < 0 || relX >= destSize.width || relY >= destSize.height) {
+        return;
+      }
+
+      final scaleX = decoded.width / destSize.width;
+      final scaleY = decoded.height / destSize.height;
+
+      final pixelX = (relX * scaleX).round().clamp(0, decoded.width - 1);
+      final pixelY = (relY * scaleY).round().clamp(0, decoded.height - 1);
+
+      final pixel = decoded.getPixel(pixelX, pixelY);
+      final color = Color.fromARGB(
+        pixel.a.toInt(),
+        pixel.r.toInt(),
+        pixel.g.toInt(),
+        pixel.b.toInt(),
+      );
+
+      widget.onSampleColor?.call(color);
+      widget.onToolSelected?.call(CanvasTool.select);
+    } catch (e) {
+      debugPrint('Error sampling color: $e');
+    }
+  }
+
+  Future<void> _performCanvasFloodFill(Offset localPos) async {
+    if (widget.imagePath == null || !File(widget.imagePath!).existsSync()) return;
+    try {
+      final fileBytes = await File(widget.imagePath!).readAsBytes();
+      final decoded = img.decodeImage(fileBytes);
+      if (decoded == null) return;
+
+      final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
+      if (renderObj is! RenderBox || !renderObj.hasSize) return;
+
+      final canvasSize = renderObj.size;
+      final inputSize = Size(decoded.width.toDouble(), decoded.height.toDouble());
+      final fittedSizes = applyBoxFit(BoxFit.contain, inputSize, canvasSize);
+      final destSize = fittedSizes.destination;
+
+      final offsetX = (canvasSize.width - destSize.width) / 2.0;
+      final offsetY = (canvasSize.height - destSize.height) / 2.0;
+
+      final relX = localPos.dx - offsetX;
+      final relY = localPos.dy - offsetY;
+
+      if (relX < 0 || relY < 0 || relX >= destSize.width || relY >= destSize.height) {
+        return;
+      }
+
+      final scaleX = decoded.width / destSize.width;
+      final scaleY = decoded.height / destSize.height;
+
+      final pixelX = (relX * scaleX).round().clamp(0, decoded.width - 1);
+      final pixelY = (relY * scaleY).round().clamp(0, decoded.height - 1);
+
+      final fillColor = widget.activeColor;
+      final r = (fillColor.r * 255).round();
+      final g = (fillColor.g * 255).round();
+      final b = (fillColor.b * 255).round();
+      final a = (fillColor.a * 255).round();
+      img.fillFlood(
+        decoded,
+        x: pixelX,
+        y: pixelY,
+        color: img.ColorRgba8(r, g, b, a),
+        threshold: 24,
+      );
+
+      final updatedBytes = Uint8List.fromList(img.encodePng(decoded));
+      await File(widget.imagePath!).writeAsBytes(updatedBytes);
+
+      widget.onPerformCanvasFill?.call(localPos);
+    } catch (e) {
+      debugPrint('Error performing flood fill: $e');
+    }
   }
 
   @override
@@ -1390,7 +1529,8 @@ Rect _getAnnotationBoundingRect(Annotation ann) {
 
     case CanvasTool.stepMarker:
       if (ann.startPoint != null) {
-        return Rect.fromCircle(center: ann.startPoint!, radius: 16.0);
+        final r = ann.fontSize > 0 ? ann.fontSize : 16.0;
+        return Rect.fromCircle(center: ann.startPoint!, radius: r);
       }
       return Rect.zero;
 
@@ -1542,7 +1682,7 @@ class _AnnotationPainter extends CustomPainter {
 
         case CanvasTool.stepMarker:
           if (ann.startPoint != null && ann.stepNumber != null) {
-            _drawStepMarker(canvas, ann.startPoint!, ann.stepNumber!, ann.color);
+            _drawStepMarker(canvas, ann.startPoint!, ann.stepNumber!, ann.color, ann.fontSize);
           }
           break;
 
@@ -1662,8 +1802,8 @@ class _AnnotationPainter extends CustomPainter {
     canvas.drawPath(path, headPaint);
   }
 
-  void _drawStepMarker(Canvas canvas, Offset center, int step, Color color) {
-    const radius = 16.0;
+  void _drawStepMarker(Canvas canvas, Offset center, int step, Color color, double fontSize) {
+    final radius = fontSize > 0 ? fontSize : 16.0;
 
     final shadowPaint = Paint()
       ..color = Colors.black.withValues(alpha: 0.3)
@@ -1676,23 +1816,24 @@ class _AnnotationPainter extends CustomPainter {
     canvas.drawCircle(center, radius, bodyPaint);
 
     final borderPaint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2
+      ..color = Colors.white.withValues(alpha: 0.9)
+      ..strokeWidth = math.max(1.5, radius * 0.1)
       ..style = PaintingStyle.stroke;
     canvas.drawCircle(center, radius, borderPaint);
 
+    final numFontSize = (radius * 0.9).clamp(9.0, 48.0);
     final textPainter = TextPainter(
       text: TextSpan(
         text: '$step',
-        style: const TextStyle(
+        style: TextStyle(
           color: Colors.white,
-          fontSize: 14,
+          fontSize: numFontSize,
           fontWeight: FontWeight.bold,
         ),
       ),
       textDirection: TextDirection.ltr,
-    );
-    textPainter.layout();
+    )..layout();
+
     textPainter.paint(
       canvas,
       center - Offset(textPainter.width / 2, textPainter.height / 2),

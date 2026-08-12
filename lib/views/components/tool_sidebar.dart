@@ -38,6 +38,7 @@ class ToolSidebar extends StatelessWidget {
     ToolSidebarItem(CanvasTool.stepMarker, Icons.pin_drop_rounded, 'Step', 'Numbered step pins (1, 2, 3...)'),
     ToolSidebarItem(CanvasTool.blur, Icons.blur_on_rounded, 'Blur', 'Obfuscate / Blur sensitive area'),
     ToolSidebarItem(CanvasTool.ruler, Icons.straighten_rounded, 'Ruler', 'Measure pixel distance'),
+    ToolSidebarItem(CanvasTool.fill, Icons.format_color_fill_rounded, 'Fill', 'Paint bucket fill shape or image'),
     ToolSidebarItem(CanvasTool.crop, Icons.crop_rounded, 'Crop', 'Crop canvas & image area'),
   ];
 

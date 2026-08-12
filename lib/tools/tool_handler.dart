@@ -26,6 +26,9 @@ abstract class ToolDelegate {
 
   void updateAnnotation(String id, Annotation updatedAnnotation);
   void pushAnnotationsState(List<Annotation> newAnnotations);
+  void onPerformCanvasFill(Offset pos);
+  void onSampleColorFromCanvas(Offset pos);
+  Annotation? hitTestAnnotation(Offset pos);
 }
 
 abstract class ToolHandler {

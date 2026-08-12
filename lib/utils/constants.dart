@@ -13,6 +13,8 @@ enum CanvasTool {
   blur,
   ruler,
   crop,
+  fill,
+  colorPicker,
 }
 
 class AppColors {

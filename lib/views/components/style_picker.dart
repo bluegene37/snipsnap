@@ -23,6 +23,7 @@ class StylePicker extends StatelessWidget {
   final VoidCallback? onCloseDrawer;
   final int stepCounter;
   final VoidCallback? onResetStepCounter;
+  final VoidCallback? onActivateEyedropper;
 
   const StylePicker({
     super.key,
@@ -46,6 +47,7 @@ class StylePicker extends StatelessWidget {
     this.onCloseDrawer,
     this.stepCounter = 1,
     this.onResetStepCounter,
+    this.onActivateEyedropper,
   });
 
   void _showColorPickerDialog(BuildContext context) {
@@ -114,7 +116,7 @@ class StylePicker extends StatelessWidget {
       CanvasTool.highlight
     ].contains(activeTool);
 
-    final showFont = activeTool == CanvasTool.text;
+    final showFont = activeTool == CanvasTool.text || activeTool == CanvasTool.stepMarker;
     final showFill = [CanvasTool.rectangle, CanvasTool.oval, CanvasTool.text].contains(activeTool);
 
     final bgColor = isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
@@ -170,6 +172,41 @@ class StylePicker extends StatelessWidget {
             const SizedBox(height: 12),
             Divider(color: borderColor, height: 1),
             const SizedBox(height: 16),
+
+            // Dedicated Fill Tool Info Card
+            if (activeTool == CanvasTool.fill) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.format_color_fill_rounded, color: selectedColor, size: 22),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Paint Bucket Fill',
+                            style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Click any shape or canvas region to flood-fill with the selected color below.',
+                      style: TextStyle(color: subTextColor, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // Dedicated Step Marker Info Card
             if (activeTool == CanvasTool.stepMarker) ...[
@@ -306,6 +343,24 @@ class StylePicker extends StatelessWidget {
                     ),
                   ),
                 ),
+                // Eyedropper Color Picker Tool
+                if (onActivateEyedropper != null)
+                  Tooltip(
+                    message: 'Pick color from screen/image',
+                    child: GestureDetector(
+                      onTap: onActivateEyedropper,
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: AppColors.accent.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.accent),
+                        ),
+                        child: const Icon(Icons.colorize_rounded, size: 16, color: AppColors.accent),
+                      ),
+                    ),
+                  ),
               ],
             ),
 

@@ -746,6 +746,22 @@ class _MainScreenState extends State<MainScreen> {
                             onAnnotationsLiveUpdated: _onAnnotationsLiveUpdated,
                             onStepCounterIncremented: (nextVal) => setState(() => _stepCounter = nextVal),
                             onApplyCrop: _handleApplyCrop,
+                            onSampleColor: (color) {
+                              _updateActiveToolProperty(activeColor: color);
+                              _scaffoldMessengerKey.currentState?.showSnackBar(
+                                SnackBar(
+                                  content: Text('Sampled Color: #${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}'),
+                                  duration: const Duration(seconds: 2),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            },
+                            onPerformCanvasFill: (pos) {
+                              _pushUndoState();
+                              setState(() {
+                                _imageRevision++;
+                              });
+                            },
                             repaintBoundaryKey: _repaintKey,
                             isDarkMode: _isDarkMode,
                             zoomScale: _zoomScale,
@@ -786,6 +802,7 @@ class _MainScreenState extends State<MainScreen> {
                                   isDarkMode: _isDarkMode,
                                   stepCounter: _stepCounter,
                                   onResetStepCounter: () => setState(() => _stepCounter = 1),
+                                  onActivateEyedropper: () => setState(() => _activeTool = CanvasTool.colorPicker),
                                   onFlattenCanvas: _annotations.isNotEmpty ? _handleFlattenCanvas : null,
                                   onCloseDrawer: () => setState(() => _isPropertiesOpen = false),
                                 ),
