@@ -21,6 +21,8 @@ class StylePicker extends StatelessWidget {
   final bool isDarkMode;
   final VoidCallback? onFlattenCanvas;
   final VoidCallback? onCloseDrawer;
+  final int stepCounter;
+  final VoidCallback? onResetStepCounter;
 
   const StylePicker({
     super.key,
@@ -42,6 +44,8 @@ class StylePicker extends StatelessWidget {
     this.isDarkMode = true,
     this.onFlattenCanvas,
     this.onCloseDrawer,
+    this.stepCounter = 1,
+    this.onResetStepCounter,
   });
 
   void _showColorPickerDialog(BuildContext context) {
@@ -166,6 +170,73 @@ class StylePicker extends StatelessWidget {
             const SizedBox(height: 12),
             Divider(color: borderColor, height: 1),
             const SizedBox(height: 16),
+
+            // Dedicated Step Marker Info Card
+            if (activeTool == CanvasTool.stepMarker) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 28,
+                          height: 28,
+                          decoration: const BoxDecoration(
+                            color: AppColors.accent,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(
+                            child: Text(
+                              '$stepCounter',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Next Step Badge',
+                                style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
+                              ),
+                              Text(
+                                'Click canvas to place #$stepCounter',
+                                style: TextStyle(color: subTextColor, fontSize: 10),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (stepCounter > 1 && onResetStepCounter != null) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.restart_alt_rounded, size: 14),
+                          label: const Text('Reset to #1', style: TextStyle(fontSize: 11)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.accent,
+                            side: const BorderSide(color: AppColors.accent),
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                          ),
+                          onPressed: onResetStepCounter,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // Selection Color Swatches Grid
             Text(

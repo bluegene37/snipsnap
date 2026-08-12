@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import '../models/annotation.dart';
 import '../models/app_shortcut.dart';
 import '../models/capture_item.dart';
+import '../models/tool_properties.dart';
 import '../services/capture_service.dart';
 import '../services/clipboard_service.dart';
 import '../services/database_service.dart';
@@ -46,12 +47,7 @@ class _MainScreenState extends State<MainScreen> {
   final List<List<Annotation>> _redoStack = [];
 
   CanvasTool _activeTool = CanvasTool.select;
-  Color _activeColor = AppDefaults.defaultColor;
-  Color? _textBackgroundColor;
-  double _strokeWidth = AppDefaults.defaultStrokeWidth;
-  double _opacity = 1.0;
-  double _fontSize = AppDefaults.defaultFontSize;
-  bool _isFilled = false;
+  final Map<CanvasTool, ToolProperties> _toolPropertiesMap = ToolProperties.createDefaults();
   double _rotation = 0.0;
   double _zoomScale = 1.0;
   int _stepCounter = 1;
@@ -59,6 +55,30 @@ class _MainScreenState extends State<MainScreen> {
   bool _isPropertiesOpen = true;
   bool _isCapturing = false;
   bool _isDarkMode = true;
+
+  ToolProperties get _currentToolProperties =>
+      _toolPropertiesMap[_activeTool] ?? const ToolProperties(activeColor: AppColors.accent);
+
+  void _updateActiveToolProperty({
+    Color? activeColor,
+    double? strokeWidth,
+    double? opacity,
+    double? fontSize,
+    bool? isFilled,
+    Color? textBackgroundColor,
+  }) {
+    setState(() {
+      final currentProps = _currentToolProperties;
+      _toolPropertiesMap[_activeTool] = currentProps.copyWith(
+        activeColor: activeColor,
+        strokeWidth: strokeWidth,
+        opacity: opacity,
+        fontSize: fontSize,
+        isFilled: isFilled,
+        textBackgroundColor: textBackgroundColor,
+      );
+    });
+  }
 
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
@@ -639,24 +659,26 @@ class _MainScreenState extends State<MainScreen> {
                             onToolSelected: (tool) => setState(() => _activeTool = tool),
                             onSelectAnnotation: (ann) {
                               if (ann != null) {
+                                _updateActiveToolProperty(
+                                  activeColor: ann.color,
+                                  textBackgroundColor: ann.backgroundColor,
+                                  strokeWidth: ann.strokeWidth,
+                                  fontSize: ann.fontSize,
+                                  opacity: ann.opacity,
+                                  isFilled: ann.fill,
+                                );
                                 setState(() {
-                                  _activeColor = ann.color;
-                                  _textBackgroundColor = ann.backgroundColor;
-                                  _strokeWidth = ann.strokeWidth;
-                                  _fontSize = ann.fontSize;
-                                  _opacity = ann.opacity;
-                                  _isFilled = ann.fill;
                                   _rotation = ann.rotation;
                                 });
                               }
                             },
-                            activeColor: _activeColor,
-                            textBackgroundColor: _textBackgroundColor,
-                            strokeWidth: _strokeWidth,
-                            opacity: _opacity,
+                            activeColor: _currentToolProperties.activeColor,
+                            textBackgroundColor: _currentToolProperties.textBackgroundColor,
+                            strokeWidth: _currentToolProperties.strokeWidth,
+                            opacity: _currentToolProperties.opacity,
                             rotation: _rotation,
-                            fontSize: _fontSize,
-                            isFilled: _isFilled,
+                            fontSize: _currentToolProperties.fontSize,
+                            isFilled: _currentToolProperties.isFilled,
                             stepCounter: _stepCounter,
                             onAnnotationAdded: _onAnnotationAdded,
                             onAnnotationsUpdated: _onAnnotationsUpdated,
@@ -684,22 +706,24 @@ class _MainScreenState extends State<MainScreen> {
                                 width: 250,
                                 height: double.infinity,
                                 child: StylePicker(
-                                  selectedColor: _activeColor,
-                                  onColorChanged: (color) => setState(() => _activeColor = color),
-                                  textBackgroundColor: _textBackgroundColor,
-                                  onTextBackgroundColorChanged: (c) => setState(() => _textBackgroundColor = c),
-                                  strokeWidth: _strokeWidth,
-                                  onStrokeWidthChanged: (val) => setState(() => _strokeWidth = val),
-                                  opacity: _opacity,
-                                  onOpacityChanged: (val) => setState(() => _opacity = val),
-                                  fontSize: _fontSize,
-                                  onFontSizeChanged: (val) => setState(() => _fontSize = val),
-                                  isFilled: _isFilled,
-                                  onFillChanged: (val) => setState(() => _isFilled = val),
+                                  selectedColor: _currentToolProperties.activeColor,
+                                  onColorChanged: (color) => _updateActiveToolProperty(activeColor: color),
+                                  textBackgroundColor: _currentToolProperties.textBackgroundColor,
+                                  onTextBackgroundColorChanged: (c) => _updateActiveToolProperty(textBackgroundColor: c),
+                                  strokeWidth: _currentToolProperties.strokeWidth,
+                                  onStrokeWidthChanged: (val) => _updateActiveToolProperty(strokeWidth: val),
+                                  opacity: _currentToolProperties.opacity,
+                                  onOpacityChanged: (val) => _updateActiveToolProperty(opacity: val),
+                                  fontSize: _currentToolProperties.fontSize,
+                                  onFontSizeChanged: (val) => _updateActiveToolProperty(fontSize: val),
+                                  isFilled: _currentToolProperties.isFilled,
+                                  onFillChanged: (val) => _updateActiveToolProperty(isFilled: val),
                                   rotation: _rotation,
                                   onRotationChanged: (r) => setState(() => _rotation = r),
                                   activeTool: _activeTool,
                                   isDarkMode: _isDarkMode,
+                                  stepCounter: _stepCounter,
+                                  onResetStepCounter: () => setState(() => _stepCounter = 1),
                                   onFlattenCanvas: _annotations.isNotEmpty ? _handleFlattenCanvas : null,
                                   onCloseDrawer: () => setState(() => _isPropertiesOpen = false),
                                 ),
