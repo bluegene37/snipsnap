@@ -31,6 +31,7 @@ class EditorCanvas extends StatefulWidget {
   final Color? textBackgroundColor;
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
+  final int imageRevision;
 
   const EditorCanvas({
     super.key,
@@ -51,11 +52,12 @@ class EditorCanvas extends StatefulWidget {
     required this.onStepCounterIncremented,
     this.onApplyCrop,
     required this.repaintBoundaryKey,
-    this.isDarkMode = true,
+    this.isDarkMode = false,
     this.opacity = 1.0,
     this.rotation = 0.0,
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
+    this.imageRevision = 0,
   });
 
   @override
@@ -174,8 +176,23 @@ class _EditorCanvasState extends State<EditorCanvas> {
       _updateZoomMatrix(widget.zoomScale);
     }
 
-    // Live update selected annotation properties when controls change
-    if (_selectedAnnotationId != null &&
+    if (oldWidget.activeTool != widget.activeTool) {
+      setState(() {
+        _selectedAnnotationId = null;
+        if (widget.activeTool != CanvasTool.crop) {
+          _activeCropRect = null;
+        }
+      });
+      widget.onSelectAnnotation?.call(null);
+
+      if (widget.activeTool == CanvasTool.crop) {
+        _ensureCropRectInitialized();
+      }
+    }
+
+    // Live update selected annotation properties when controls change (ONLY in Select Mode!)
+    if (widget.activeTool == CanvasTool.select &&
+        _selectedAnnotationId != null &&
         (oldWidget.activeColor != widget.activeColor ||
             oldWidget.strokeWidth != widget.strokeWidth ||
             oldWidget.opacity != widget.opacity ||
@@ -184,16 +201,6 @@ class _EditorCanvasState extends State<EditorCanvas> {
             oldWidget.rotation != widget.rotation ||
             oldWidget.textBackgroundColor != widget.textBackgroundColor)) {
       _updateSelectedAnnotationProperties();
-    }
-
-    if (oldWidget.activeTool != widget.activeTool) {
-      if (widget.activeTool == CanvasTool.crop) {
-        _ensureCropRectInitialized();
-      } else {
-        setState(() {
-          _activeCropRect = null;
-        });
-      }
     }
   }
 
@@ -809,11 +816,6 @@ class _EditorCanvasState extends State<EditorCanvas> {
         _currentAnnotation = null;
         _currentPoints = [];
       });
-
-      // After completing drawing a shape, park back to select
-      if (widget.activeTool != CanvasTool.crop) {
-        widget.onToolSelected?.call(CanvasTool.select);
-      }
     }
   }
 
@@ -827,11 +829,10 @@ class _EditorCanvasState extends State<EditorCanvas> {
     final pos = details.localPosition;
     final hit = _hitTestAnnotation(pos);
 
-    if (hit != null) {
+    if (hit != null && widget.activeTool == CanvasTool.select) {
       setState(() {
         _selectedAnnotationId = hit.id;
       });
-      widget.onToolSelected?.call(hit.tool);
       widget.onSelectAnnotation?.call(hit);
       return;
     }
@@ -847,15 +848,13 @@ class _EditorCanvasState extends State<EditorCanvas> {
       );
       widget.onAnnotationAdded(annotation);
       widget.onStepCounterIncremented(widget.stepCounter + 1);
-      widget.onToolSelected?.call(CanvasTool.select);
     } else if (widget.activeTool == CanvasTool.text) {
       _promptForText(pos);
-    } else {
-      // Clicked on blank canvas space: Park to select!
+    } else if (widget.activeTool == CanvasTool.select) {
+      // Clicked on blank canvas space in Select mode: Deselect item
       setState(() {
         _selectedAnnotationId = null;
       });
-      widget.onToolSelected?.call(CanvasTool.select);
       widget.onSelectAnnotation?.call(null);
     }
   }
@@ -1046,7 +1045,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
                       // Base Screenshot Image
                       Image.file(
                         File(widget.imagePath!),
-                        key: ValueKey('${widget.imagePath!}_${File(widget.imagePath!).existsSync() ? File(widget.imagePath!).lastModifiedSync().millisecondsSinceEpoch : 0}'),
+                        key: ValueKey('${widget.imagePath!}_${widget.imageRevision}'),
                         fit: BoxFit.contain,
                       ),
 

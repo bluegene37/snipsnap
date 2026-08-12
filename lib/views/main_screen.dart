@@ -27,6 +27,16 @@ import 'dialogs/shortcut_settings_dialog.dart';
 import 'editor_canvas.dart';
 import 'gallery_sidebar.dart';
 
+class CanvasSnapshot {
+  final Uint8List? imageBytes;
+  final List<Annotation> annotations;
+
+  CanvasSnapshot({
+    this.imageBytes,
+    required this.annotations,
+  });
+}
+
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
 
@@ -43,8 +53,9 @@ class _MainScreenState extends State<MainScreen> {
   CaptureItem? _activeCapture;
 
   List<Annotation> _annotations = [];
-  final List<List<Annotation>> _undoStack = [];
-  final List<List<Annotation>> _redoStack = [];
+  final List<CanvasSnapshot> _undoStack = [];
+  final List<CanvasSnapshot> _redoStack = [];
+  int _imageRevision = 0;
 
   CanvasTool _activeTool = CanvasTool.select;
   final Map<CanvasTool, ToolProperties> _toolPropertiesMap = ToolProperties.createDefaults();
@@ -239,8 +250,15 @@ class _MainScreenState extends State<MainScreen> {
     return bindings;
   }
 
-  void _pushUndoState() {
-    _undoStack.add(List.from(_annotations));
+  Future<void> _pushUndoState({Uint8List? imageBytes}) async {
+    Uint8List? bytes = imageBytes;
+    if (bytes == null && _activeCapture != null && File(_activeCapture!.filePath).existsSync()) {
+      bytes = await File(_activeCapture!.filePath).readAsBytes();
+    }
+    _undoStack.add(CanvasSnapshot(
+      imageBytes: bytes,
+      annotations: List.from(_annotations),
+    ));
     _redoStack.clear();
   }
 
@@ -268,21 +286,57 @@ class _MainScreenState extends State<MainScreen> {
     _syncCurrentCaptureAnnotations();
   }
 
-  void _undo() {
+  Future<void> _undo() async {
     if (_undoStack.isNotEmpty) {
-      _redoStack.add(List.from(_annotations));
+      Uint8List? currentBytes;
+      if (_activeCapture != null && File(_activeCapture!.filePath).existsSync()) {
+        currentBytes = await File(_activeCapture!.filePath).readAsBytes();
+      }
+      _redoStack.add(CanvasSnapshot(
+        imageBytes: currentBytes,
+        annotations: List.from(_annotations),
+      ));
+
+      final snapshot = _undoStack.removeLast();
+      if (snapshot.imageBytes != null && _activeCapture != null) {
+        final filePath = _activeCapture!.filePath;
+        await File(filePath).writeAsBytes(snapshot.imageBytes!);
+        await FileImage(File(filePath)).evict();
+        PaintingBinding.instance.imageCache.clear();
+        PaintingBinding.instance.imageCache.clearLiveImages();
+      }
+
       setState(() {
-        _annotations = _undoStack.removeLast();
+        _imageRevision++;
+        _annotations = List.from(snapshot.annotations);
       });
       _syncCurrentCaptureAnnotations();
     }
   }
 
-  void _redo() {
+  Future<void> _redo() async {
     if (_redoStack.isNotEmpty) {
-      _undoStack.add(List.from(_annotations));
+      Uint8List? currentBytes;
+      if (_activeCapture != null && File(_activeCapture!.filePath).existsSync()) {
+        currentBytes = await File(_activeCapture!.filePath).readAsBytes();
+      }
+      _undoStack.add(CanvasSnapshot(
+        imageBytes: currentBytes,
+        annotations: List.from(_annotations),
+      ));
+
+      final snapshot = _redoStack.removeLast();
+      if (snapshot.imageBytes != null && _activeCapture != null) {
+        final filePath = _activeCapture!.filePath;
+        await File(filePath).writeAsBytes(snapshot.imageBytes!);
+        await FileImage(File(filePath)).evict();
+        PaintingBinding.instance.imageCache.clear();
+        PaintingBinding.instance.imageCache.clearLiveImages();
+      }
+
       setState(() {
-        _annotations = _redoStack.removeLast();
+        _imageRevision++;
+        _annotations = List.from(snapshot.annotations);
       });
       _syncCurrentCaptureAnnotations();
     }
@@ -489,38 +543,46 @@ class _MainScreenState extends State<MainScreen> {
       final decoded = img.decodeImage(fileBytes);
       if (decoded == null) return;
 
-      double scaleX = 1.0;
-      double scaleY = 1.0;
-      if (canvasSize.width > 0 && canvasSize.height > 0) {
-        scaleX = decoded.width / canvasSize.width;
-        scaleY = decoded.height / canvasSize.height;
-      }
+      // 1. Push current uncropped state to undo stack before applying crop!
+      await _pushUndoState(imageBytes: fileBytes);
 
-      final cropX = (cropRect.left * scaleX).round();
-      final cropY = (cropRect.top * scaleY).round();
-      final cropW = math.max(1, (cropRect.width * scaleX).round());
-      final cropH = math.max(1, (cropRect.height * scaleY).round());
+      // 2. Calculate exact 1:1 image bounds inside BoxFit.contain boundary
+      final inputSize = Size(decoded.width.toDouble(), decoded.height.toDouble());
+      final fittedSizes = applyBoxFit(BoxFit.contain, inputSize, canvasSize);
+      final destSize = fittedSizes.destination;
 
-      // Create new target image of requested crop dimensions with transparent background (numChannels: 4 RGBA)
-      final targetImage = img.Image(
+      // Offsets of letterbox/pillarbox padding
+      final offsetX = (canvasSize.width - destSize.width) / 2.0;
+      final offsetY = (canvasSize.height - destSize.height) / 2.0;
+
+      // Clamp cropRect to destination image region
+      final relLeft = (cropRect.left - offsetX).clamp(0.0, destSize.width);
+      final relTop = (cropRect.top - offsetY).clamp(0.0, destSize.height);
+      final relRight = (cropRect.right - offsetX).clamp(0.0, destSize.width);
+      final relBottom = (cropRect.bottom - offsetY).clamp(0.0, destSize.height);
+
+      final cropWOnScreen = relRight - relLeft;
+      final cropHOnScreen = relBottom - relTop;
+      if (cropWOnScreen <= 5 || cropHOnScreen <= 5) return;
+
+      final scaleX = decoded.width / destSize.width;
+      final scaleY = decoded.height / destSize.height;
+
+      final cropX = (relLeft * scaleX).round().clamp(0, decoded.width - 1);
+      final cropY = (relTop * scaleY).round().clamp(0, decoded.height - 1);
+      final cropW = math.max(1, (cropWOnScreen * scaleX).round().clamp(1, decoded.width - cropX));
+      final cropH = math.max(1, (cropHOnScreen * scaleY).round().clamp(1, decoded.height - cropY));
+
+      // 3. Crop using official package:image copyCrop function (100% distortion-free)
+      final croppedImage = img.copyCrop(
+        decoded,
+        x: cropX,
+        y: cropY,
         width: cropW,
         height: cropH,
-        numChannels: 4,
-      );
-      img.fill(targetImage, color: img.ColorRgba8(0, 0, 0, 0));
-
-      // Composite original image onto transparent canvas at offset (-cropX, -cropY)
-      final dstX = -cropX;
-      final dstY = -cropY;
-
-      img.compositeImage(
-        targetImage,
-        decoded,
-        dstX: dstX,
-        dstY: dstY,
       );
 
-      final croppedBytes = Uint8List.fromList(img.encodePng(targetImage));
+      final croppedBytes = Uint8List.fromList(img.encodePng(croppedImage));
 
       final targetPath = _activeCapture!.filePath;
       await File(targetPath).writeAsBytes(croppedBytes);
@@ -531,14 +593,13 @@ class _MainScreenState extends State<MainScreen> {
       PaintingBinding.instance.imageCache.clearLiveImages();
 
       setState(() {
+        _imageRevision++;
         _annotations.clear();
-        _undoStack.clear();
-        _redoStack.clear();
         _activeTool = CanvasTool.select;
       });
       _syncCurrentCaptureAnnotations();
 
-      _showToast('Image cropped & canvas adjusted!');
+      _showToast('Image cropped cleanly! (Press Cmd+Z to Undo)');
     } catch (e) {
       debugPrint('SnipSnap crop error: $e');
       _showToast('Failed to crop image');
@@ -689,6 +750,7 @@ class _MainScreenState extends State<MainScreen> {
                             isDarkMode: _isDarkMode,
                             zoomScale: _zoomScale,
                             onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
+                            imageRevision: _imageRevision,
                           ),
                         ),
 
