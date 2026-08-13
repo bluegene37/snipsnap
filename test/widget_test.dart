@@ -1,8 +1,10 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/models/app_shortcut.dart';
+import 'package:snipsnap/models/tool_properties.dart';
 import 'package:snipsnap/services/shortcut_service.dart';
 import 'package:snipsnap/utils/constants.dart';
+import 'package:snipsnap/views/components/tool_sidebar.dart';
 
 void main() {
   test('CustomShortcut model and JSON serialization', () {
@@ -60,17 +62,29 @@ void main() {
   });
 
   test('CanvasTool enum and stroke width presets verification', () {
-    expect(CanvasTool.values.length, 14);
+    expect(CanvasTool.values.length, 13);
     expect(CanvasTool.values, contains(CanvasTool.pen));
     expect(CanvasTool.values, contains(CanvasTool.line));
     expect(CanvasTool.values, contains(CanvasTool.blur));
     expect(CanvasTool.values, contains(CanvasTool.ruler));
     expect(CanvasTool.values, contains(CanvasTool.crop));
+    // Rectangle and oval were merged into the multi-shape tool.
+    expect(CanvasTool.values, contains(CanvasTool.shape));
+    expect(CanvasTool.values.map((t) => t.name), isNot(contains('rectangle')));
+    expect(CanvasTool.values.map((t) => t.name), isNot(contains('oval')));
 
     expect(AppDefaults.strokeWidthThin, 2.0);
     expect(AppDefaults.strokeWidthMedium, 4.0);
     expect(AppDefaults.strokeWidthThick, 8.0);
     expect(AppDefaults.strokeWidthHeavy, 14.0);
+  });
+
+  test('every tool in the sidebar has default properties', () {
+    final defaults = ToolProperties.createDefaults();
+    for (final item in ToolSidebar.tools) {
+      expect(defaults.containsKey(item.tool), isTrue,
+          reason: '${item.tool} is offered in the sidebar but has no defaults');
+    }
   });
 
   test('Flatten shortcut display properties', () {

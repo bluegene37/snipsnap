@@ -8,6 +8,14 @@ class StylePicker extends StatelessWidget {
   final ValueChanged<Color> onColorChanged;
   final Color? textBackgroundColor;
   final ValueChanged<Color?>? onTextBackgroundColorChanged;
+  final Color? fillColor;
+  final ValueChanged<Color?>? onFillColorChanged;
+  final ShapeKind shapeKind;
+  final ValueChanged<ShapeKind>? onShapeKindChanged;
+  final double blurStrength;
+  final ValueChanged<double>? onBlurStrengthChanged;
+  final bool hasShadow;
+  final ValueChanged<bool>? onShadowChanged;
   final double strokeWidth;
   final ValueChanged<double> onStrokeWidthChanged;
   final double opacity;
@@ -45,6 +53,14 @@ class StylePicker extends StatelessWidget {
     required this.onColorChanged,
     this.textBackgroundColor,
     this.onTextBackgroundColorChanged,
+    this.fillColor,
+    this.onFillColorChanged,
+    this.shapeKind = ShapeKind.rectangle,
+    this.onShapeKindChanged,
+    this.blurStrength = 14.0,
+    this.onBlurStrengthChanged,
+    this.hasShadow = false,
+    this.onShadowChanged,
     required this.strokeWidth,
     required this.onStrokeWidthChanged,
     required this.opacity,
@@ -135,18 +151,32 @@ class StylePicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final effectiveTool = selectedAnnotation?.tool ?? activeTool;
+    final effectiveShapeKind = selectedAnnotation?.shapeKind ?? shapeKind;
 
     final showStroke = [
       CanvasTool.pen,
       CanvasTool.arrow,
       CanvasTool.line,
-      CanvasTool.rectangle,
-      CanvasTool.oval,
-      CanvasTool.highlight
+      CanvasTool.shape,
+      CanvasTool.highlight,
+      CanvasTool.ruler,
     ].contains(effectiveTool);
 
     final showFont = effectiveTool == CanvasTool.text || effectiveTool == CanvasTool.stepMarker;
-    final showFill = [CanvasTool.rectangle, CanvasTool.oval, CanvasTool.text].contains(effectiveTool);
+    final showFill = [CanvasTool.shape, CanvasTool.text].contains(effectiveTool);
+
+    // A drop shadow only makes sense for vector markup drawn over the image.
+    final showShadow = [
+      CanvasTool.pen,
+      CanvasTool.arrow,
+      CanvasTool.line,
+      CanvasTool.shape,
+    ].contains(effectiveTool);
+
+    // Corner radius only affects shapes that actually have corners.
+    final showCornerRadius = effectiveTool == CanvasTool.shape &&
+        (effectiveShapeKind == ShapeKind.rectangle ||
+            effectiveShapeKind == ShapeKind.speechBubble);
 
     final bgColor = isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
     final textColor = isDarkMode ? Colors.white : Colors.black87;
@@ -395,6 +425,57 @@ class StylePicker extends StatelessWidget {
               const SizedBox(height: 16),
             ],
 
+            // Shape Chooser Grid (all outlines available to the Shape tool)
+            if (effectiveTool == CanvasTool.shape && onShapeKindChanged != null) ...[
+              Text(
+                'SHAPE',
+                style: TextStyle(
+                  color: subTextColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: ShapeKind.values.map((kind) {
+                  final isSelected = effectiveShapeKind == kind;
+                  return Tooltip(
+                    message: kind.label,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => onShapeKindChanged!(kind),
+                        child: Container(
+                          width: 46,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? AppColors.accent.withValues(alpha: 0.18)
+                                : cardBg,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isSelected ? AppColors.accent : borderColor,
+                              width: isSelected ? 1.8 : 1,
+                            ),
+                          ),
+                          child: Icon(
+                            kind.icon,
+                            size: 20,
+                            color: isSelected ? AppColors.accent : textColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 20),
+            ],
+
             // Selection Color Swatches Grid
             Text(
               activeTool == CanvasTool.text
@@ -615,8 +696,8 @@ class StylePicker extends StatelessWidget {
                 onChanged: onOpacityChanged,
               ),
             ),
-            // Corner Radius (for Rectangle)
-            if (effectiveTool == CanvasTool.rectangle) ...[
+            // Corner Radius (rectangles & speech bubbles)
+            if (showCornerRadius) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -802,6 +883,78 @@ class StylePicker extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
+
+              // Obscuration strength: gaussian sigma, or mosaic block size.
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    blurType == BlurType.pixelate ? 'BLOCK SIZE' : 'BLUR STRENGTH',
+                    style: TextStyle(
+                      color: subTextColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${blurStrength.toInt()} px',
+                      style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              SliderTheme(
+                data: SliderThemeData(
+                  activeTrackColor: AppColors.accent,
+                  inactiveTrackColor: borderColor,
+                  thumbColor: AppColors.accent,
+                  trackHeight: 3,
+                ),
+                child: Slider(
+                  value: blurStrength.clamp(2.0, 50.0),
+                  min: 2.0,
+                  max: 50.0,
+                  onChanged: (v) => onBlurStrengthChanged?.call(v),
+                ),
+              ),
+              Text(
+                blurType == BlurType.pixelate
+                    ? 'Mosaic blocks fully discard the original pixels — safest for redacting sensitive data.'
+                    : 'Gaussian blur softens the region; use a high strength for sensitive content.',
+                style: TextStyle(color: subTextColor, fontSize: 10.5, height: 1.3),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Drop Shadow Toggle
+            if (showShadow && onShadowChanged != null) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'DROP SHADOW',
+                    style: TextStyle(
+                      color: subTextColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  Switch(
+                    value: hasShadow,
+                    activeTrackColor: AppColors.accent,
+                    onChanged: (val) => onShadowChanged!(val),
+                  ),
+                ],
+              ),
               const SizedBox(height: 16),
             ],
 
@@ -956,6 +1109,76 @@ class StylePicker extends StatelessWidget {
                         ),
                       ),
                     ),
+                  ],
+                ),
+              ],
+
+              // Independent shape fill colour — the outline keeps using the
+              // selection colour above, as in Snagit's shape styles.
+              if (isFilled && onFillColorChanged != null && effectiveTool == CanvasTool.shape) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'FILL COLOUR',
+                  style: TextStyle(
+                    color: subTextColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Tooltip(
+                      message: 'Auto — 25% tint of the outline colour',
+                      child: GestureDetector(
+                        onTap: () => onFillColorChanged!(null),
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: selectedColor.withValues(alpha: 0.25),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: fillColor == null ? AppColors.accent : borderColor,
+                              width: fillColor == null ? 2.5 : 1,
+                            ),
+                          ),
+                          child: Icon(Icons.auto_awesome_rounded, size: 13, color: textColor),
+                        ),
+                      ),
+                    ),
+                    ...[
+                      Colors.white.withValues(alpha: 0.85),
+                      Colors.black.withValues(alpha: 0.55),
+                      const Color(0x66FDE047),
+                      const Color(0x66EF4444),
+                      const Color(0x6610B981),
+                      const Color(0x660EA5E9),
+                      const Color(0x668B5CF6),
+                    ].map((c) {
+                      final isSelected = fillColor?.toARGB32() == c.toARGB32();
+                      return GestureDetector(
+                        onTap: () => onFillColorChanged!(c),
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: c,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected ? AppColors.accent : Colors.black26,
+                              width: isSelected ? 2.5 : 1,
+                            ),
+                          ),
+                          child: isSelected
+                              ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                              : null,
+                        ),
+                      );
+                    }),
                   ],
                 ),
               ],

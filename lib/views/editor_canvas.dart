@@ -1,13 +1,18 @@
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:uuid/uuid.dart';
+
 import '../models/annotation.dart';
+import '../services/render_service.dart';
 import '../utils/constants.dart';
+import 'components/annotation_renderer.dart';
 
 class EditorCanvas extends StatefulWidget {
   final String? imagePath;
@@ -27,17 +32,25 @@ class EditorCanvas extends StatefulWidget {
   final ValueChanged<Rect>? onApplyCrop;
   final ValueChanged<Color>? onSampleColor;
   final ValueChanged<Offset>? onPerformCanvasFill;
+
+  /// Awaited before the flood fill overwrites the source file so the caller can
+  /// snapshot the original bitmap for undo.
+  final Future<void> Function()? onBeforeCanvasFill;
   final GlobalKey repaintBoundaryKey;
   final bool isDarkMode;
   final double opacity;
   final double rotation;
   final Color? textBackgroundColor;
+  final Color? fillColor;
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
   final int imageRevision;
   final double borderRadius;
+  final ShapeKind shapeKind;
   final LineStyle lineStyle;
   final BlurType blurType;
+  final double blurStrength;
+  final bool hasShadow;
   final bool isDoubleArrow;
 
   const EditorCanvas({
@@ -49,6 +62,7 @@ class EditorCanvas extends StatefulWidget {
     this.onSelectAnnotation,
     required this.activeColor,
     this.textBackgroundColor,
+    this.fillColor,
     required this.strokeWidth,
     required this.fontSize,
     required this.isFilled,
@@ -60,6 +74,7 @@ class EditorCanvas extends StatefulWidget {
     this.onApplyCrop,
     this.onSampleColor,
     this.onPerformCanvasFill,
+    this.onBeforeCanvasFill,
     required this.repaintBoundaryKey,
     this.isDarkMode = false,
     this.opacity = 1.0,
@@ -68,8 +83,11 @@ class EditorCanvas extends StatefulWidget {
     this.onZoomScaleChanged,
     this.imageRevision = 0,
     this.borderRadius = 8.0,
+    this.shapeKind = ShapeKind.rectangle,
     this.lineStyle = LineStyle.solid,
     this.blurType = BlurType.gaussian,
+    this.blurStrength = 14.0,
+    this.hasShadow = false,
     this.isDoubleArrow = false,
   });
 
@@ -100,12 +118,29 @@ enum _CropHandle {
   right,
 }
 
+/// Tools that place a shape by dragging out two corners / endpoints.
+const _dragToDrawTools = {
+  CanvasTool.shape,
+  CanvasTool.arrow,
+  CanvasTool.line,
+  CanvasTool.blur,
+  CanvasTool.ruler,
+};
+
+const _freehandTools = {CanvasTool.pen, CanvasTool.highlight};
+
 class _EditorCanvasState extends State<EditorCanvas> {
   final Uuid _uuid = const Uuid();
+  final FocusNode _focusNode = FocusNode(debugLabel: 'EditorCanvas');
   bool _fileExists = false;
   late TransformationController _transformationController;
 
-  // Selection, Dragging, Resizing, and Rotating State
+  /// Decoded source pixels, used to render blur/pixelate regions on screen with
+  /// exactly the same code path the exporter uses.
+  ui.Image? _baseImage;
+  int _baseImageToken = 0;
+
+  // Selection / transform state
   String? _selectedAnnotationId;
   String? _prevSelectedAnnotationId;
   bool _isDraggingAnnotation = false;
@@ -113,57 +148,38 @@ class _EditorCanvasState extends State<EditorCanvas> {
   bool _isRotatingAnnotation = false;
   _AnnHandle _currentAnnHandle = _AnnHandle.none;
 
-  // Crop State
+  /// Geometry captured when a transform gesture begins so every frame is
+  /// computed from the original shape instead of accumulating rounding drift.
+  Annotation? _gestureOrigin;
+  Offset _gestureStartPos = Offset.zero;
+
+  // Crop state
   Rect? _activeCropRect;
   bool _isDraggingCrop = false;
   _CropHandle _currentCropHandle = _CropHandle.none;
+  Rect? _cropOrigin;
 
-  void _ensureCropRectInitialized() {
-    if (widget.activeTool == CanvasTool.crop && _activeCropRect == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _activeCropRect == null) {
-          final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
-          if (renderObj is RenderBox && renderObj.hasSize) {
-            final size = renderObj.size;
-            if (size.width > 0 && size.height > 0) {
-              setState(() {
-                _activeCropRect = Rect.fromLTWH(0, 0, size.width, size.height);
-              });
-            }
-          }
-        }
-      });
-    }
-  }
+  // Drawing state
+  Annotation? _currentAnnotation;
+  List<Offset> _currentPoints = [];
+  Offset? _drawStart;
 
-  void _updateZoomMatrix(double targetScale) {
-    final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
-    double vpW = 800.0;
-    double vpH = 600.0;
-    if (renderObj is RenderBox && renderObj.hasSize) {
-      vpW = renderObj.size.width;
-      vpH = renderObj.size.height;
-    }
+  MouseCursor _cursor = SystemMouseCursors.basic;
+  bool _isInteractiveZooming = false;
 
-    final cx = vpW / 2;
-    final cy = vpH / 2;
+  // Manual double-click detection (see _consumeDoubleTap).
+  DateTime _lastTapAt = DateTime.fromMillisecondsSinceEpoch(0);
+  Offset _lastTapPos = Offset.zero;
 
-    final matrix = Matrix4.identity();
-    if ((targetScale - 1.0).abs() > 0.001) {
-      final storage = matrix.storage;
-      storage[0] = targetScale;
-      storage[5] = targetScale;
-      storage[12] = (1.0 - targetScale) * cx;
-      storage[13] = (1.0 - targetScale) * cy;
-    }
-
-    _transformationController.value = matrix;
-  }
+  // ---------------------------------------------------------------------------
+  // Lifecycle
+  // ---------------------------------------------------------------------------
 
   @override
   void initState() {
     super.initState();
     _checkFileExists();
+    _loadBaseImage();
     _transformationController = TransformationController();
     if (widget.zoomScale != 1.0) {
       _updateZoomMatrix(widget.zoomScale);
@@ -173,17 +189,21 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
   @override
   void dispose() {
+    _baseImage?.dispose();
+    _baseImage = null;
+    _focusNode.dispose();
     _transformationController.dispose();
     super.dispose();
   }
 
-  bool _isInteractiveZooming = false;
-
   @override
   void didUpdateWidget(covariant EditorCanvas oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imagePath != widget.imagePath) {
+
+    if (oldWidget.imagePath != widget.imagePath ||
+        oldWidget.imageRevision != widget.imageRevision) {
       _checkFileExists();
+      _loadBaseImage();
     }
 
     if (oldWidget.zoomScale != widget.zoomScale && !_isInteractiveZooming) {
@@ -198,87 +218,249 @@ class _EditorCanvasState extends State<EditorCanvas> {
       final callback = widget.onSelectAnnotation;
       if (callback != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            callback(null);
-          }
+          if (mounted) callback(null);
         });
       }
-
       if (widget.activeTool == CanvasTool.crop) {
         _ensureCropRectInitialized();
       }
     }
 
+    // Property panel edits are applied to the selected annotation by the parent
+    // (`_updateActiveToolProperty`); rotation is the only control the canvas
+    // still owns, so it is the only one mirrored back here.
     final isSameSelection = _prevSelectedAnnotationId == _selectedAnnotationId;
     _prevSelectedAnnotationId = _selectedAnnotationId;
-
-    // Live update selected annotation properties when controls change (ONLY if same item remains selected!)
     if (widget.activeTool == CanvasTool.select &&
         _selectedAnnotationId != null &&
         isSameSelection &&
-        (oldWidget.activeColor != widget.activeColor ||
-            oldWidget.strokeWidth != widget.strokeWidth ||
-            oldWidget.opacity != widget.opacity ||
-            oldWidget.fontSize != widget.fontSize ||
-            oldWidget.isFilled != widget.isFilled ||
-            oldWidget.rotation != widget.rotation ||
-            oldWidget.textBackgroundColor != widget.textBackgroundColor ||
-            oldWidget.borderRadius != widget.borderRadius ||
-            oldWidget.lineStyle != widget.lineStyle ||
-            oldWidget.blurType != widget.blurType ||
-            oldWidget.isDoubleArrow != widget.isDoubleArrow)) {
-      _updateSelectedAnnotationProperties();
+        oldWidget.rotation != widget.rotation) {
+      _applyRotationToSelection(widget.rotation);
     }
   }
 
-  void _checkFileExists() {
+  Future<void> _loadBaseImage() async {
+    final path = widget.imagePath;
+    final token = ++_baseImageToken;
+
+    if (path == null) {
+      _baseImage?.dispose();
+      if (mounted) setState(() => _baseImage = null);
+      return;
+    }
+
+    final image = await RenderService.decodeImageFile(path);
+    // A newer load (or disposal) won the race — drop this frame's native memory.
+    if (!mounted || token != _baseImageToken) {
+      image?.dispose();
+      return;
+    }
     setState(() {
-      _fileExists = widget.imagePath != null && File(widget.imagePath!).existsSync();
+      _baseImage?.dispose();
+      _baseImage = image;
     });
   }
 
-  void _updateSelectedAnnotationProperties() {
-    if (_selectedAnnotationId == null) return;
-    final callback = widget.onAnnotationsLiveUpdated ?? widget.onAnnotationsUpdated;
-    if (callback == null) return;
-    final index = widget.annotations.indexWhere((a) => a.id == _selectedAnnotationId);
-    if (index != -1) {
-      final oldAnn = widget.annotations[index];
-      final updatedAnn = oldAnn.copyWith(
-        color: widget.activeColor,
-        backgroundColor: widget.textBackgroundColor,
-        strokeWidth: widget.strokeWidth,
-        opacity: widget.opacity,
-        fontSize: widget.fontSize,
-        fill: widget.isFilled,
-        rotation: widget.rotation,
-        borderRadius: widget.borderRadius,
-        lineStyle: widget.lineStyle,
-        blurType: widget.blurType,
-        isDoubleArrow: widget.isDoubleArrow,
-      );
-      final newList = List<Annotation>.from(widget.annotations);
-      newList[index] = updatedAnn;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          callback(newList);
-        }
-      });
+  void _checkFileExists() {
+    final exists = widget.imagePath != null && File(widget.imagePath!).existsSync();
+    if (exists != _fileExists) {
+      setState(() => _fileExists = exists);
     }
+  }
+
+  void _updateZoomMatrix(double targetScale) {
+    final size = _canvasSize;
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+
+    final matrix = Matrix4.identity();
+    if ((targetScale - 1.0).abs() > 0.001) {
+      final storage = matrix.storage;
+      storage[0] = targetScale;
+      storage[5] = targetScale;
+      storage[12] = (1.0 - targetScale) * cx;
+      storage[13] = (1.0 - targetScale) * cy;
+    }
+    _transformationController.value = matrix;
+  }
+
+  Size get _canvasSize {
+    final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
+    if (renderObj is RenderBox && renderObj.hasSize) return renderObj.size;
+    return const Size(800, 600);
+  }
+
+  /// Region the screenshot actually occupies inside the canvas viewport.
+  Rect get _imageRect {
+    final image = _baseImage;
+    if (image == null) return Offset.zero & _canvasSize;
+    return RenderService.imageRectInCanvas(
+      imageSize: Size(image.width.toDouble(), image.height.toDouble()),
+      canvasSize: _canvasSize,
+    );
+  }
+
+  void _ensureCropRectInitialized() {
+    if (widget.activeTool != CanvasTool.crop || _activeCropRect != null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _activeCropRect != null) return;
+      // Default the crop box to the image itself rather than the whole
+      // viewport, so the first drag never includes empty letterbox area.
+      final rect = _imageRect;
+      if (rect.width > 0 && rect.height > 0) {
+        setState(() => _activeCropRect = rect);
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Modifier keys
+  // ---------------------------------------------------------------------------
+
+  bool get _isShiftDown {
+    final keys = HardwareKeyboard.instance.logicalKeysPressed;
+    return keys.contains(LogicalKeyboardKey.shiftLeft) ||
+        keys.contains(LogicalKeyboardKey.shiftRight);
+  }
+
+  bool get _isAltDown {
+    final keys = HardwareKeyboard.instance.logicalKeysPressed;
+    return keys.contains(LogicalKeyboardKey.altLeft) ||
+        keys.contains(LogicalKeyboardKey.altRight);
+  }
+
+  bool get _isCommandDown {
+    final keys = HardwareKeyboard.instance.logicalKeysPressed;
+    return keys.contains(LogicalKeyboardKey.metaLeft) ||
+        keys.contains(LogicalKeyboardKey.metaRight) ||
+        keys.contains(LogicalKeyboardKey.controlLeft) ||
+        keys.contains(LogicalKeyboardKey.controlRight);
+  }
+
+  /// Shift-constrains a drag: square/circle for box tools, 15° increments for
+  /// linear tools — the convention shared by Snagit, Shottr, Figma and Sketch.
+  Offset _constrainEndPoint(Offset start, Offset end, CanvasTool tool) {
+    if (!_isShiftDown) return end;
+
+    if (tool == CanvasTool.shape || tool == CanvasTool.blur || tool == CanvasTool.crop) {
+      final dx = end.dx - start.dx;
+      final dy = end.dy - start.dy;
+      final size = math.max(dx.abs(), dy.abs());
+      return Offset(
+        start.dx + (dx.isNegative ? -size : size),
+        start.dy + (dy.isNegative ? -size : size),
+      );
+    }
+
+    final delta = end - start;
+    if (delta.distance == 0) return end;
+    const stepRad = math.pi / 12; // 15°
+    final snapped = (math.atan2(delta.dy, delta.dx) / stepRad).round() * stepRad;
+    return start + Offset(math.cos(snapped), math.sin(snapped)) * delta.distance;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Selection helpers
+  // ---------------------------------------------------------------------------
+
+  Annotation? get _selectedAnnotation {
+    if (_selectedAnnotationId == null) return null;
+    for (final a in widget.annotations) {
+      if (a.id == _selectedAnnotationId) return a;
+    }
+    return null;
+  }
+
+  /// Topmost annotation under [pos]. A precise pass runs first so a click
+  /// inside a hollow shape reaches whatever sits under it; only if nothing is
+  /// hit precisely does a bounding-box pass make large hollow shapes grabbable.
+  Annotation? _hitTestAnnotation(Offset pos) {
+    for (int i = widget.annotations.length - 1; i >= 0; i--) {
+      if (AnnotationRenderer.hitTest(widget.annotations[i], pos)) {
+        return widget.annotations[i];
+      }
+    }
+    for (int i = widget.annotations.length - 1; i >= 0; i--) {
+      if (AnnotationRenderer.hitTestBounds(widget.annotations[i], pos)) {
+        return widget.annotations[i];
+      }
+    }
+    return null;
+  }
+
+  _AnnHandle _hitTestAnnotationHandles(Offset pos, Annotation ann) {
+    final bounds = AnnotationRenderer.selectionRect(ann);
+    if (bounds == Rect.zero) return _AnnHandle.none;
+
+    // Handles are drawn in the annotation's rotated frame, so the probe point
+    // has to be rotated into that same frame before comparing distances.
+    final local = AnnotationRenderer.toLocalSpace(ann, pos);
+    const r = AnnotationRenderer.handleHitRadius;
+
+    final rotPos = bounds.topCenter - const Offset(0, AnnotationRenderer.rotationHandleGap);
+    if ((local - rotPos).distance <= r) return _AnnHandle.rotate;
+    if ((local - bounds.topLeft).distance <= r) return _AnnHandle.topLeft;
+    if ((local - bounds.topRight).distance <= r) return _AnnHandle.topRight;
+    if ((local - bounds.bottomLeft).distance <= r) return _AnnHandle.bottomLeft;
+    if ((local - bounds.bottomRight).distance <= r) return _AnnHandle.bottomRight;
+
+    if (AnnotationRenderer.hitTest(ann, pos)) return _AnnHandle.body;
+    return _AnnHandle.none;
+  }
+
+  void _replaceAnnotation(Annotation updated, {required bool live}) {
+    final callback =
+        live ? (widget.onAnnotationsLiveUpdated ?? widget.onAnnotationsUpdated) : widget.onAnnotationsUpdated;
+    if (callback == null) return;
+    final index = widget.annotations.indexWhere((a) => a.id == updated.id);
+    if (index == -1) return;
+    final list = List<Annotation>.from(widget.annotations);
+    list[index] = updated;
+    callback(list);
+  }
+
+  /// Records the pre-gesture state so the whole gesture collapses into a single
+  /// undo step.
+  void _pushHistoryCheckpoint() {
+    widget.onAnnotationsUpdated?.call(List<Annotation>.from(widget.annotations));
+  }
+
+  void _applyRotationToSelection(double radians) {
+    final ann = _selectedAnnotation;
+    if (ann == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _replaceAnnotation(ann.copyWith(rotation: radians), live: true);
+    });
   }
 
   void _deleteSelectedAnnotation() {
     if (_selectedAnnotationId == null || widget.onAnnotationsUpdated == null) return;
     final updated = widget.annotations.where((a) => a.id != _selectedAnnotationId).toList();
-    setState(() {
-      _selectedAnnotationId = null;
-    });
+    setState(() => _selectedAnnotationId = null);
+    widget.onSelectAnnotation?.call(null);
     widget.onAnnotationsUpdated!(updated);
   }
 
-  // Current drawing shape state
-  Annotation? _currentAnnotation;
-  List<Offset> _currentPoints = [];
+  void _duplicateSelectedAnnotation() {
+    final ann = _selectedAnnotation;
+    if (ann == null) return;
+    const offset = Offset(16, 16);
+    final clone = ann.translated(offset).copyWith(id: _uuid.v4());
+    widget.onAnnotationAdded(clone);
+    setState(() => _selectedAnnotationId = clone.id);
+    widget.onSelectAnnotation?.call(clone);
+  }
+
+  void _nudgeSelectedAnnotation(Offset delta) {
+    final ann = _selectedAnnotation;
+    if (ann == null) return;
+    _pushHistoryCheckpoint();
+    _replaceAnnotation(ann.translated(delta), live: true);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Crop geometry
+  // ---------------------------------------------------------------------------
 
   _CropHandle _hitTestCropRect(Offset pos, Rect cropRect) {
     const handleRadius = 18.0;
@@ -288,483 +470,378 @@ class _EditorCanvasState extends State<EditorCanvas> {
     if ((pos - cropRect.bottomLeft).distance <= handleRadius) return _CropHandle.bottomLeft;
     if ((pos - cropRect.bottomRight).distance <= handleRadius) return _CropHandle.bottomRight;
 
-    if ((pos.dy - cropRect.top).abs() <= handleRadius && pos.dx >= cropRect.left - handleRadius && pos.dx <= cropRect.right + handleRadius) {
-      return _CropHandle.top;
-    }
-    if ((pos.dy - cropRect.bottom).abs() <= handleRadius && pos.dx >= cropRect.left - handleRadius && pos.dx <= cropRect.right + handleRadius) {
-      return _CropHandle.bottom;
-    }
-    if ((pos.dx - cropRect.left).abs() <= handleRadius && pos.dy >= cropRect.top - handleRadius && pos.dy <= cropRect.bottom + handleRadius) {
-      return _CropHandle.left;
-    }
-    if ((pos.dx - cropRect.right).abs() <= handleRadius && pos.dy >= cropRect.top - handleRadius && pos.dy <= cropRect.bottom + handleRadius) {
-      return _CropHandle.right;
-    }
+    final withinX = pos.dx >= cropRect.left - handleRadius && pos.dx <= cropRect.right + handleRadius;
+    final withinY = pos.dy >= cropRect.top - handleRadius && pos.dy <= cropRect.bottom + handleRadius;
 
-    if (cropRect.contains(pos)) {
-      return _CropHandle.move;
-    }
+    if ((pos.dy - cropRect.top).abs() <= handleRadius && withinX) return _CropHandle.top;
+    if ((pos.dy - cropRect.bottom).abs() <= handleRadius && withinX) return _CropHandle.bottom;
+    if ((pos.dx - cropRect.left).abs() <= handleRadius && withinY) return _CropHandle.left;
+    if ((pos.dx - cropRect.right).abs() <= handleRadius && withinY) return _CropHandle.right;
 
+    if (cropRect.contains(pos)) return _CropHandle.move;
     return _CropHandle.none;
   }
 
-  void _updateCropRectWithDelta(Offset delta) {
-    if (_activeCropRect == null) return;
-    double left = _activeCropRect!.left;
-    double top = _activeCropRect!.top;
-    double right = _activeCropRect!.right;
-    double bottom = _activeCropRect!.bottom;
+  void _updateCropRect(Offset totalDelta) {
+    final origin = _cropOrigin;
+    if (origin == null) return;
 
-    final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
-    double maxW = double.infinity;
-    double maxH = double.infinity;
-    if (renderObj is RenderBox && renderObj.hasSize) {
-      maxW = renderObj.size.width;
-      maxH = renderObj.size.height;
-    }
+    // The crop box is confined to the image, never the surrounding letterbox.
+    final limit = _imageRect;
+    double left = origin.left;
+    double top = origin.top;
+    double right = origin.right;
+    double bottom = origin.bottom;
 
     switch (_currentCropHandle) {
       case _CropHandle.move:
-        double newLeft = left + delta.dx;
-        double newTop = top + delta.dy;
-        if (maxW.isFinite) {
-          newLeft = newLeft.clamp(0.0, math.max(0.0, maxW - _activeCropRect!.width));
-        }
-        if (maxH.isFinite) {
-          newTop = newTop.clamp(0.0, math.max(0.0, maxH - _activeCropRect!.height));
-        }
+        final newLeft = (origin.left + totalDelta.dx)
+            .clamp(limit.left, math.max(limit.left, limit.right - origin.width))
+            .toDouble();
+        final newTop = (origin.top + totalDelta.dy)
+            .clamp(limit.top, math.max(limit.top, limit.bottom - origin.height))
+            .toDouble();
         setState(() {
-          _activeCropRect = Rect.fromLTWH(newLeft, newTop, _activeCropRect!.width, _activeCropRect!.height);
+          _activeCropRect = Rect.fromLTWH(newLeft, newTop, origin.width, origin.height);
         });
         return;
       case _CropHandle.topLeft:
-        left += delta.dx;
-        top += delta.dy;
+        left += totalDelta.dx;
+        top += totalDelta.dy;
         break;
       case _CropHandle.topRight:
-        right += delta.dx;
-        top += delta.dy;
+        right += totalDelta.dx;
+        top += totalDelta.dy;
         break;
       case _CropHandle.bottomLeft:
-        left += delta.dx;
-        bottom += delta.dy;
+        left += totalDelta.dx;
+        bottom += totalDelta.dy;
         break;
       case _CropHandle.bottomRight:
-        right += delta.dx;
-        bottom += delta.dy;
+        right += totalDelta.dx;
+        bottom += totalDelta.dy;
         break;
       case _CropHandle.top:
-        top += delta.dy;
+        top += totalDelta.dy;
         break;
       case _CropHandle.bottom:
-        bottom += delta.dy;
+        bottom += totalDelta.dy;
         break;
       case _CropHandle.left:
-        left += delta.dx;
+        left += totalDelta.dx;
         break;
       case _CropHandle.right:
-        right += delta.dx;
+        right += totalDelta.dx;
         break;
       case _CropHandle.none:
         return;
     }
 
-    // Clamp within 0..maxW and 0..maxH with min size 20px
-    left = left.clamp(0.0, right - 20);
-    top = top.clamp(0.0, bottom - 20);
-    if (maxW.isFinite) right = right.clamp(left + 20, maxW);
-    if (maxH.isFinite) bottom = bottom.clamp(top + 20, maxH);
+    const minSize = 20.0;
+    left = left.clamp(limit.left, math.max(limit.left, right - minSize));
+    top = top.clamp(limit.top, math.max(limit.top, bottom - minSize));
+    right = right.clamp(left + minSize, limit.right);
+    bottom = bottom.clamp(top + minSize, limit.bottom);
 
-    setState(() {
-      _activeCropRect = Rect.fromLTRB(left, top, right, bottom);
-    });
+    setState(() => _activeCropRect = Rect.fromLTRB(left, top, right, bottom));
   }
 
-  Annotation? _hitTestAnnotation(Offset pos) {
-    for (int i = widget.annotations.length - 1; i >= 0; i--) {
-      final ann = widget.annotations[i];
-      if (_isPointInsideAnnotation(ann, pos)) {
-        return ann;
-      }
-    }
-    return null;
-  }
+  // ---------------------------------------------------------------------------
+  // Resize
+  // ---------------------------------------------------------------------------
 
-  bool _isPointInsideAnnotation(Annotation ann, Offset point) {
-    const hitPadding = 14.0;
-
-    switch (ann.tool) {
-      case CanvasTool.rectangle:
-      case CanvasTool.oval:
-      case CanvasTool.crop:
-      case CanvasTool.blur:
-        if (ann.startPoint == null || ann.endPoint == null) return false;
-        final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!).inflate(hitPadding);
-        return rect.contains(point);
-
-      case CanvasTool.arrow:
-      case CanvasTool.line:
-        if (ann.startPoint == null || ann.endPoint == null) return false;
-        return _distanceToSegment(point, ann.startPoint!, ann.endPoint!) <= (ann.strokeWidth / 2 + hitPadding);
-
-      case CanvasTool.pen:
-      case CanvasTool.highlight:
-        if (ann.points.isEmpty) return false;
-        final strokeRadius = ann.tool == CanvasTool.highlight ? ann.strokeWidth * 3 : ann.strokeWidth;
-        for (int i = 0; i < ann.points.length - 1; i++) {
-          if (_distanceToSegment(point, ann.points[i], ann.points[i + 1]) <= (strokeRadius / 2 + hitPadding)) {
-            return true;
-          }
-        }
-        return false;
-
-      case CanvasTool.stepMarker:
-        if (ann.startPoint == null) return false;
-        return (point - ann.startPoint!).distance <= (16.0 + hitPadding);
-
-      case CanvasTool.text:
-        if (ann.startPoint == null || ann.text == null) return false;
-        final textPainter = TextPainter(
-          text: TextSpan(
-            text: ann.text,
-            style: TextStyle(fontSize: ann.fontSize, fontWeight: FontWeight.bold),
-          ),
-          textDirection: TextDirection.ltr,
-        );
-        textPainter.layout();
-        final rect = Rect.fromLTWH(
-          ann.startPoint!.dx - 6,
-          ann.startPoint!.dy - 4,
-          textPainter.width + 12,
-          textPainter.height + 8,
-        ).inflate(hitPadding);
-        return rect.contains(point);
-
-      default:
-        if (ann.startPoint != null && ann.endPoint != null) {
-          final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!).inflate(hitPadding);
-          return rect.contains(point);
-        }
-        return false;
-    }
-  }
-
-  double _distanceToSegment(Offset p, Offset v, Offset w) {
-    final l2 = (v - w).distanceSquared;
-    if (l2 == 0) return (p - v).distance;
-    var t = ((p.dx - v.dx) * (w.dx - v.dx) + (p.dy - v.dy) * (w.dy - v.dy)) / l2;
-    t = t.clamp(0.0, 1.0);
-    final projection = Offset(v.dx + t * (w.dx - v.dx), v.dy + t * (w.dy - v.dy));
-    return (p - projection).distance;
-  }
-
-  Annotation _translateAnnotation(Annotation ann, Offset delta) {
-    return ann.copyWith(
-      startPoint: ann.startPoint != null ? ann.startPoint! + delta : null,
-      endPoint: ann.endPoint != null ? ann.endPoint! + delta : null,
-      points: ann.points.map((p) => p + delta).toList(),
-      rect: ann.rect?.shift(delta),
-    );
-  }
-
-  _AnnHandle _hitTestAnnotationHandles(Offset pos, Annotation ann) {
-    final rawBounds = _getAnnotationBoundingRect(ann);
-    if (rawBounds == Rect.zero) return _AnnHandle.none;
-
-    final bounds = rawBounds.inflate(8.0);
-    const handleRadius = 18.0;
-
-    // Rotation handle check (top stalk)
-    final topCenter = bounds.topCenter;
-    final rotPos = topCenter - const Offset(0, 22);
-    if ((pos - rotPos).distance <= handleRadius) return _AnnHandle.rotate;
-
-    if ((pos - bounds.topLeft).distance <= handleRadius) return _AnnHandle.topLeft;
-    if ((pos - bounds.topRight).distance <= handleRadius) return _AnnHandle.topRight;
-    if ((pos - bounds.bottomLeft).distance <= handleRadius) return _AnnHandle.bottomLeft;
-    if ((pos - bounds.bottomRight).distance <= handleRadius) return _AnnHandle.bottomRight;
-
-    if (_isPointInsideAnnotation(ann, pos)) {
-      return _AnnHandle.body;
+  Annotation _resizeAnnotation(Annotation origin, _AnnHandle handle, Offset totalDelta) {
+    if (origin.tool == CanvasTool.text || origin.tool == CanvasTool.stepMarker) {
+      // Point-anchored items scale by their type size rather than by bounds.
+      final grow = (handle == _AnnHandle.bottomRight || handle == _AnnHandle.topRight)
+          ? totalDelta.dx
+          : -totalDelta.dx;
+      return origin.copyWith(fontSize: (origin.fontSize + grow * 0.4).clamp(8.0, 120.0));
     }
 
-    return _AnnHandle.none;
-  }
+    final bounds = AnnotationRenderer.boundingRect(origin);
+    if (bounds == Rect.zero) return origin;
 
-  Annotation _resizeAnnotation(Annotation ann, _AnnHandle handle, Offset delta) {
-    if (ann.tool == CanvasTool.text) {
-      final step = (handle == _AnnHandle.bottomRight || handle == _AnnHandle.topRight) ? delta.dx : -delta.dx;
-      final newSize = (ann.fontSize + step * 0.4).clamp(10.0, 72.0);
-      return ann.copyWith(fontSize: newSize);
-    }
-
-    if (ann.startPoint == null || ann.endPoint == null) {
-      return ann;
-    }
-
-    double startX = ann.startPoint!.dx;
-    double startY = ann.startPoint!.dy;
-    double endX = ann.endPoint!.dx;
-    double endY = ann.endPoint!.dy;
+    double left = bounds.left;
+    double top = bounds.top;
+    double right = bounds.right;
+    double bottom = bounds.bottom;
 
     switch (handle) {
       case _AnnHandle.topLeft:
-        startX += delta.dx;
-        startY += delta.dy;
+        left += totalDelta.dx;
+        top += totalDelta.dy;
         break;
       case _AnnHandle.topRight:
-        endX += delta.dx;
-        startY += delta.dy;
+        right += totalDelta.dx;
+        top += totalDelta.dy;
         break;
       case _AnnHandle.bottomLeft:
-        startX += delta.dx;
-        endY += delta.dy;
+        left += totalDelta.dx;
+        bottom += totalDelta.dy;
         break;
       case _AnnHandle.bottomRight:
-        endX += delta.dx;
-        endY += delta.dy;
+        right += totalDelta.dx;
+        bottom += totalDelta.dy;
         break;
-      case _AnnHandle.none:
-      case _AnnHandle.body:
-      case _AnnHandle.rotate:
-        return ann;
+      default:
+        return origin;
     }
 
-    if ((ann.tool == CanvasTool.pen || ann.tool == CanvasTool.highlight) && ann.points.length > 1) {
-      final oldBounds = _getAnnotationBoundingRect(ann);
-      if (oldBounds.width > 0 && oldBounds.height > 0) {
-        final newBounds = Rect.fromLTRB(
-          math.min(startX, endX),
-          math.min(startY, endY),
-          math.max(startX, endX),
-          math.max(startY, endY),
-        );
-        final scaleX = newBounds.width / oldBounds.width;
-        final scaleY = newBounds.height / oldBounds.height;
-        final scaledPoints = ann.points.map((p) {
-          final relX = (p.dx - oldBounds.left) * scaleX;
-          final relY = (p.dy - oldBounds.top) * scaleY;
-          return Offset(newBounds.left + relX, newBounds.top + relY);
-        }).toList();
-        return ann.copyWith(
-          points: scaledPoints,
-          startPoint: newBounds.topLeft,
-          endPoint: newBounds.bottomRight,
-        );
+    if (_isShiftDown && bounds.width > 0 && bounds.height > 0) {
+      // Preserve the original aspect ratio, anchored at the opposite corner.
+      final ratio = bounds.height / bounds.width;
+      final anchorLeft = handle == _AnnHandle.topRight || handle == _AnnHandle.bottomRight;
+      final anchorTop = handle == _AnnHandle.bottomLeft || handle == _AnnHandle.bottomRight;
+      final width = (right - left).abs();
+      final height = width * ratio;
+      if (anchorLeft) {
+        right = left + width;
+      } else {
+        left = right - width;
+      }
+      if (anchorTop) {
+        bottom = top + height;
+      } else {
+        top = bottom - height;
       }
     }
 
-    return ann.copyWith(
-      startPoint: Offset(startX, startY),
-      endPoint: Offset(endX, endY),
+    final newBounds = Rect.fromLTRB(
+      math.min(left, right),
+      math.min(top, bottom),
+      math.max(left, right),
+      math.max(top, bottom),
+    );
+
+    if (_freehandTools.contains(origin.tool) && origin.points.length > 1) {
+      if (bounds.width <= 0 || bounds.height <= 0) return origin;
+      final scaleX = newBounds.width / bounds.width;
+      final scaleY = newBounds.height / bounds.height;
+      return origin.copyWith(
+        points: origin.points
+            .map((p) => Offset(
+                  newBounds.left + (p.dx - bounds.left) * scaleX,
+                  newBounds.top + (p.dy - bounds.top) * scaleY,
+                ))
+            .toList(),
+      );
+    }
+
+    // Preserve the drag direction of the original shape so arrows/lines keep
+    // pointing the same way after a resize.
+    final origStart = origin.startPoint;
+    final origEnd = origin.endPoint;
+    if (origStart == null || origEnd == null) return origin;
+
+    Offset remap(Offset p) => Offset(
+          bounds.width == 0
+              ? newBounds.left
+              : newBounds.left + (p.dx - bounds.left) / bounds.width * newBounds.width,
+          bounds.height == 0
+              ? newBounds.top
+              : newBounds.top + (p.dy - bounds.top) / bounds.height * newBounds.height,
+        );
+
+    return origin.copyWith(startPoint: remap(origStart), endPoint: remap(origEnd));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Gestures
+  // ---------------------------------------------------------------------------
+
+  Annotation _buildAnnotationForTool(CanvasTool tool, Offset pos) {
+    return Annotation(
+      id: _uuid.v4(),
+      tool: tool,
+      color: widget.activeColor,
+      backgroundColor: widget.textBackgroundColor,
+      fillColor: widget.fillColor,
+      strokeWidth: widget.strokeWidth,
+      opacity: widget.opacity,
+      fontSize: widget.fontSize,
+      fill: widget.isFilled,
+      borderRadius: widget.borderRadius,
+      shapeKind: widget.shapeKind,
+      lineStyle: widget.lineStyle,
+      blurType: widget.blurType,
+      blurStrength: widget.blurStrength,
+      hasShadow: widget.hasShadow,
+      isDoubleArrow: widget.isDoubleArrow,
+      startPoint: pos,
+      endPoint: _freehandTools.contains(tool) ? null : pos,
+      points: _freehandTools.contains(tool) ? [pos] : const [],
     );
   }
 
   void _onPanStart(DragStartDetails details) {
     if (widget.imagePath == null) return;
-
+    _focusNode.requestFocus();
     final pos = details.localPosition;
+    _gestureStartPos = pos;
 
-    // Check if in Crop Tool Mode
     if (widget.activeTool == CanvasTool.crop) {
       if (_activeCropRect != null) {
-        final cropHandle = _hitTestCropRect(pos, _activeCropRect!);
-        if (cropHandle != _CropHandle.none) {
+        final handle = _hitTestCropRect(pos, _activeCropRect!);
+        if (handle != _CropHandle.none) {
           setState(() {
             _isDraggingCrop = true;
-            _currentCropHandle = cropHandle;
+            _currentCropHandle = handle;
+            _cropOrigin = _activeCropRect;
           });
           return;
         }
       }
-      // Start drawing a brand new crop rectangle
       setState(() {
         _selectedAnnotationId = null;
-        _currentAnnotation = Annotation(
-          id: _uuid.v4(),
-          tool: CanvasTool.crop,
-          color: Colors.transparent,
-          startPoint: pos,
-          endPoint: pos,
-        );
+        _drawStart = pos;
         _activeCropRect = Rect.fromPoints(pos, pos);
       });
       return;
     }
 
-    // Check if active crop rect handles or body is being dragged (if crop rect left behind)
     if (_activeCropRect != null) {
-      final cropHandle = _hitTestCropRect(pos, _activeCropRect!);
-      if (cropHandle != _CropHandle.none) {
+      final handle = _hitTestCropRect(pos, _activeCropRect!);
+      if (handle != _CropHandle.none) {
         setState(() {
           _isDraggingCrop = true;
-          _currentCropHandle = cropHandle;
+          _currentCropHandle = handle;
+          _cropOrigin = _activeCropRect;
         });
         return;
       }
     }
 
-    // If an annotation is currently selected, check if its corner handles or body are clicked
-    if (_selectedAnnotationId != null) {
-      final selectedAnn = widget.annotations.firstWhere(
-        (a) => a.id == _selectedAnnotationId,
-        orElse: () => Annotation(id: '', tool: CanvasTool.pen, color: Colors.transparent),
-      );
-      if (selectedAnn.id.isNotEmpty) {
-        final annHandle = _hitTestAnnotationHandles(pos, selectedAnn);
-        if (annHandle != _AnnHandle.none) {
-          // Push undo state once at gesture start
-          widget.onAnnotationsUpdated?.call(List.from(widget.annotations));
-          if (annHandle == _AnnHandle.body) {
-            setState(() {
-              _isDraggingAnnotation = true;
-            });
-          } else if (annHandle == _AnnHandle.rotate) {
-            setState(() {
-              _isRotatingAnnotation = true;
-            });
-          } else {
-            setState(() {
-              _isResizingAnnotation = true;
-              _currentAnnHandle = annHandle;
-            });
-          }
-          return;
-        }
+    // Transform the current selection when its handles or body are grabbed.
+    final selected = _selectedAnnotation;
+    if (selected != null) {
+      final handle = _hitTestAnnotationHandles(pos, selected);
+      if (handle != _AnnHandle.none) {
+        _pushHistoryCheckpoint();
+        setState(() {
+          _gestureOrigin = selected;
+          _isDraggingAnnotation = handle == _AnnHandle.body;
+          _isRotatingAnnotation = handle == _AnnHandle.rotate;
+          _isResizingAnnotation = !_isDraggingAnnotation && !_isRotatingAnnotation;
+          _currentAnnHandle = handle;
+        });
+        return;
       }
     }
 
+    // Existing items can be grabbed directly with any tool active, matching the
+    // "always live" selection behaviour of Snagit's editor.
     final hit = _hitTestAnnotation(pos);
-
-    // If hit an existing annotation -> select item and sync properties
     if (hit != null) {
-      // Push undo state once at start of drag gesture
-      widget.onAnnotationsUpdated?.call(List.from(widget.annotations));
+      _pushHistoryCheckpoint();
       setState(() {
         _selectedAnnotationId = hit.id;
+        _gestureOrigin = hit;
         _isDraggingAnnotation = true;
+        _currentAnnHandle = _AnnHandle.body;
       });
       widget.onSelectAnnotation?.call(hit);
       return;
     }
 
-    // If in select tool and nothing hit -> deselect
     if (widget.activeTool == CanvasTool.select) {
-      setState(() {
-        _selectedAnnotationId = null;
-      });
+      setState(() => _selectedAnnotationId = null);
       widget.onSelectAnnotation?.call(null);
       return;
     }
 
-    // Otherwise deselect item and start drawing new shape
     setState(() {
       _selectedAnnotationId = null;
       _isDraggingAnnotation = false;
       _isResizingAnnotation = false;
       _isRotatingAnnotation = false;
       _currentAnnHandle = _AnnHandle.none;
+      _gestureOrigin = null;
     });
 
-    if (widget.activeTool == CanvasTool.stepMarker || widget.activeTool == CanvasTool.text) {
-      return; // Handled exclusively in _onTapUp to avoid duplicate double-creations
+    // Click-to-place tools are created on tap-up so a stray drag cannot spawn
+    // duplicates.
+    if (widget.activeTool == CanvasTool.stepMarker ||
+        widget.activeTool == CanvasTool.text ||
+        widget.activeTool == CanvasTool.fill ||
+        widget.activeTool == CanvasTool.colorPicker) {
+      return;
     }
 
-    if (widget.activeTool == CanvasTool.pen || widget.activeTool == CanvasTool.highlight) {
-      _currentPoints = [pos];
-      _currentAnnotation = Annotation(
-        id: _uuid.v4(),
-        tool: widget.activeTool,
-        color: widget.activeColor,
-        strokeWidth: widget.strokeWidth,
-        opacity: widget.opacity,
-        points: _currentPoints,
-      );
-    } else {
-      _currentAnnotation = Annotation(
-        id: _uuid.v4(),
-        tool: widget.activeTool,
-        color: widget.activeColor,
-        strokeWidth: widget.strokeWidth,
-        opacity: widget.opacity,
-        startPoint: pos,
-        endPoint: pos,
-        fill: widget.isFilled,
-      );
-    }
-    setState(() {});
+    _drawStart = pos;
+    _currentPoints = _freehandTools.contains(widget.activeTool) ? [pos] : [];
+    setState(() {
+      _currentAnnotation = _buildAnnotationForTool(widget.activeTool, pos);
+    });
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
-    if (_isDraggingCrop && _activeCropRect != null) {
-      _updateCropRectWithDelta(details.delta);
-      return;
-    }
-
-    if (_isRotatingAnnotation && _selectedAnnotationId != null) {
-      final index = widget.annotations.indexWhere((a) => a.id == _selectedAnnotationId);
-      final liveCallback = widget.onAnnotationsLiveUpdated ?? widget.onAnnotationsUpdated;
-      if (index != -1 && liveCallback != null) {
-        final ann = widget.annotations[index];
-        final bounds = _getAnnotationBoundingRect(ann);
-        final center = bounds.center;
-        final angle = math.atan2(details.localPosition.dy - center.dy, details.localPosition.dx - center.dx) + math.pi / 2;
-        final updatedAnn = ann.copyWith(rotation: angle);
-        final newList = List<Annotation>.from(widget.annotations);
-        newList[index] = updatedAnn;
-        liveCallback(newList);
-      }
-      return;
-    }
-
-    if (_isResizingAnnotation && _selectedAnnotationId != null) {
-      final delta = details.delta;
-      final index = widget.annotations.indexWhere((a) => a.id == _selectedAnnotationId);
-      final liveCallback = widget.onAnnotationsLiveUpdated ?? widget.onAnnotationsUpdated;
-      if (index != -1 && liveCallback != null) {
-        final resizedAnn = _resizeAnnotation(widget.annotations[index], _currentAnnHandle, delta);
-        final newList = List<Annotation>.from(widget.annotations);
-        newList[index] = resizedAnn;
-        liveCallback(newList);
-      }
-      return;
-    }
-
-    if (_isDraggingAnnotation && _selectedAnnotationId != null) {
-      final delta = details.delta;
-      final index = widget.annotations.indexWhere((a) => a.id == _selectedAnnotationId);
-      final liveCallback = widget.onAnnotationsLiveUpdated ?? widget.onAnnotationsUpdated;
-      if (index != -1 && liveCallback != null) {
-        final updatedAnn = _translateAnnotation(widget.annotations[index], delta);
-        final newList = List<Annotation>.from(widget.annotations);
-        newList[index] = updatedAnn;
-        liveCallback(newList);
-      }
-      return;
-    }
-
-    if (_currentAnnotation == null) return;
-
     final pos = details.localPosition;
+    final totalDelta = pos - _gestureStartPos;
 
-    if (_currentAnnotation!.tool == CanvasTool.crop) {
-      setState(() {
-        _currentAnnotation = _currentAnnotation!.copyWith(endPoint: pos);
-        _activeCropRect = Rect.fromPoints(_currentAnnotation!.startPoint!, pos);
-      });
+    if (_isDraggingCrop) {
+      _updateCropRect(totalDelta);
       return;
     }
 
-    if (widget.activeTool == CanvasTool.pen || widget.activeTool == CanvasTool.highlight) {
-      setState(() {
-        _currentPoints.add(pos);
-        _currentAnnotation = _currentAnnotation!.copyWith(points: _currentPoints);
-      });
-    } else {
-      setState(() {
-        _currentAnnotation = _currentAnnotation!.copyWith(endPoint: pos);
-      });
+    final origin = _gestureOrigin;
+
+    if (_isRotatingAnnotation && origin != null) {
+      final center = AnnotationRenderer.boundingRect(origin).center;
+      var angle = math.atan2(pos.dy - center.dy, pos.dx - center.dx) + math.pi / 2;
+      if (_isShiftDown) {
+        const step = math.pi / 12; // snap to 15°
+        angle = (angle / step).round() * step;
+      }
+      _replaceAnnotation(origin.copyWith(rotation: angle), live: true);
+      return;
     }
+
+    if (_isResizingAnnotation && origin != null) {
+      _replaceAnnotation(_resizeAnnotation(origin, _currentAnnHandle, totalDelta), live: true);
+      return;
+    }
+
+    if (_isDraggingAnnotation && origin != null) {
+      var delta = totalDelta;
+      if (_isShiftDown) {
+        // Lock movement to the dominant axis.
+        delta = delta.dx.abs() > delta.dy.abs() ? Offset(delta.dx, 0) : Offset(0, delta.dy);
+      }
+      _replaceAnnotation(origin.translated(delta), live: true);
+      return;
+    }
+
+    if (widget.activeTool == CanvasTool.crop && _drawStart != null) {
+      final end = _constrainEndPoint(_drawStart!, pos, CanvasTool.crop);
+      setState(() => _activeCropRect = Rect.fromPoints(_drawStart!, end).intersect(_imageRect));
+      return;
+    }
+
+    if (_currentAnnotation == null || _drawStart == null) return;
+
+    if (_freehandTools.contains(widget.activeTool)) {
+      // Skip sub-pixel samples: fewer points means a smoother path and a much
+      // smaller annotation to store and re-render.
+      if (_currentPoints.isEmpty || (pos - _currentPoints.last).distance >= 1.5) {
+        _currentPoints = [..._currentPoints, pos];
+        setState(() => _currentAnnotation = _currentAnnotation!.copyWith(points: _currentPoints));
+      }
+      return;
+    }
+
+    var start = _drawStart!;
+    var end = _constrainEndPoint(start, pos, widget.activeTool);
+
+    if (_isAltDown && _dragToDrawTools.contains(widget.activeTool)) {
+      // Alt/Option grows the shape outwards from the initial click point.
+      final half = end - start;
+      start = _drawStart! - half;
+    }
+
+    setState(() {
+      _currentAnnotation = _currentAnnotation!.copyWith(startPoint: start, endPoint: end);
+    });
   }
 
   void _onPanEnd(DragEndDetails details) {
@@ -772,89 +849,96 @@ class _EditorCanvasState extends State<EditorCanvas> {
       setState(() {
         _isDraggingCrop = false;
         _currentCropHandle = _CropHandle.none;
+        _cropOrigin = null;
       });
       return;
     }
 
-    if (_isRotatingAnnotation) {
+    if (_isRotatingAnnotation || _isResizingAnnotation || _isDraggingAnnotation) {
+      final settled = _selectedAnnotation;
       setState(() {
         _isRotatingAnnotation = false;
-      });
-      return;
-    }
-
-    if (_isResizingAnnotation) {
-      setState(() {
         _isResizingAnnotation = false;
-        _currentAnnHandle = _AnnHandle.none;
-      });
-      return;
-    }
-
-    if (_isDraggingAnnotation) {
-      setState(() {
         _isDraggingAnnotation = false;
+        _currentAnnHandle = _AnnHandle.none;
+        _gestureOrigin = null;
       });
+      // Re-sync the property panel with the final geometry.
+      if (settled != null) widget.onSelectAnnotation?.call(settled);
       return;
     }
 
-    if (_currentAnnotation != null) {
-      if (_currentAnnotation!.tool == CanvasTool.crop) {
-        final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
-        double maxW = 800;
-        double maxH = 600;
-        if (renderObj is RenderBox && renderObj.hasSize) {
-          maxW = renderObj.size.width;
-          maxH = renderObj.size.height;
-        }
-
-        if (_activeCropRect != null && _activeCropRect!.width >= 15 && _activeCropRect!.height >= 15) {
-          setState(() {
-            _currentAnnotation = null;
-          });
-        } else {
-          // Reset to full image crop box if drawn rect was too small / single click
-          setState(() {
-            _activeCropRect = Rect.fromLTWH(0, 0, maxW, maxH);
-            _currentAnnotation = null;
-          });
-        }
-        return;
+    if (widget.activeTool == CanvasTool.crop) {
+      final rect = _activeCropRect;
+      if (rect == null || rect.width < 15 || rect.height < 15) {
+        setState(() => _activeCropRect = _imageRect);
       }
-
-      widget.onAnnotationAdded(_currentAnnotation!);
-      setState(() {
-        _currentAnnotation = null;
-        _currentPoints = [];
-      });
+      _drawStart = null;
+      return;
     }
+
+    final drawn = _currentAnnotation;
+    setState(() {
+      _currentAnnotation = null;
+      _currentPoints = [];
+      _drawStart = null;
+    });
+
+    if (drawn == null) return;
+
+    // Discard accidental micro-drags instead of leaving invisible artefacts on
+    // the canvas.
+    if (_freehandTools.contains(drawn.tool)) {
+      if (drawn.points.length < 2) return;
+    } else {
+      final bounds = AnnotationRenderer.boundingRect(drawn);
+      if (bounds.width < 3 && bounds.height < 3) return;
+    }
+
+    widget.onAnnotationAdded(drawn);
+    setState(() => _selectedAnnotationId = drawn.id);
+    widget.onSelectAnnotation?.call(drawn);
+  }
+
+  /// Double clicks are detected by hand rather than with a
+  /// `DoubleTapGestureRecognizer`, because adding that recognizer to the arena
+  /// delays every single tap until the double-tap window expires — placing a
+  /// step marker or text box would feel sluggish.
+  bool _consumeDoubleTap(Offset pos) {
+    final now = DateTime.now();
+    final isDouble = now.difference(_lastTapAt) < const Duration(milliseconds: 350) &&
+        (pos - _lastTapPos).distance < 12;
+    _lastTapAt = isDouble ? DateTime.fromMillisecondsSinceEpoch(0) : now;
+    _lastTapPos = pos;
+    return isDouble;
   }
 
   void _onTapUp(TapUpDetails details) {
     if (widget.imagePath == null) return;
-
-    if (widget.activeTool == CanvasTool.crop) {
-      return; // Do NOT exit crop mode on blank canvas tap!
-    }
+    _focusNode.requestFocus();
+    if (widget.activeTool == CanvasTool.crop) return;
 
     final pos = details.localPosition;
     final hit = _hitTestAnnotation(pos);
 
+    if (_consumeDoubleTap(pos)) {
+      // Double-click a text callout to edit it in place.
+      if (hit != null && hit.tool == CanvasTool.text) {
+        setState(() => _selectedAnnotationId = hit.id);
+        widget.onSelectAnnotation?.call(hit);
+        _promptForText(hit.startPoint ?? pos, existing: hit);
+        return;
+      }
+    }
+
     if (widget.activeTool == CanvasTool.fill) {
       if (hit != null) {
-        final updated = hit.copyWith(
-          fill: true,
-          color: widget.activeColor,
+        _pushHistoryCheckpoint();
+        _replaceAnnotation(
+          hit.copyWith(fill: true, fillColor: widget.activeColor),
+          live: true,
         );
-        final list = List<Annotation>.from(widget.annotations);
-        final idx = list.indexWhere((a) => a.id == hit.id);
-        if (idx != -1) {
-          list[idx] = updated;
-          widget.onAnnotationsUpdated?.call(list);
-          setState(() {
-            _selectedAnnotationId = updated.id;
-          });
-        }
+        setState(() => _selectedAnnotationId = hit.id);
       } else {
         _performCanvasFloodFill(pos);
       }
@@ -867,137 +951,156 @@ class _EditorCanvasState extends State<EditorCanvas> {
     }
 
     if (hit != null) {
-      setState(() {
-        _selectedAnnotationId = hit.id;
-      });
+      setState(() => _selectedAnnotationId = hit.id);
       widget.onSelectAnnotation?.call(hit);
       return;
     }
 
-    if (widget.activeTool == CanvasTool.stepMarker) {
-      final annotation = Annotation(
-        id: _uuid.v4(),
-        tool: CanvasTool.stepMarker,
-        color: widget.activeColor,
-        opacity: widget.opacity,
-        startPoint: pos,
-        stepNumber: widget.stepCounter,
-      );
-      widget.onAnnotationAdded(annotation);
-      widget.onStepCounterIncremented(widget.stepCounter + 1);
-      setState(() {
-        _selectedAnnotationId = annotation.id;
-      });
-      widget.onSelectAnnotation?.call(annotation);
-    } else if (widget.activeTool == CanvasTool.text) {
-      _promptForText(pos);
-    } else if (widget.activeTool == CanvasTool.select) {
-      // Clicked on blank canvas space in Select mode: Deselect item
-      setState(() {
-        _selectedAnnotationId = null;
-      });
-      widget.onSelectAnnotation?.call(null);
+    switch (widget.activeTool) {
+      case CanvasTool.stepMarker:
+        final annotation = _buildAnnotationForTool(CanvasTool.stepMarker, pos)
+            .copyWith(stepNumber: widget.stepCounter, endPoint: null);
+        widget.onAnnotationAdded(annotation);
+        widget.onStepCounterIncremented(widget.stepCounter + 1);
+        setState(() => _selectedAnnotationId = annotation.id);
+        widget.onSelectAnnotation?.call(annotation);
+        break;
+      case CanvasTool.text:
+        _promptForText(pos);
+        break;
+      case CanvasTool.select:
+        setState(() => _selectedAnnotationId = null);
+        widget.onSelectAnnotation?.call(null);
+        break;
+      default:
+        break;
     }
   }
 
-  void _promptForText(Offset pos) {
-    final controller = TextEditingController();
+  // ---------------------------------------------------------------------------
+  // Text entry
+  // ---------------------------------------------------------------------------
+
+  void _promptForText(Offset pos, {Annotation? existing}) {
+    final controller = TextEditingController(text: existing?.text ?? '');
+    controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length);
+
     final dialogBg = widget.isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
     final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
     final hintColor = widget.isDarkMode ? Colors.white38 : Colors.black38;
+
+    void submit(BuildContext ctx) {
+      final value = controller.text.trim();
+      Navigator.pop(ctx);
+      if (value.isEmpty) {
+        // Clearing the text of an existing callout removes it.
+        if (existing != null) {
+          widget.onAnnotationsUpdated
+              ?.call(widget.annotations.where((a) => a.id != existing.id).toList());
+          setState(() => _selectedAnnotationId = null);
+          widget.onSelectAnnotation?.call(null);
+        }
+        return;
+      }
+
+      if (existing != null) {
+        _pushHistoryCheckpoint();
+        _replaceAnnotation(existing.copyWith(text: value), live: true);
+        return;
+      }
+
+      final annotation = _buildAnnotationForTool(CanvasTool.text, pos)
+          .copyWith(text: value, endPoint: null);
+      widget.onAnnotationAdded(annotation);
+      setState(() => _selectedAnnotationId = annotation.id);
+      widget.onSelectAnnotation?.call(annotation);
+    }
 
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: dialogBg,
-        title: Text('Add Text Annotation', style: TextStyle(color: textColor)),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
+        title: Text(
+          existing != null ? 'Edit Text Annotation' : 'Add Text Annotation',
           style: TextStyle(color: textColor),
-          decoration: InputDecoration(
-            hintText: 'Enter label or comment...',
-            hintStyle: TextStyle(color: hintColor),
-            enabledBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: AppColors.accent),
+        ),
+        content: SizedBox(
+          width: 380,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLines: 6,
+            minLines: 1,
+            textInputAction: TextInputAction.newline,
+            style: TextStyle(color: textColor),
+            decoration: InputDecoration(
+              hintText: 'Enter label or comment...',
+              hintStyle: TextStyle(color: hintColor),
+              helperText: 'Shift+Enter for a new line',
+              helperStyle: TextStyle(color: hintColor, fontSize: 11),
+              enabledBorder: const UnderlineInputBorder(
+                borderSide: BorderSide(color: AppColors.accent),
+              ),
             ),
+            onSubmitted: (_) => submit(ctx),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: TextStyle(color: widget.isDarkMode ? Colors.white54 : Colors.black54)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: widget.isDarkMode ? Colors.white54 : Colors.black54),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
-            onPressed: () {
-              if (controller.text.trim().isNotEmpty) {
-                final annotation = Annotation(
-                  id: _uuid.v4(),
-                  tool: CanvasTool.text,
-                  color: widget.activeColor,
-                  backgroundColor: widget.textBackgroundColor,
-                  opacity: widget.opacity,
-                  startPoint: pos,
-                  text: controller.text.trim(),
-                  fontSize: widget.fontSize,
-                  fill: widget.isFilled,
-                );
-                widget.onAnnotationAdded(annotation);
-                setState(() {
-                  _selectedAnnotationId = annotation.id;
-                });
-                widget.onSelectAnnotation?.call(annotation);
-              }
-              Navigator.pop(ctx);
-            },
-            child: const Text('Add Text', style: TextStyle(color: Colors.white)),
+            onPressed: () => submit(ctx),
+            child: Text(
+              existing != null ? 'Update' : 'Add Text',
+              style: const TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
+    ).then((_) => controller.dispose());
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pixel sampling tools
+  // ---------------------------------------------------------------------------
+
+  /// Converts a canvas point into a pixel coordinate of the source image, or
+  /// null when the point lies outside the image (in the letterbox area).
+  ({int x, int y})? _canvasPointToImagePixel(Offset localPos, int imgWidth, int imgHeight) {
+    final rect = RenderService.imageRectInCanvas(
+      imageSize: Size(imgWidth.toDouble(), imgHeight.toDouble()),
+      canvasSize: _canvasSize,
     );
+    if (rect.isEmpty || !rect.contains(localPos)) return null;
+
+    final x = ((localPos.dx - rect.left) / rect.width * imgWidth).round().clamp(0, imgWidth - 1);
+    final y = ((localPos.dy - rect.top) / rect.height * imgHeight).round().clamp(0, imgHeight - 1);
+    return (x: x, y: y);
   }
 
   Future<void> _sampleColorAt(Offset localPos) async {
-    if (widget.imagePath == null || !File(widget.imagePath!).existsSync()) return;
+    final path = widget.imagePath;
+    if (path == null || !File(path).existsSync()) return;
     try {
-      final fileBytes = await File(widget.imagePath!).readAsBytes();
-      final decoded = img.decodeImage(fileBytes);
+      final decoded = img.decodeImage(await File(path).readAsBytes());
       if (decoded == null) return;
 
-      final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
-      if (renderObj is! RenderBox || !renderObj.hasSize) return;
+      final pixelPos = _canvasPointToImagePixel(localPos, decoded.width, decoded.height);
+      if (pixelPos == null) return;
 
-      final canvasSize = renderObj.size;
-      final inputSize = Size(decoded.width.toDouble(), decoded.height.toDouble());
-      final fittedSizes = applyBoxFit(BoxFit.contain, inputSize, canvasSize);
-      final destSize = fittedSizes.destination;
-
-      final offsetX = (canvasSize.width - destSize.width) / 2.0;
-      final offsetY = (canvasSize.height - destSize.height) / 2.0;
-
-      final relX = localPos.dx - offsetX;
-      final relY = localPos.dy - offsetY;
-
-      if (relX < 0 || relY < 0 || relX >= destSize.width || relY >= destSize.height) {
-        return;
-      }
-
-      final scaleX = decoded.width / destSize.width;
-      final scaleY = decoded.height / destSize.height;
-
-      final pixelX = (relX * scaleX).round().clamp(0, decoded.width - 1);
-      final pixelY = (relY * scaleY).round().clamp(0, decoded.height - 1);
-
-      final pixel = decoded.getPixel(pixelX, pixelY);
-      final color = Color.fromARGB(
+      final pixel = decoded.getPixel(pixelPos.x, pixelPos.y);
+      widget.onSampleColor?.call(Color.fromARGB(
         pixel.a.toInt(),
         pixel.r.toInt(),
         pixel.g.toInt(),
         pixel.b.toInt(),
-      );
-
-      widget.onSampleColor?.call(color);
+      ));
       widget.onToolSelected?.call(CanvasTool.select);
     } catch (e) {
       debugPrint('Error sampling color: $e');
@@ -1005,388 +1108,433 @@ class _EditorCanvasState extends State<EditorCanvas> {
   }
 
   Future<void> _performCanvasFloodFill(Offset localPos) async {
-    if (widget.imagePath == null || !File(widget.imagePath!).existsSync()) return;
+    final path = widget.imagePath;
+    if (path == null || !File(path).existsSync()) return;
     try {
-      final fileBytes = await File(widget.imagePath!).readAsBytes();
-      final decoded = img.decodeImage(fileBytes);
+      final decoded = img.decodeImage(await File(path).readAsBytes());
       if (decoded == null) return;
 
-      final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
-      if (renderObj is! RenderBox || !renderObj.hasSize) return;
+      final pixelPos = _canvasPointToImagePixel(localPos, decoded.width, decoded.height);
+      if (pixelPos == null) return;
 
-      final canvasSize = renderObj.size;
-      final inputSize = Size(decoded.width.toDouble(), decoded.height.toDouble());
-      final fittedSizes = applyBoxFit(BoxFit.contain, inputSize, canvasSize);
-      final destSize = fittedSizes.destination;
+      // Snapshot the pre-fill bitmap *before* it is overwritten, otherwise the
+      // undo stack would capture the already-filled image.
+      final beforeFill = widget.onBeforeCanvasFill;
+      if (beforeFill != null) await beforeFill();
 
-      final offsetX = (canvasSize.width - destSize.width) / 2.0;
-      final offsetY = (canvasSize.height - destSize.height) / 2.0;
-
-      final relX = localPos.dx - offsetX;
-      final relY = localPos.dy - offsetY;
-
-      if (relX < 0 || relY < 0 || relX >= destSize.width || relY >= destSize.height) {
-        return;
-      }
-
-      final scaleX = decoded.width / destSize.width;
-      final scaleY = decoded.height / destSize.height;
-
-      final pixelX = (relX * scaleX).round().clamp(0, decoded.width - 1);
-      final pixelY = (relY * scaleY).round().clamp(0, decoded.height - 1);
-
-      final fillColor = widget.activeColor;
-      final r = (fillColor.r * 255).round();
-      final g = (fillColor.g * 255).round();
-      final b = (fillColor.b * 255).round();
-      final a = (fillColor.a * 255).round();
+      final fill = widget.activeColor;
       img.fillFlood(
         decoded,
-        x: pixelX,
-        y: pixelY,
-        color: img.ColorRgba8(r, g, b, a),
+        x: pixelPos.x,
+        y: pixelPos.y,
+        color: img.ColorRgba8(
+          (fill.r * 255).round(),
+          (fill.g * 255).round(),
+          (fill.b * 255).round(),
+          (fill.a * 255).round(),
+        ),
         threshold: 24,
       );
 
-      final updatedBytes = Uint8List.fromList(img.encodePng(decoded));
-      await File(widget.imagePath!).writeAsBytes(updatedBytes);
-
+      await File(path).writeAsBytes(Uint8List.fromList(img.encodePng(decoded)));
       widget.onPerformCanvasFill?.call(localPos);
     } catch (e) {
       debugPrint('Error performing flood fill: $e');
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Keyboard
+  // ---------------------------------------------------------------------------
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.delete || key == LogicalKeyboardKey.backspace) {
+      if (_selectedAnnotationId != null) {
+        _deleteSelectedAnnotation();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (key == LogicalKeyboardKey.escape) {
+      setState(() {
+        _selectedAnnotationId = null;
+        _activeCropRect = null;
+        _currentAnnotation = null;
+        _drawStart = null;
+      });
+      widget.onSelectAnnotation?.call(null);
+      widget.onToolSelected?.call(CanvasTool.select);
+      return KeyEventResult.handled;
+    }
+
+    // Nudge the selection with the arrow keys; Shift jumps 10px at a time.
+    final nudges = <LogicalKeyboardKey, Offset>{
+      LogicalKeyboardKey.arrowLeft: Offset(-1, 0),
+      LogicalKeyboardKey.arrowRight: Offset(1, 0),
+      LogicalKeyboardKey.arrowUp: Offset(0, -1),
+      LogicalKeyboardKey.arrowDown: Offset(0, 1),
+    };
+    final nudge = nudges[key];
+    if (nudge != null) {
+      if (_selectedAnnotationId == null) return KeyEventResult.ignored;
+      _nudgeSelectedAnnotation(nudge * (_isShiftDown ? 10.0 : 1.0));
+      return KeyEventResult.handled;
+    }
+
+    if (_isCommandDown) {
+      if (key == LogicalKeyboardKey.keyD) {
+        _duplicateSelectedAnnotation();
+        return KeyEventResult.handled;
+      }
+      // Every other Cmd/Ctrl chord belongs to the app-level shortcut handler.
+      return KeyEventResult.ignored;
+    }
+
+    if (event is KeyRepeatEvent) return KeyEventResult.ignored;
+
+    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+      if (widget.activeTool == CanvasTool.crop && _activeCropRect != null) {
+        _applyCrop();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    final toolKeys = <LogicalKeyboardKey, CanvasTool>{
+      LogicalKeyboardKey.keyV: CanvasTool.select,
+      LogicalKeyboardKey.keyP: CanvasTool.pen,
+      LogicalKeyboardKey.keyL: CanvasTool.line,
+      LogicalKeyboardKey.keyA: CanvasTool.arrow,
+      LogicalKeyboardKey.keyR: CanvasTool.shape,
+      LogicalKeyboardKey.keyS: CanvasTool.shape,
+      LogicalKeyboardKey.keyH: CanvasTool.highlight,
+      LogicalKeyboardKey.keyT: CanvasTool.text,
+      LogicalKeyboardKey.keyN: CanvasTool.stepMarker,
+      LogicalKeyboardKey.digit1: CanvasTool.stepMarker,
+      LogicalKeyboardKey.keyB: CanvasTool.blur,
+      LogicalKeyboardKey.keyM: CanvasTool.ruler,
+      LogicalKeyboardKey.keyG: CanvasTool.fill,
+      LogicalKeyboardKey.keyI: CanvasTool.colorPicker,
+      LogicalKeyboardKey.keyC: CanvasTool.crop,
+    };
+    final tool = toolKeys[key];
+    if (tool != null) {
+      widget.onToolSelected?.call(tool);
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  void _applyCrop() {
+    final rect = _activeCropRect;
+    if (rect == null) return;
+    widget.onApplyCrop?.call(rect);
+    setState(() => _activeCropRect = null);
+    widget.onToolSelected?.call(CanvasTool.select);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cursor
+  // ---------------------------------------------------------------------------
+
+  MouseCursor _cursorForHandle(_AnnHandle handle) {
+    switch (handle) {
+      case _AnnHandle.topLeft:
+      case _AnnHandle.bottomRight:
+        return SystemMouseCursors.resizeUpLeftDownRight;
+      case _AnnHandle.topRight:
+      case _AnnHandle.bottomLeft:
+        return SystemMouseCursors.resizeUpRightDownLeft;
+      case _AnnHandle.rotate:
+        return SystemMouseCursors.grab;
+      case _AnnHandle.body:
+        return SystemMouseCursors.move;
+      case _AnnHandle.none:
+        return SystemMouseCursors.basic;
+    }
+  }
+
+  void _updateCursor(Offset pos) {
+    MouseCursor next;
+
+    final selected = _selectedAnnotation;
+    final handle = selected != null ? _hitTestAnnotationHandles(pos, selected) : _AnnHandle.none;
+
+    if (handle != _AnnHandle.none) {
+      next = _cursorForHandle(handle);
+    } else if (widget.activeTool == CanvasTool.crop) {
+      final crop = _activeCropRect;
+      final cropHandle = crop != null ? _hitTestCropRect(pos, crop) : _CropHandle.none;
+      next = switch (cropHandle) {
+        _CropHandle.move => SystemMouseCursors.move,
+        _CropHandle.topLeft || _CropHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
+        _CropHandle.topRight || _CropHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
+        _CropHandle.top || _CropHandle.bottom => SystemMouseCursors.resizeUpDown,
+        _CropHandle.left || _CropHandle.right => SystemMouseCursors.resizeLeftRight,
+        _CropHandle.none => SystemMouseCursors.precise,
+      };
+    } else if (widget.activeTool == CanvasTool.select) {
+      next = _hitTestAnnotation(pos) != null ? SystemMouseCursors.move : SystemMouseCursors.basic;
+    } else if (widget.activeTool == CanvasTool.colorPicker ||
+        widget.activeTool == CanvasTool.fill) {
+      next = SystemMouseCursors.precise;
+    } else if (widget.activeTool == CanvasTool.text) {
+      next = SystemMouseCursors.text;
+    } else {
+      next = SystemMouseCursors.precise;
+    }
+
+    if (next != _cursor) setState(() => _cursor = next);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     if (widget.imagePath == null || !_fileExists) {
-      final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
-      final subTextColor = widget.isDarkMode ? Colors.white54 : Colors.black54;
-      final circleBg = widget.isDarkMode
-          ? AppColors.darkSurface.withValues(alpha: 0.5)
-          : AppColors.lightSurface;
-      final borderColor = widget.isDarkMode ? Colors.white10 : Colors.black12;
-
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: circleBg,
-                shape: BoxShape.circle,
-                border: Border.all(color: borderColor),
-              ),
-              child: const Icon(Icons.add_a_photo_rounded, size: 56, color: AppColors.accent),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No Screenshot Selected',
-              style: TextStyle(color: textColor, fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Click "Snip" in the top bar to capture screen area, or open an existing image.',
-              style: TextStyle(color: subTextColor, fontSize: 13),
-            ),
-          ],
-        ),
-      );
+      return _buildEmptyState();
     }
 
-    Rect? selectedBounds;
-    if (_selectedAnnotationId != null) {
-      final selectedAnn = widget.annotations.firstWhere(
-        (a) => a.id == _selectedAnnotationId,
-        orElse: () => Annotation(id: '', tool: CanvasTool.pen, color: Colors.transparent),
-      );
-      if (selectedAnn.id.isNotEmpty) {
-        final b = _getAnnotationBoundingRect(selectedAnn);
-        if (b != Rect.zero) {
-          selectedBounds = b.inflate(8.0);
-        }
-      }
-    }
+    final selected = _selectedAnnotation;
+    final selectedBounds =
+        selected != null ? AnnotationRenderer.selectionRect(selected) : Rect.zero;
 
     return Focus(
+      focusNode: _focusNode,
       autofocus: true,
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.delete ||
-              event.logicalKey == LogicalKeyboardKey.backspace) {
-            if (_selectedAnnotationId != null) {
-              _deleteSelectedAnnotation();
-              return KeyEventResult.handled;
-            }
-          } else if (event.logicalKey == LogicalKeyboardKey.escape) {
-            setState(() {
-              _selectedAnnotationId = null;
-              _activeCropRect = null;
-            });
-            widget.onToolSelected?.call(CanvasTool.select);
-            return KeyEventResult.handled;
-          }
-
-          // Single-key tool shortcuts (Shottr / Figma / Photoshop standard)
-          final key = event.logicalKey;
-          if (key == LogicalKeyboardKey.keyV || key == LogicalKeyboardKey.keyS) {
-            widget.onToolSelected?.call(CanvasTool.select);
-            return KeyEventResult.handled;
-          } else if (key == LogicalKeyboardKey.keyA) {
-            widget.onToolSelected?.call(CanvasTool.arrow);
-            return KeyEventResult.handled;
-          } else if (key == LogicalKeyboardKey.keyR) {
-            widget.onToolSelected?.call(CanvasTool.rectangle);
-            return KeyEventResult.handled;
-          } else if (key == LogicalKeyboardKey.keyO) {
-            widget.onToolSelected?.call(CanvasTool.oval);
-            return KeyEventResult.handled;
-          } else if (key == LogicalKeyboardKey.keyP) {
-            widget.onToolSelected?.call(CanvasTool.pen);
-            return KeyEventResult.handled;
-          } else if (key == LogicalKeyboardKey.keyH) {
-            widget.onToolSelected?.call(CanvasTool.highlight);
-            return KeyEventResult.handled;
-          } else if (key == LogicalKeyboardKey.keyT) {
-            widget.onToolSelected?.call(CanvasTool.text);
-            return KeyEventResult.handled;
-          } else if (key == LogicalKeyboardKey.keyB) {
-            widget.onToolSelected?.call(CanvasTool.blur);
-            return KeyEventResult.handled;
-          } else if (key == LogicalKeyboardKey.keyC) {
-            widget.onToolSelected?.call(CanvasTool.crop);
-            return KeyEventResult.handled;
-          } else if (key == LogicalKeyboardKey.keyN || key == LogicalKeyboardKey.digit1) {
-            widget.onToolSelected?.call(CanvasTool.stepMarker);
-            return KeyEventResult.handled;
-          } else if (key == LogicalKeyboardKey.keyM) {
-            widget.onToolSelected?.call(CanvasTool.ruler);
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
+      onKeyEvent: _handleKeyEvent,
       child: ClipRect(
         child: Stack(
           children: [
-            // 1. STEADY Full-Viewport Checkerboard Background (Never shrinks or leaves black gaps on zoom out!)
             Positioned.fill(
-              child: CustomPaint(
-                painter: _SteadyCheckerboardPainter(isDarkMode: widget.isDarkMode),
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: _SteadyCheckerboardPainter(isDarkMode: widget.isDarkMode),
+                ),
               ),
             ),
-
-            // 2. Interactive Zoom & Editing Layer with 2-Finger Trackpad & Scroll Wheel Support
             SizedBox.expand(
               child: Listener(
-              onPointerSignal: (pointerSignal) {
-                if (pointerSignal is PointerScrollEvent) {
-                  final dy = pointerSignal.scrollDelta.dy;
-                  if (dy != 0) {
-                    final currentScale = _transformationController.value.getMaxScaleOnAxis();
-                    final zoomDelta = dy > 0 ? -0.05 : 0.05;
-                    final newScale = (currentScale + zoomDelta).clamp(0.2, 4.0);
-                    _updateZoomMatrix(newScale);
-                    widget.onZoomScaleChanged?.call(newScale);
-                  }
-                }
-              },
-              child: InteractiveViewer(
-                transformationController: _transformationController,
-                maxScale: 4.0,
-                minScale: 0.2,
-                boundaryMargin: const EdgeInsets.all(double.infinity),
-                panEnabled: false,
-                clipBehavior: Clip.hardEdge,
-                onInteractionStart: (details) {
-                  _isInteractiveZooming = true;
+                onPointerSignal: (signal) {
+                  if (signal is! PointerScrollEvent) return;
+                  final dy = signal.scrollDelta.dy;
+                  if (dy == 0) return;
+                  final current = _transformationController.value.getMaxScaleOnAxis();
+                  final newScale = (current + (dy > 0 ? -0.05 : 0.05)).clamp(0.2, 4.0);
+                  _updateZoomMatrix(newScale);
+                  widget.onZoomScaleChanged?.call(newScale);
                 },
-                onInteractionUpdate: (details) {
-                  final scale = _transformationController.value.getMaxScaleOnAxis();
-                  if ((scale - widget.zoomScale).abs() > 0.02) {
-                    widget.onZoomScaleChanged?.call(scale);
-                  }
-                },
-                onInteractionEnd: (details) {
-                  _isInteractiveZooming = false;
-                  final finalScale = _transformationController.value.getMaxScaleOnAxis();
-                  widget.onZoomScaleChanged?.call(finalScale);
-                },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 0),
-                child: RepaintBoundary(
-                  key: widget.repaintBoundaryKey,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    clipBehavior: Clip.none,
-                    children: [
-                      // Base Screenshot Image
-                      Image.file(
-                        File(widget.imagePath!),
-                        key: ValueKey('${widget.imagePath!}_${widget.imageRevision}'),
-                        fit: BoxFit.contain,
-                      ),
+                child: InteractiveViewer(
+                  transformationController: _transformationController,
+                  maxScale: 4.0,
+                  minScale: 0.2,
+                  boundaryMargin: const EdgeInsets.all(double.infinity),
+                  panEnabled: false,
+                  clipBehavior: Clip.hardEdge,
+                  onInteractionStart: (_) => _isInteractiveZooming = true,
+                  onInteractionUpdate: (_) {
+                    final scale = _transformationController.value.getMaxScaleOnAxis();
+                    if ((scale - widget.zoomScale).abs() > 0.02) {
+                      widget.onZoomScaleChanged?.call(scale);
+                    }
+                  },
+                  onInteractionEnd: (_) {
+                    _isInteractiveZooming = false;
+                    widget.onZoomScaleChanged
+                        ?.call(_transformationController.value.getMaxScaleOnAxis());
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: RepaintBoundary(
+                      key: widget.repaintBoundaryKey,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        clipBehavior: Clip.none,
+                        children: [
+                          Image.file(
+                            File(widget.imagePath!),
+                            key: ValueKey('${widget.imagePath!}_${widget.imageRevision}'),
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.medium,
+                          ),
 
-                // Real-time BackdropFilter Blur Overlay for Blur Annotations
-                ...[...widget.annotations, ?_currentAnnotation]
-                    .where((a) => a.tool == CanvasTool.blur && a.startPoint != null && a.endPoint != null)
-                    .map((ann) {
-                  final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!);
-                  if (rect.width < 2 || rect.height < 2) return const SizedBox.shrink();
-                  return Positioned.fromRect(
-                    rect: rect,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: BackdropFilter(
-                        filter: ui.ImageFilter.blur(sigmaX: 12.0, sigmaY: 12.0),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.15),
-                            border: Border.all(
-                              color: AppColors.accent.withValues(alpha: 0.5),
-                              width: 1.2,
+                          // Annotations + live preview + selection chrome.
+                          Positioned.fill(
+                            child: MouseRegion(
+                              cursor: _cursor,
+                              onHover: (e) => _updateCursor(e.localPosition),
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onPanStart: _onPanStart,
+                                onPanUpdate: _onPanUpdate,
+                                onPanEnd: _onPanEnd,
+                                onTapUp: _onTapUp,
+                                child: CustomPaint(
+                                  painter: _AnnotationPainter(
+                                    annotations: widget.annotations,
+                                    currentAnnotation: _currentAnnotation,
+                                    selectedAnnotationId: _selectedAnnotationId,
+                                    baseImage: _baseImage,
+                                    showHud: _currentAnnotation != null ||
+                                        _isResizingAnnotation ||
+                                        _isDraggingAnnotation,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-                  );
-                }),
 
-                // Active Movable & Resizable Crop Overlay (wrapped in IgnorePointer so gestures pass through to GestureDetector)
-                if (_activeCropRect != null && _activeCropRect!.width > 10 && _activeCropRect!.height > 10)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: _CropOverlayPainter(cropRect: _activeCropRect!),
-                      ),
-                    ),
-                  ),
+                          if (_activeCropRect != null &&
+                              _activeCropRect!.width > 10 &&
+                              _activeCropRect!.height > 10) ...[
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: _CropOverlayPainter(cropRect: _activeCropRect!),
+                                ),
+                              ),
+                            ),
+                            _buildCropActionBar(),
+                          ],
 
-                // Interactive Gesture Overlay + CustomPainter (Behavior opaque, on top so drag/pan events are never blocked!)
-                Positioned.fill(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onPanStart: _onPanStart,
-                    onPanUpdate: _onPanUpdate,
-                    onPanEnd: _onPanEnd,
-                    onTapUp: _onTapUp,
-                    child: CustomPaint(
-                      painter: _AnnotationPainter(
-                        annotations: widget.annotations,
-                        currentAnnotation: _currentAnnotation,
-                        selectedAnnotationId: _selectedAnnotationId,
+                          if (selectedBounds != Rect.zero) _buildDeleteChip(selectedBounds),
+                        ],
                       ),
                     ),
                   ),
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-                // Floating Action Chip Bar for Crop Confirmation (Always positioned safely on screen)
-                if (_activeCropRect != null && _activeCropRect!.width > 10 && _activeCropRect!.height > 10)
-                  Builder(
-                    builder: (ctx) {
-                      final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
-                      final renderSize = (renderObj is RenderBox && renderObj.hasSize) ? renderObj.size : null;
-                      final canvasH = renderSize?.height ?? 600.0;
-                      final canvasW = renderSize?.width ?? 800.0;
+  Widget _buildEmptyState() {
+    final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
+    final subTextColor = widget.isDarkMode ? Colors.white54 : Colors.black54;
+    final circleBg = widget.isDarkMode
+        ? AppColors.darkSurface.withValues(alpha: 0.5)
+        : AppColors.lightSurface;
+    final borderColor = widget.isDarkMode ? Colors.white10 : Colors.black12;
 
-                      double barTop = _activeCropRect!.bottom + 14;
-                      if (barTop > canvasH - 50) {
-                        barTop = math.max(12, _activeCropRect!.top - 48);
-                        if (barTop < 12) {
-                          barTop = math.max(12, _activeCropRect!.bottom - 48);
-                        }
-                      }
-                      final barLeft = (_activeCropRect!.center.dx - 110).clamp(12.0, math.max(12.0, canvasW - 220)).toDouble();
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: circleBg,
+              shape: BoxShape.circle,
+              border: Border.all(color: borderColor),
+            ),
+            child: const Icon(Icons.add_a_photo_rounded, size: 56, color: AppColors.accent),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No Screenshot Selected',
+            style: TextStyle(color: textColor, fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Click "Snip" in the top bar to capture screen area, or open an existing image.',
+            style: TextStyle(color: subTextColor, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
 
-                      return Positioned(
-                        left: barLeft,
-                        top: barTop,
-                        child: Material(
-                          color: widget.isDarkMode ? AppColors.darkSurface : AppColors.lightSurface,
-                          elevation: 8,
-                          borderRadius: BorderRadius.circular(20),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: AppColors.accent, width: 1.5),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppColors.accent,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                  ),
-                                  icon: const Icon(Icons.check_rounded, size: 16),
-                                  label: const Text('Apply Crop', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                  onPressed: () {
-                                    if (widget.onApplyCrop != null) {
-                                      widget.onApplyCrop!(_activeCropRect!);
-                                    }
-                                    setState(() => _activeCropRect = null);
-                                    widget.onToolSelected?.call(CanvasTool.select);
-                                  },
-                                ),
-                                const SizedBox(width: 8),
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                  ),
-                                  icon: const Icon(Icons.close_rounded, size: 16),
-                                  label: const Text('Cancel', style: TextStyle(fontSize: 12)),
-                                  onPressed: () {
-                                    setState(() => _activeCropRect = null);
-                                    widget.onToolSelected?.call(CanvasTool.select);
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+  Widget _buildCropActionBar() {
+    final cropRect = _activeCropRect!;
+    final size = _canvasSize;
 
-                // Floating Delete Chip overlay on selected annotation
-                if (selectedBounds != null)
-                  Positioned(
-                    left: math.max(0, selectedBounds.topRight.dx - 10),
-                    top: math.max(0, selectedBounds.topRight.dy - 14),
-                    child: Tooltip(
-                      message: 'Delete selected annotation (Delete / Backspace)',
-                      child: Material(
-                        color: Colors.redAccent,
-                        elevation: 4,
-                        shape: const CircleBorder(),
-                        child: InkWell(
-                          customBorder: const CircleBorder(),
-                          onTap: _deleteSelectedAnnotation,
-                          child: const Padding(
-                            padding: EdgeInsets.all(5),
-                            child: Icon(Icons.close_rounded, size: 14, color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+    double barTop = cropRect.bottom + 14;
+    if (barTop > size.height - 50) {
+      barTop = math.max(12, cropRect.top - 48);
+      if (barTop < 12) barTop = math.max(12, cropRect.bottom - 48);
+    }
+    final barLeft =
+        (cropRect.center.dx - 110).clamp(12.0, math.max(12.0, size.width - 220)).toDouble();
+
+    return Positioned(
+      left: barLeft,
+      top: barTop,
+      child: Material(
+        color: widget.isDarkMode ? AppColors.darkSurface : AppColors.lightSurface,
+        elevation: 8,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.accent, width: 1.5),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.accent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: const Icon(Icons.check_rounded, size: 16),
+                label: const Text('Apply Crop',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                onPressed: _applyCrop,
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: const Icon(Icons.close_rounded, size: 16),
+                label: const Text('Cancel', style: TextStyle(fontSize: 12)),
+                onPressed: () {
+                  setState(() => _activeCropRect = null);
+                  widget.onToolSelected?.call(CanvasTool.select);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeleteChip(Rect selectedBounds) {
+    return Positioned(
+      left: math.max(0, selectedBounds.topRight.dx - 10),
+      top: math.max(0, selectedBounds.topRight.dy - 14),
+      child: Tooltip(
+        message: 'Delete selected annotation (Delete / Backspace)',
+        child: Material(
+          color: Colors.redAccent,
+          elevation: 4,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: _deleteSelectedAnnotation,
+            child: const Padding(
+              padding: EdgeInsets.all(5),
+              child: Icon(Icons.close_rounded, size: 14, color: Colors.white),
             ),
           ),
         ),
       ),
-    ),
-  ),
-],
-),
-),
-);
+    );
   }
 }
 
@@ -1398,23 +1546,18 @@ class _SteadyCheckerboardPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     const squareSize = 14.0;
-    final color1 = isDarkMode ? const Color(0xFF1B1917) : const Color(0xFFE8E2D9);
-    final color2 = isDarkMode ? const Color(0xFF262320) : const Color(0xFFF5EFE6);
-
-    final paint1 = Paint()..color = color1;
-    final paint2 = Paint()..color = color2;
+    final paint1 = Paint()..color = isDarkMode ? const Color(0xFF1B1917) : const Color(0xFFE8E2D9);
+    final paint2 = Paint()..color = isDarkMode ? const Color(0xFF262320) : const Color(0xFFF5EFE6);
 
     int row = 0;
     for (double y = 0; y < size.height; y += squareSize) {
       int col = 0;
       for (double x = 0; x < size.width; x += squareSize) {
-        final rect = Rect.fromLTWH(
-          x,
-          y,
-          math.min(squareSize, size.width - x),
-          math.min(squareSize, size.height - y),
+        canvas.drawRect(
+          Rect.fromLTWH(x, y, math.min(squareSize, size.width - x),
+              math.min(squareSize, size.height - y)),
+          ((row + col) % 2 == 0) ? paint1 : paint2,
         );
-        canvas.drawRect(rect, ((row + col) % 2 == 0) ? paint1 : paint2);
         col++;
       }
       row++;
@@ -1422,9 +1565,8 @@ class _SteadyCheckerboardPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _SteadyCheckerboardPainter oldDelegate) {
-    return oldDelegate.isDarkMode != isDarkMode;
-  }
+  bool shouldRepaint(covariant _SteadyCheckerboardPainter oldDelegate) =>
+      oldDelegate.isDarkMode != isDarkMode;
 }
 
 class _CropOverlayPainter extends CustomPainter {
@@ -1434,529 +1576,140 @@ class _CropOverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final maskPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.55)
-      ..style = PaintingStyle.fill;
-
-    final fullRect = Rect.fromLTWH(0, 0, size.width, size.height).expandToInclude(cropRect).inflate(100.0);
+    final fullRect =
+        (Offset.zero & size).expandToInclude(cropRect).inflate(100.0);
     final path = Path()
       ..addRect(fullRect)
-      ..addRect(cropRect);
-    path.fillType = PathFillType.evenOdd;
-    canvas.drawPath(path, maskPaint);
+      ..addRect(cropRect)
+      ..fillType = PathFillType.evenOdd;
+    canvas.drawPath(path, Paint()..color = Colors.black.withValues(alpha: 0.55));
 
-    final borderPaint = Paint()
-      ..color = AppColors.accent
-      ..strokeWidth = 2.0
-      ..style = PaintingStyle.stroke;
-    canvas.drawRect(cropRect, borderPaint);
+    canvas.drawRect(
+      cropRect,
+      Paint()
+        ..color = AppColors.accent
+        ..strokeWidth = 2.0
+        ..style = PaintingStyle.stroke,
+    );
+
+    // Rule-of-thirds guides, as used by every mainstream crop UI.
+    final guidePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.28)
+      ..strokeWidth = 1.0;
+    for (int i = 1; i < 3; i++) {
+      final dx = cropRect.left + cropRect.width * i / 3;
+      final dy = cropRect.top + cropRect.height * i / 3;
+      canvas.drawLine(Offset(dx, cropRect.top), Offset(dx, cropRect.bottom), guidePaint);
+      canvas.drawLine(Offset(cropRect.left, dy), Offset(cropRect.right, dy), guidePaint);
+    }
 
     const handleSize = 9.0;
     void drawSquareHandle(Offset center) {
-      final handleRect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
-      // Drop shadow
+      final rect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
+      canvas.drawRect(rect.shift(const Offset(0, 1)), Paint()..color = Colors.black38);
+      canvas.drawRect(rect, Paint()..color = Colors.white);
       canvas.drawRect(
-        handleRect.shift(const Offset(0, 1)),
-        Paint()..color = Colors.black38..style = PaintingStyle.fill,
-      );
-      // White square fill
-      canvas.drawRect(handleRect, Paint()..color = Colors.white..style = PaintingStyle.fill);
-      // Dark border outline
-      canvas.drawRect(
-        handleRect,
-        Paint()..color = AppColors.accent..strokeWidth = 1.2..style = PaintingStyle.stroke,
+        rect,
+        Paint()
+          ..color = AppColors.accent
+          ..strokeWidth = 1.2
+          ..style = PaintingStyle.stroke,
       );
     }
 
-    final corners = [
+    for (final c in [
       cropRect.topLeft,
       cropRect.topRight,
       cropRect.bottomLeft,
       cropRect.bottomRight,
-    ];
-
-    for (final c in corners) {
+      cropRect.topCenter,
+      cropRect.bottomCenter,
+      cropRect.centerLeft,
+      cropRect.centerRight,
+    ]) {
       drawSquareHandle(c);
     }
 
-    final midEdges = [
-      Offset(cropRect.center.dx, cropRect.top),
-      Offset(cropRect.center.dx, cropRect.bottom),
-      Offset(cropRect.left, cropRect.center.dy),
-      Offset(cropRect.right, cropRect.center.dy),
-    ];
-    for (final m in midEdges) {
-      drawSquareHandle(m);
-    }
-
-    // Dimension Badge Pill
-    final textSpan = TextSpan(
-      text: '${cropRect.width.round()} × ${cropRect.height.round()} px',
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 11,
-        fontWeight: FontWeight.bold,
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '${cropRect.width.round()} × ${cropRect.height.round()} px',
+        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
       ),
-    );
-    final textPainter = TextPainter(
-      text: textSpan,
       textDirection: TextDirection.ltr,
-    );
-    textPainter.layout();
+    )..layout();
 
     final badgeCenter = Offset(cropRect.center.dx, cropRect.top - 16);
-    final badgeRect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: badgeCenter, width: textPainter.width + 12, height: textPainter.height + 6),
-      const Radius.circular(10),
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+            center: badgeCenter, width: tp.width + 12, height: tp.height + 6),
+        const Radius.circular(10),
+      ),
+      Paint()..color = AppColors.accent,
     );
-    final badgePaint = Paint()..color = AppColors.accent..style = PaintingStyle.fill;
-    canvas.drawRRect(badgeRect, badgePaint);
-    textPainter.paint(canvas, badgeCenter - Offset(textPainter.width / 2, textPainter.height / 2));
+    tp.paint(canvas, badgeCenter - Offset(tp.width / 2, tp.height / 2));
   }
 
   @override
-  bool shouldRepaint(covariant _CropOverlayPainter oldDelegate) {
-    return oldDelegate.cropRect != cropRect;
-  }
-}
-
-Rect _getAnnotationBoundingRect(Annotation ann) {
-  switch (ann.tool) {
-    case CanvasTool.rectangle:
-    case CanvasTool.oval:
-    case CanvasTool.crop:
-    case CanvasTool.blur:
-    case CanvasTool.line:
-    case CanvasTool.arrow:
-      if (ann.startPoint != null && ann.endPoint != null) {
-        return Rect.fromPoints(ann.startPoint!, ann.endPoint!);
-      }
-      return Rect.zero;
-
-    case CanvasTool.pen:
-    case CanvasTool.highlight:
-      if (ann.points.isEmpty) return Rect.zero;
-      double minX = ann.points.first.dx;
-      double maxX = ann.points.first.dx;
-      double minY = ann.points.first.dy;
-      double maxY = ann.points.first.dy;
-      for (final p in ann.points) {
-        if (p.dx < minX) minX = p.dx;
-        if (p.dx > maxX) maxX = p.dx;
-        if (p.dy < minY) minY = p.dy;
-        if (p.dy > maxY) maxY = p.dy;
-      }
-      return Rect.fromLTRB(minX, minY, maxX, maxY);
-
-    case CanvasTool.stepMarker:
-      if (ann.startPoint != null) {
-        final r = ann.fontSize > 0 ? ann.fontSize : 16.0;
-        return Rect.fromCircle(center: ann.startPoint!, radius: r);
-      }
-      return Rect.zero;
-
-    case CanvasTool.text:
-      if (ann.startPoint != null && ann.text != null) {
-        final textPainter = TextPainter(
-          text: TextSpan(
-            text: ann.text,
-            style: TextStyle(fontSize: ann.fontSize, fontWeight: FontWeight.bold),
-          ),
-          textDirection: TextDirection.ltr,
-        );
-        textPainter.layout();
-        return Rect.fromLTWH(
-          ann.startPoint!.dx - 6,
-          ann.startPoint!.dy - 4,
-          textPainter.width + 12,
-          textPainter.height + 8,
-        );
-      }
-      return Rect.zero;
-
-    default:
-      if (ann.startPoint != null && ann.endPoint != null) {
-        return Rect.fromPoints(ann.startPoint!, ann.endPoint!);
-      }
-      return Rect.zero;
-  }
+  bool shouldRepaint(covariant _CropOverlayPainter oldDelegate) =>
+      oldDelegate.cropRect != cropRect;
 }
 
 class _AnnotationPainter extends CustomPainter {
   final List<Annotation> annotations;
   final Annotation? currentAnnotation;
   final String? selectedAnnotationId;
+  final ui.Image? baseImage;
+  final bool showHud;
 
   _AnnotationPainter({
     required this.annotations,
     this.currentAnnotation,
     this.selectedAnnotationId,
+    this.baseImage,
+    this.showHud = false,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final allAnnotations = [...annotations, ?currentAnnotation];
-    for (final ann in allAnnotations) {
-      final effectiveAlpha = (ann.color.a * ann.opacity).clamp(0.0, 1.0);
-      final paint = Paint()
-        ..color = ann.color.withValues(alpha: effectiveAlpha)
-        ..strokeWidth = ann.strokeWidth
-        ..style = ann.fill ? PaintingStyle.fill : PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round;
+    // Blur regions resample the real screenshot pixels, so the on-screen result
+    // is identical to what the exporter writes to disk.
+    final image = baseImage;
+    final imageRect = image == null
+        ? null
+        : RenderService.imageRectInCanvas(
+            imageSize: Size(image.width.toDouble(), image.height.toDouble()),
+            canvasSize: size,
+          );
 
-      final bounds = _getAnnotationBoundingRect(ann);
-      final hasRotation = ann.rotation != 0.0;
-
-      if (hasRotation && bounds != Rect.zero) {
-        canvas.save();
-        final center = bounds.center;
-        canvas.translate(center.dx, center.dy);
-        canvas.rotate(ann.rotation);
-        canvas.translate(-center.dx, -center.dy);
-      }
-
-      switch (ann.tool) {
-        case CanvasTool.pen:
-          if (ann.points.length > 1) {
-            for (int i = 0; i < ann.points.length - 1; i++) {
-              canvas.drawLine(ann.points[i], ann.points[i + 1], paint);
-            }
-          }
-          break;
-
-        case CanvasTool.highlight:
-          final hlAlpha = (0.4 * ann.opacity).clamp(0.0, 1.0);
-          final hlPaint = Paint()
-            ..color = ann.color.withValues(alpha: hlAlpha)
-            ..strokeWidth = ann.strokeWidth * 3
-            ..strokeCap = StrokeCap.square
-            ..style = PaintingStyle.stroke;
-          if (ann.points.length > 1) {
-            for (int i = 0; i < ann.points.length - 1; i++) {
-              canvas.drawLine(ann.points[i], ann.points[i + 1], hlPaint);
-            }
-          }
-          break;
-
-        case CanvasTool.arrow:
-          if (ann.startPoint != null && ann.endPoint != null) {
-            _drawArrow(canvas, ann, paint);
-          }
-          break;
-
-        case CanvasTool.line:
-          if (ann.startPoint != null && ann.endPoint != null) {
-            if (ann.lineStyle == LineStyle.dashed) {
-              _drawDashedLine(canvas, ann.startPoint!, ann.endPoint!, paint);
-            } else {
-              canvas.drawLine(ann.startPoint!, ann.endPoint!, paint);
-            }
-          }
-          break;
-
-        case CanvasTool.rectangle:
-          if (ann.startPoint != null && ann.endPoint != null) {
-            final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!);
-            final rrect = RRect.fromRectAndRadius(rect, Radius.circular(ann.borderRadius));
-            canvas.drawRRect(rrect, paint);
-          }
-          break;
-
-        case CanvasTool.oval:
-          if (ann.startPoint != null && ann.endPoint != null) {
-            final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!);
-            canvas.drawOval(rect, paint);
-          }
-          break;
-
-        case CanvasTool.blur:
-          if (ann.startPoint != null && ann.endPoint != null) {
-            final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!);
-            final blurBg = Paint()
-              ..color = Colors.black.withValues(alpha: 0.8)
-              ..style = PaintingStyle.fill;
-            canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)), blurBg);
-
-            const blockSize = 8.0;
-            final blockPaint1 = Paint()..color = Colors.white12..style = PaintingStyle.fill;
-            final blockPaint2 = Paint()..color = Colors.white24..style = PaintingStyle.fill;
-            int row = 0;
-            for (double y = rect.top; y < rect.bottom; y += blockSize) {
-              int col = 0;
-              for (double x = rect.left; x < rect.right; x += blockSize) {
-                final cellRect = Rect.fromLTWH(
-                  x,
-                  y,
-                  math.min(blockSize, rect.right - x),
-                  math.min(blockSize, rect.bottom - y),
-                );
-                canvas.drawRect(cellRect, ((row + col) % 2 == 0) ? blockPaint1 : blockPaint2);
-                col++;
-              }
-              row++;
-            }
-
-            final borderPaint = Paint()
-              ..color = AppColors.accent.withValues(alpha: 0.5)
-              ..strokeWidth = 1.2
-              ..style = PaintingStyle.stroke;
-            canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)), borderPaint);
-          }
-          break;
-
-        case CanvasTool.stepMarker:
-          if (ann.startPoint != null && ann.stepNumber != null) {
-            _drawStepMarker(canvas, ann.startPoint!, ann.stepNumber!, ann.color, ann.fontSize);
-          }
-          break;
-
-        case CanvasTool.text:
-          if (ann.startPoint != null && ann.text != null) {
-            _drawText(canvas, ann.startPoint!, ann.text!, ann.color, ann.fontSize, ann.fill, ann.backgroundColor);
-          }
-          break;
-
-        default:
-          break;
-      }
-
-      if (hasRotation && bounds != Rect.zero) {
-        canvas.restore();
-      }
-    }
-
-    // Render selection box around selected annotation
-    if (selectedAnnotationId != null) {
-      final selectedAnn = annotations.firstWhere(
-        (a) => a.id == selectedAnnotationId,
-        orElse: () => Annotation(id: '', tool: CanvasTool.pen, color: Colors.transparent),
-      );
-      if (selectedAnn.id.isNotEmpty) {
-        _drawSelectionFrame(canvas, selectedAnn);
-      }
-    }
-  }
-
-  void _drawSelectionFrame(Canvas canvas, Annotation ann) {
-    final rawBounds = _getAnnotationBoundingRect(ann);
-    if (rawBounds == Rect.zero) return;
-
-    final bounds = rawBounds.inflate(8.0);
-    final hasRotation = ann.rotation != 0.0;
-
-    if (hasRotation) {
-      canvas.save();
-      final center = bounds.center;
-      canvas.translate(center.dx, center.dy);
-      canvas.rotate(ann.rotation);
-      canvas.translate(-center.dx, -center.dy);
-    }
-
-    final selPaint = Paint()
-      ..color = AppColors.accent
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-
-    final rrect = RRect.fromRectAndRadius(bounds, const Radius.circular(6));
-    canvas.drawRRect(rrect, selPaint);
-
-    final corners = [
-      bounds.topLeft,
-      bounds.topRight,
-      bounds.bottomLeft,
-      bounds.bottomRight,
-    ];
-
-    final handleFill = Paint()..color = Colors.white..style = PaintingStyle.fill;
-    final handleBorder = Paint()..color = AppColors.accent..strokeWidth = 2.0..style = PaintingStyle.stroke;
-
-    for (final c in corners) {
-      canvas.drawCircle(c, 4.5, handleFill);
-      canvas.drawCircle(c, 4.5, handleBorder);
-    }
-
-    // Top Stalk Line + Rotation Handle Knob
-    final topCenter = bounds.topCenter;
-    final rotHandlePos = topCenter - const Offset(0, 22);
-
-    canvas.drawLine(
-      topCenter,
-      rotHandlePos,
-      Paint()..color = AppColors.accent..strokeWidth = 1.5,
-    );
-
-    canvas.drawCircle(rotHandlePos, 5.5, handleFill);
-    canvas.drawCircle(rotHandlePos, 5.5, handleBorder);
-
-    if (hasRotation) {
-      canvas.restore();
-    }
-  }
-
-  void _drawArrow(Canvas canvas, Annotation ann, Paint paint) {
-    final start = ann.startPoint;
-    final end = ann.endPoint;
-    if (start == null || end == null) return;
-
-    final strokeW = paint.strokeWidth;
-    final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
-    final arrowSize = math.max(16.0, strokeW * 3.2);
-
-    final lineEndOffset = strokeW > 4.0 ? (strokeW * 0.5) : 0.0;
-    final lineEnd = Offset(
-      end.dx - lineEndOffset * math.cos(angle),
-      end.dy - lineEndOffset * math.sin(angle),
-    );
-
-    if (ann.lineStyle == LineStyle.dashed) {
-      _drawDashedLine(canvas, start, lineEnd, paint);
-    } else {
-      canvas.drawLine(start, lineEnd, paint);
-    }
-
-    final path = Path();
-    path.moveTo(end.dx, end.dy);
-    path.lineTo(
-      end.dx - arrowSize * math.cos(angle - math.pi / 6),
-      end.dy - arrowSize * math.sin(angle - math.pi / 6),
-    );
-    path.lineTo(
-      end.dx - arrowSize * math.cos(angle + math.pi / 6),
-      end.dy - arrowSize * math.sin(angle + math.pi / 6),
-    );
-    path.close();
-
-    final headPaint = Paint()
-      ..color = paint.color
-      ..style = PaintingStyle.fill;
-
-    canvas.drawPath(path, headPaint);
-
-    if (ann.isDoubleArrow) {
-      final startPath = Path();
-      startPath.moveTo(start.dx, start.dy);
-      startPath.lineTo(
-        start.dx + arrowSize * math.cos(angle - math.pi / 6),
-        start.dy + arrowSize * math.sin(angle - math.pi / 6),
-      );
-      startPath.lineTo(
-        start.dx + arrowSize * math.cos(angle + math.pi / 6),
-        start.dy + arrowSize * math.sin(angle + math.pi / 6),
-      );
-      startPath.close();
-      canvas.drawPath(startPath, headPaint);
-    }
-  }
-
-  void _drawDashedLine(Canvas canvas, Offset p1, Offset p2, Paint paint) {
-    final distance = (p2 - p1).distance;
-    if (distance == 0) return;
-
-    final direction = (p2 - p1) / distance;
-    const dashWidth = 8.0;
-    const dashSpace = 6.0;
-
-    double currentDistance = 0.0;
-    while (currentDistance < distance) {
-      final start = p1 + direction * currentDistance;
-      final end = p1 + direction * math.min(currentDistance + dashWidth, distance);
-      canvas.drawLine(start, end, paint);
-      currentDistance += dashWidth + dashSpace;
-    }
-  }
-
-  void _drawStepMarker(Canvas canvas, Offset center, int step, Color color, double fontSize) {
-    final radius = fontSize > 0 ? fontSize : 16.0;
-
-    final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.3)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-    canvas.drawCircle(center + const Offset(0, 2), radius, shadowPaint);
-
-    final bodyPaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(center, radius, bodyPaint);
-
-    final borderPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.9)
-      ..strokeWidth = math.max(1.5, radius * 0.1)
-      ..style = PaintingStyle.stroke;
-    canvas.drawCircle(center, radius, borderPaint);
-
-    final numFontSize = (radius * 0.9).clamp(9.0, 48.0);
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: '$step',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: numFontSize,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    textPainter.paint(
+    AnnotationRenderer.paintAll(
       canvas,
-      center - Offset(textPainter.width / 2, textPainter.height / 2),
+      [...annotations, ?currentAnnotation],
+      baseImage: image,
+      imageRect: imageRect,
     );
-  }
 
-  void _drawText(Canvas canvas, Offset position, String text, Color color, double fontSize, bool fill, Color? backgroundColor) {
-    final showBg = fill || (backgroundColor != null && backgroundColor != Colors.transparent);
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(
-          color: color,
-          fontSize: fontSize,
-          fontWeight: FontWeight.bold,
-          shadows: showBg
-              ? null
-              : const [
-                  Shadow(color: Colors.black87, offset: Offset(1, 1), blurRadius: 4),
-                  Shadow(color: Colors.white70, offset: Offset(-0.5, -0.5), blurRadius: 2),
-                ],
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout();
-
-    if (showBg) {
-      final bgRect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          position.dx - 6,
-          position.dy - 4,
-          textPainter.width + 12,
-          textPainter.height + 8,
-        ),
-        const Radius.circular(6),
-      );
-
-      final bgColor = backgroundColor ?? Colors.black.withValues(alpha: 0.75);
-
-      final bgPaint = Paint()
-        ..color = bgColor
-        ..style = PaintingStyle.fill;
-      canvas.drawRRect(bgRect, bgPaint);
-
-      final borderPaint = Paint()
-        ..color = color.withValues(alpha: 0.6)
-        ..strokeWidth = 1.2
-        ..style = PaintingStyle.stroke;
-      canvas.drawRRect(bgRect, borderPaint);
+    if (selectedAnnotationId != null) {
+      for (final ann in annotations) {
+        if (ann.id == selectedAnnotationId) {
+          AnnotationRenderer.paintSelection(canvas, ann);
+          if (showHud) AnnotationRenderer.paintMeasurementHud(canvas, ann);
+          break;
+        }
+      }
     }
 
-    textPainter.paint(canvas, position);
+    if (showHud && currentAnnotation != null) {
+      AnnotationRenderer.paintMeasurementHud(canvas, currentAnnotation!);
+    }
   }
 
   @override
   bool shouldRepaint(covariant _AnnotationPainter oldDelegate) {
-    return oldDelegate.annotations != annotations ||
+    return !listEquals(oldDelegate.annotations, annotations) ||
         oldDelegate.currentAnnotation != currentAnnotation ||
-        oldDelegate.selectedAnnotationId != selectedAnnotationId;
+        oldDelegate.selectedAnnotationId != selectedAnnotationId ||
+        oldDelegate.baseImage != baseImage ||
+        oldDelegate.showHud != showHud;
   }
 }

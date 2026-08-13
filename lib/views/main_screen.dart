@@ -1,9 +1,7 @@
+import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
-import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image/image.dart' as img;
@@ -15,6 +13,7 @@ import '../models/tool_properties.dart';
 import '../services/capture_service.dart';
 import '../services/clipboard_service.dart';
 import '../services/database_service.dart';
+import '../services/render_service.dart';
 import '../services/shortcut_service.dart';
 import '../services/storage_service.dart';
 import '../utils/constants.dart';
@@ -26,6 +25,10 @@ import 'dialogs/save_as_dialog.dart';
 import 'dialogs/shortcut_settings_dialog.dart';
 import 'editor_canvas.dart';
 import 'gallery_sidebar.dart';
+
+/// Sentinel mirroring the one in the models so "leave unchanged" stays
+/// distinguishable from "clear this colour".
+const Object _unsetProperty = Object();
 
 class CanvasSnapshot {
   final Uint8List? imageBytes;
@@ -55,7 +58,15 @@ class _MainScreenState extends State<MainScreen> {
   List<Annotation> _annotations = [];
   final List<CanvasSnapshot> _undoStack = [];
   final List<CanvasSnapshot> _redoStack = [];
+  static const int _maxUndoSteps = 80;
   int _imageRevision = 0;
+
+  /// Debounces persistence during high-frequency drag updates.
+  Timer? _persistDebounce;
+
+  /// Collapses a burst of property-slider edits into one undo step.
+  String? _propertyUndoAnnotationId;
+  DateTime _propertyUndoAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   CanvasTool _activeTool = CanvasTool.select;
   final Map<CanvasTool, ToolProperties> _toolPropertiesMap = ToolProperties.createDefaults();
@@ -82,22 +93,39 @@ class _MainScreenState extends State<MainScreen> {
     return _toolPropertiesMap[targetTool] ?? const ToolProperties(activeColor: AppColors.accent);
   }
 
+  /// Applies a property change to the active tool's defaults and, when an item
+  /// is selected, to that item as well.
+  ///
+  /// [syncOnly] is used when the change originates from selecting an existing
+  /// annotation — the tool defaults absorb its style but the annotation itself
+  /// must not be rewritten (and no undo entry is recorded).
   void _updateActiveToolProperty({
     Color? activeColor,
     double? strokeWidth,
     double? opacity,
     double? fontSize,
     bool? isFilled,
-    Color? textBackgroundColor,
+    Object? textBackgroundColor = _unsetProperty,
+    Object? fillColor = _unsetProperty,
     double? borderRadius,
+    ShapeKind? shapeKind,
     LineStyle? lineStyle,
     BlurType? blurType,
+    double? blurStrength,
+    bool? hasShadow,
     bool? isDoubleArrow,
+    bool syncOnly = false,
   }) {
+    final selectedAnn = _selectedAnnotation;
+    final targetTool = selectedAnn?.tool ?? _activeTool;
+
+    if (!syncOnly && selectedAnn != null) {
+      _pushPropertyUndoState(selectedAnn.id);
+    }
+
     setState(() {
-      final selectedAnn = _selectedAnnotation;
-      final targetTool = selectedAnn?.tool ?? _activeTool;
-      final currentProps = _toolPropertiesMap[targetTool] ?? const ToolProperties(activeColor: AppColors.accent);
+      final currentProps =
+          _toolPropertiesMap[targetTool] ?? const ToolProperties(activeColor: AppColors.accent);
 
       _toolPropertiesMap[targetTool] = currentProps.copyWith(
         activeColor: activeColor,
@@ -106,32 +134,46 @@ class _MainScreenState extends State<MainScreen> {
         fontSize: fontSize,
         isFilled: isFilled,
         textBackgroundColor: textBackgroundColor,
+        fillColor: fillColor,
         borderRadius: borderRadius,
+        shapeKind: shapeKind,
         lineStyle: lineStyle,
         blurType: blurType,
+        blurStrength: blurStrength,
+        hasShadow: hasShadow,
         isDoubleArrow: isDoubleArrow,
       );
 
-      // If an annotation is selected, mutate its properties directly in _annotations!
-      if (_selectedAnnotationId != null) {
-        final idx = _annotations.indexWhere((a) => a.id == _selectedAnnotationId);
-        if (idx != -1) {
-          final oldAnn = _annotations[idx];
-          _annotations[idx] = oldAnn.copyWith(
-            color: activeColor ?? oldAnn.color,
-            strokeWidth: strokeWidth ?? oldAnn.strokeWidth,
-            opacity: opacity ?? oldAnn.opacity,
-            fontSize: fontSize ?? oldAnn.fontSize,
-            fill: isFilled ?? oldAnn.fill,
-            backgroundColor: textBackgroundColor ?? oldAnn.backgroundColor,
-            borderRadius: borderRadius ?? oldAnn.borderRadius,
-            lineStyle: lineStyle ?? oldAnn.lineStyle,
-            blurType: blurType ?? oldAnn.blurType,
-            isDoubleArrow: isDoubleArrow ?? oldAnn.isDoubleArrow,
-          );
-        }
-      }
+      if (syncOnly || _selectedAnnotationId == null) return;
+
+      final idx = _annotations.indexWhere((a) => a.id == _selectedAnnotationId);
+      if (idx == -1) return;
+      // Replace the list rather than mutating it in place: the canvas painter
+      // compares element-wise against its previous list, and an in-place edit
+      // leaves both references pointing at the same (already updated) object,
+      // so the change would never repaint.
+      _annotations = List<Annotation>.of(_annotations);
+      _annotations[idx] = _annotations[idx].copyWith(
+        color: activeColor,
+        strokeWidth: strokeWidth,
+        opacity: opacity,
+        fontSize: fontSize,
+        fill: isFilled,
+        backgroundColor: textBackgroundColor,
+        fillColor: fillColor,
+        borderRadius: borderRadius,
+        shapeKind: shapeKind,
+        lineStyle: lineStyle,
+        blurType: blurType,
+        blurStrength: blurStrength,
+        hasShadow: hasShadow,
+        isDoubleArrow: isDoubleArrow,
+      );
     });
+
+    if (!syncOnly && _selectedAnnotationId != null) {
+      _syncCurrentCaptureAnnotations();
+    }
   }
 
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -144,6 +186,15 @@ class _MainScreenState extends State<MainScreen> {
     _loadShortcuts();
     _loadHistory();
     _loadThemePreference();
+  }
+
+  @override
+  void dispose() {
+    // Flush any annotation edit still waiting on the debounce timer.
+    _persistDebounce?.cancel();
+    final pending = _activeCapture;
+    if (pending != null) StorageService.saveCaptureItem(pending);
+    super.dispose();
   }
 
   Future<void> _loadThemePreference() async {
@@ -179,18 +230,31 @@ class _MainScreenState extends State<MainScreen> {
     return maxStep;
   }
 
-  void _syncCurrentCaptureAnnotations() {
-    if (_activeCapture != null) {
-      final updatedItem = _activeCapture!.copyWith(annotations: List.from(_annotations));
-      _activeCapture = updatedItem;
+  /// Mirrors the working annotation list onto the active capture and persists
+  /// it.
+  ///
+  /// [debounce] is used for the high-frequency updates emitted while dragging;
+  /// without it every pointer move would run a SQLite transaction.
+  void _syncCurrentCaptureAnnotations({bool debounce = false}) {
+    if (_activeCapture == null) return;
 
-      final idx = _captures.indexWhere((c) => c.id == updatedItem.id);
-      if (idx != -1) {
-        _captures[idx] = updatedItem;
-      }
+    final updatedItem = _activeCapture!.copyWith(annotations: List.from(_annotations));
+    _activeCapture = updatedItem;
 
-      StorageService.saveCaptureItem(updatedItem);
+    final idx = _captures.indexWhere((c) => c.id == updatedItem.id);
+    if (idx != -1) {
+      _captures[idx] = updatedItem;
     }
+
+    _persistDebounce?.cancel();
+    if (!debounce) {
+      StorageService.saveCaptureItem(updatedItem);
+      return;
+    }
+    _persistDebounce = Timer(const Duration(milliseconds: 400), () {
+      final pending = _activeCapture;
+      if (pending != null) StorageService.saveCaptureItem(pending);
+    });
   }
 
   Future<void> _loadHistory() async {
@@ -293,22 +357,90 @@ class _MainScreenState extends State<MainScreen> {
     return bindings;
   }
 
-  Future<void> _pushUndoState({Uint8List? imageBytes}) async {
+  /// Records an undo checkpoint.
+  ///
+  /// Bitmap pixels are only snapshotted for operations that actually rewrite
+  /// the image file (crop, flatten, flood fill). Vector-only edits store just
+  /// the annotation list, which keeps the history cheap — a full-resolution
+  /// screenshot copy per annotation would exhaust memory in a long session.
+  Future<void> _pushUndoState({Uint8List? imageBytes, bool captureImage = false}) async {
+    _propertyUndoAnnotationId = null;
+
     Uint8List? bytes = imageBytes;
-    if (bytes == null && _activeCapture != null && File(_activeCapture!.filePath).existsSync()) {
+    if (bytes == null &&
+        captureImage &&
+        _activeCapture != null &&
+        File(_activeCapture!.filePath).existsSync()) {
       bytes = await File(_activeCapture!.filePath).readAsBytes();
     }
+
     _undoStack.add(CanvasSnapshot(
       imageBytes: bytes,
       annotations: List.from(_annotations),
     ));
+    _trimUndoStack();
+    _redoStack.clear();
+  }
+
+  void _trimUndoStack() {
+    while (_undoStack.length > _maxUndoSteps) {
+      _undoStack.removeAt(0);
+    }
+  }
+
+  /// Coalesces the stream of checkpoints produced while a property slider is
+  /// being dragged into a single undo step per item per pause.
+  void _pushPropertyUndoState(String annotationId) {
+    final now = DateTime.now();
+    if (_propertyUndoAnnotationId == annotationId &&
+        now.difference(_propertyUndoAt) < const Duration(milliseconds: 900)) {
+      _propertyUndoAt = now;
+      return;
+    }
+    _propertyUndoAnnotationId = annotationId;
+    _propertyUndoAt = now;
+
+    _undoStack.add(CanvasSnapshot(annotations: List.from(_annotations)));
+    _trimUndoStack();
     _redoStack.clear();
   }
 
   void _onAnnotationAdded(Annotation annotation) {
     _pushUndoState();
     setState(() {
-      _annotations.add(annotation);
+      _annotations = [..._annotations, annotation];
+    });
+    _syncCurrentCaptureAnnotations();
+  }
+
+  void _deleteSelectedAnnotation() {
+    if (_selectedAnnotationId == null) return;
+    _pushUndoState();
+    setState(() {
+      _annotations = _annotations.where((a) => a.id != _selectedAnnotationId).toList();
+      _selectedAnnotationId = null;
+    });
+    _syncCurrentCaptureAnnotations();
+  }
+
+  /// Moves the selected annotation to the top or the bottom of the paint order.
+  void _reorderSelectedAnnotation({required bool toFront}) {
+    if (_selectedAnnotationId == null) return;
+    final idx = _annotations.indexWhere((a) => a.id == _selectedAnnotationId);
+    if (idx == -1) return;
+    if (toFront && idx == _annotations.length - 1) return;
+    if (!toFront && idx == 0) return;
+
+    _pushUndoState();
+    setState(() {
+      final reordered = List<Annotation>.of(_annotations);
+      final item = reordered.removeAt(idx);
+      if (toFront) {
+        reordered.add(item);
+      } else {
+        reordered.insert(0, item);
+      }
+      _annotations = reordered;
     });
     _syncCurrentCaptureAnnotations();
   }
@@ -321,75 +453,62 @@ class _MainScreenState extends State<MainScreen> {
     _syncCurrentCaptureAnnotations();
   }
 
-  /// Live update during drag/resize/rotate – no undo push (undo is pushed once at gesture start)
+  /// Live update during drag/resize/rotate – no undo push (undo is pushed once
+  /// at gesture start) and the database write is debounced.
   void _onAnnotationsLiveUpdated(List<Annotation> updatedList) {
     setState(() {
       _annotations = List.from(updatedList);
+    });
+    _syncCurrentCaptureAnnotations(debounce: true);
+  }
+
+  Future<void> _applyHistorySnapshot(
+    CanvasSnapshot snapshot,
+    List<CanvasSnapshot> pushTo,
+  ) async {
+    // Only carry bitmap pixels into the opposite stack when the step being
+    // reversed actually changed them.
+    Uint8List? currentBytes;
+    if (snapshot.imageBytes != null &&
+        _activeCapture != null &&
+        File(_activeCapture!.filePath).existsSync()) {
+      currentBytes = await File(_activeCapture!.filePath).readAsBytes();
+    }
+    pushTo.add(CanvasSnapshot(
+      imageBytes: currentBytes,
+      annotations: List.from(_annotations),
+    ));
+
+    if (snapshot.imageBytes != null && _activeCapture != null) {
+      await _replaceActiveImageBytes(snapshot.imageBytes!);
+    }
+
+    setState(() {
+      _imageRevision++;
+      _annotations = List.from(snapshot.annotations);
+      _selectedAnnotationId = null;
+      _stepCounter = _findMaxStepNumber(snapshot.annotations) + 1;
     });
     _syncCurrentCaptureAnnotations();
   }
 
   Future<void> _undo() async {
-    if (_undoStack.isNotEmpty) {
-      Uint8List? currentBytes;
-      if (_activeCapture != null && File(_activeCapture!.filePath).existsSync()) {
-        currentBytes = await File(_activeCapture!.filePath).readAsBytes();
-      }
-      _redoStack.add(CanvasSnapshot(
-        imageBytes: currentBytes,
-        annotations: List.from(_annotations),
-      ));
-
-      final snapshot = _undoStack.removeLast();
-      if (snapshot.imageBytes != null && _activeCapture != null) {
-        final filePath = _activeCapture!.filePath;
-        await File(filePath).writeAsBytes(snapshot.imageBytes!);
-        await FileImage(File(filePath)).evict();
-        PaintingBinding.instance.imageCache.clear();
-        PaintingBinding.instance.imageCache.clearLiveImages();
-      }
-
-      setState(() {
-        _imageRevision++;
-        _annotations = List.from(snapshot.annotations);
-      });
-      _syncCurrentCaptureAnnotations();
-    }
+    if (_undoStack.isEmpty) return;
+    _propertyUndoAnnotationId = null;
+    await _applyHistorySnapshot(_undoStack.removeLast(), _redoStack);
   }
 
   Future<void> _redo() async {
-    if (_redoStack.isNotEmpty) {
-      Uint8List? currentBytes;
-      if (_activeCapture != null && File(_activeCapture!.filePath).existsSync()) {
-        currentBytes = await File(_activeCapture!.filePath).readAsBytes();
-      }
-      _undoStack.add(CanvasSnapshot(
-        imageBytes: currentBytes,
-        annotations: List.from(_annotations),
-      ));
-
-      final snapshot = _redoStack.removeLast();
-      if (snapshot.imageBytes != null && _activeCapture != null) {
-        final filePath = _activeCapture!.filePath;
-        await File(filePath).writeAsBytes(snapshot.imageBytes!);
-        await FileImage(File(filePath)).evict();
-        PaintingBinding.instance.imageCache.clear();
-        PaintingBinding.instance.imageCache.clearLiveImages();
-      }
-
-      setState(() {
-        _imageRevision++;
-        _annotations = List.from(snapshot.annotations);
-      });
-      _syncCurrentCaptureAnnotations();
-    }
+    if (_redoStack.isEmpty) return;
+    _propertyUndoAnnotationId = null;
+    await _applyHistorySnapshot(_redoStack.removeLast(), _undoStack);
   }
 
   void _clearAnnotations() {
     if (_annotations.isNotEmpty) {
       _pushUndoState();
       setState(() {
-        _annotations.clear();
+        _annotations = [];
       });
       _syncCurrentCaptureAnnotations();
     }
@@ -463,7 +582,7 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       _captures.insert(0, newItem);
       _activeCapture = newItem;
-      _annotations.clear();
+      _annotations = [];
       _undoStack.clear();
       _redoStack.clear();
       _stepCounter = 1;
@@ -472,22 +591,29 @@ class _MainScreenState extends State<MainScreen> {
     DatabaseService.setSetting('active_capture_id', newItem.id);
   }
 
-  // Export & Copy Render
-  Future<Uint8List?> _renderAnnotatedBytes() async {
-    try {
-      final boundary = _repaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary != null) {
-        final image = await boundary.toImage(pixelRatio: 2.0); // 2x Retina resolution
-        final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-        if (byteData != null) {
-          return byteData.buffer.asUint8List();
-        }
-      }
-    } catch (_) {}
+  /// Size of the editor canvas the annotations were laid out against.
+  Size get _canvasSize {
+    final renderObj = _repaintKey.currentContext?.findRenderObject();
+    if (renderObj is RenderBox && renderObj.hasSize) return renderObj.size;
+    return Size.zero;
+  }
 
-    // Fallback to source file bytes if repaint boundary is unavailable
-    if (_activeCapture != null && File(_activeCapture!.filePath).existsSync()) {
-      return await File(_activeCapture!.filePath).readAsBytes();
+  /// Renders the active capture with its annotations burned in, at the source
+  /// image's native resolution and with no editor chrome.
+  Future<Uint8List?> _renderAnnotatedBytes() async {
+    final capture = _activeCapture;
+    if (capture == null) return null;
+
+    final bytes = await RenderService.renderFlattenedPng(
+      imagePath: capture.filePath,
+      annotations: _annotations,
+      canvasSize: _canvasSize,
+    );
+    if (bytes != null) return bytes;
+
+    // Fall back to the untouched source file rather than failing the export.
+    if (File(capture.filePath).existsSync()) {
+      return await File(capture.filePath).readAsBytes();
     }
     return null;
   }
@@ -548,6 +674,16 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  /// Writes [bytes] over the active capture's file and forces every image cache
+  /// layer to drop the stale bitmap so the canvas updates immediately.
+  Future<void> _replaceActiveImageBytes(Uint8List bytes) async {
+    final targetPath = _activeCapture!.filePath;
+    await File(targetPath).writeAsBytes(bytes);
+    await FileImage(File(targetPath)).evict();
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
+  }
+
   Future<void> _handleFlattenCanvas() async {
     if (_activeCapture == null) {
       _showToast('No screenshot to flatten!');
@@ -558,91 +694,79 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
 
+    await _pushUndoState(captureImage: true);
+
     final bytes = await _renderAnnotatedBytes();
-    if (bytes != null) {
-      final targetPath = _activeCapture!.filePath;
-      await File(targetPath).writeAsBytes(bytes);
-
-      setState(() {
-        _annotations.clear();
-        _undoStack.clear();
-        _redoStack.clear();
-        _stepCounter = 1;
-      });
-      _syncCurrentCaptureAnnotations();
-
-      _showToast('Canvas flattened! Annotations baked into image.');
+    if (bytes == null) {
+      _showToast('Failed to flatten canvas');
+      return;
     }
+
+    await _replaceActiveImageBytes(bytes);
+
+    setState(() {
+      _imageRevision++;
+      _annotations = [];
+      _stepCounter = 1;
+    });
+    _syncCurrentCaptureAnnotations();
+
+    _showToast('Canvas flattened! Annotations baked into image.');
   }
 
   Future<void> _handleApplyCrop(Rect cropRect) async {
     if (_activeCapture == null || !File(_activeCapture!.filePath).existsSync()) return;
 
     try {
-      final boundary = _repaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      final canvasSize = boundary?.size ?? Size.zero;
+      final canvasSize = _canvasSize;
+      final originalBytes = await File(_activeCapture!.filePath).readAsBytes();
 
-      final fileBytes = await File(_activeCapture!.filePath).readAsBytes();
-      final decoded = img.decodeImage(fileBytes);
+      // Push the pre-crop image *and* annotations so a single undo restores
+      // both.
+      await _pushUndoState(imageBytes: originalBytes);
+
+      // Bake annotations in before cropping so markup survives the operation
+      // instead of being discarded.
+      final sourceBytes = _annotations.isEmpty
+          ? originalBytes
+          : (await _renderAnnotatedBytes() ?? originalBytes);
+
+      final decoded = img.decodeImage(sourceBytes);
       if (decoded == null) return;
 
-      // 1. Push current uncropped state to undo stack before applying crop!
-      await _pushUndoState(imageBytes: fileBytes);
+      final imageRect = RenderService.imageRectInCanvas(
+        imageSize: Size(decoded.width.toDouble(), decoded.height.toDouble()),
+        canvasSize: canvasSize,
+      );
+      if (imageRect.isEmpty) return;
 
-      // 2. Calculate exact 1:1 image bounds inside BoxFit.contain boundary
-      final inputSize = Size(decoded.width.toDouble(), decoded.height.toDouble());
-      final fittedSizes = applyBoxFit(BoxFit.contain, inputSize, canvasSize);
-      final destSize = fittedSizes.destination;
+      // Canvas coordinates -> native image pixels.
+      final scaleX = decoded.width / imageRect.width;
+      final scaleY = decoded.height / imageRect.height;
 
-      // Offsets of letterbox/pillarbox padding
-      final offsetX = (canvasSize.width - destSize.width) / 2.0;
-      final offsetY = (canvasSize.height - destSize.height) / 2.0;
-
-      // Clamp cropRect to destination image region
-      final relLeft = (cropRect.left - offsetX).clamp(0.0, destSize.width);
-      final relTop = (cropRect.top - offsetY).clamp(0.0, destSize.height);
-      final relRight = (cropRect.right - offsetX).clamp(0.0, destSize.width);
-      final relBottom = (cropRect.bottom - offsetY).clamp(0.0, destSize.height);
-
-      final cropWOnScreen = relRight - relLeft;
-      final cropHOnScreen = relBottom - relTop;
-      if (cropWOnScreen <= 5 || cropHOnScreen <= 5) return;
-
-      final scaleX = decoded.width / destSize.width;
-      final scaleY = decoded.height / destSize.height;
+      final relLeft = (cropRect.left - imageRect.left).clamp(0.0, imageRect.width);
+      final relTop = (cropRect.top - imageRect.top).clamp(0.0, imageRect.height);
+      final relRight = (cropRect.right - imageRect.left).clamp(0.0, imageRect.width);
+      final relBottom = (cropRect.bottom - imageRect.top).clamp(0.0, imageRect.height);
+      if (relRight - relLeft <= 5 || relBottom - relTop <= 5) return;
 
       final cropX = (relLeft * scaleX).round().clamp(0, decoded.width - 1);
       final cropY = (relTop * scaleY).round().clamp(0, decoded.height - 1);
-      final cropW = math.max(1, (cropWOnScreen * scaleX).round().clamp(1, decoded.width - cropX));
-      final cropH = math.max(1, (cropHOnScreen * scaleY).round().clamp(1, decoded.height - cropY));
+      final cropW = ((relRight - relLeft) * scaleX).round().clamp(1, decoded.width - cropX);
+      final cropH = ((relBottom - relTop) * scaleY).round().clamp(1, decoded.height - cropY);
 
-      // 3. Crop using official package:image copyCrop function (100% distortion-free)
-      final croppedImage = img.copyCrop(
-        decoded,
-        x: cropX,
-        y: cropY,
-        width: cropW,
-        height: cropH,
-      );
-
-      final croppedBytes = Uint8List.fromList(img.encodePng(croppedImage));
-
-      final targetPath = _activeCapture!.filePath;
-      await File(targetPath).writeAsBytes(croppedBytes);
-
-      // Evict old cached image from memory so canvas updates immediately in real-time
-      await FileImage(File(targetPath)).evict();
-      PaintingBinding.instance.imageCache.clear();
-      PaintingBinding.instance.imageCache.clearLiveImages();
+      final cropped = img.copyCrop(decoded, x: cropX, y: cropY, width: cropW, height: cropH);
+      await _replaceActiveImageBytes(Uint8List.fromList(img.encodePng(cropped)));
 
       setState(() {
         _imageRevision++;
-        _annotations.clear();
+        _annotations = [];
+        _selectedAnnotationId = null;
         _activeTool = CanvasTool.select;
       });
       _syncCurrentCaptureAnnotations();
 
-      _showToast('Image cropped cleanly! (Press Cmd+Z to Undo)');
+      _showToast('Cropped to $cropW × $cropH px (Cmd+Z to undo)');
     } catch (e) {
       debugPrint('SnipSnap crop error: $e');
       _showToast('Failed to crop image');
@@ -711,8 +835,6 @@ class _MainScreenState extends State<MainScreen> {
             children: [
               // Top Header Bar
               HeaderBar(
-                activeTool: _activeTool,
-                onToolSelected: (tool) => setState(() => _activeTool = tool),
                 onSnipInteractive: _handleInteractiveCapture,
                 onSnipFullScreen: _handleFullScreenCapture,
                 onSnipTimer: _handleTimerCapture,
@@ -731,6 +853,8 @@ class _MainScreenState extends State<MainScreen> {
                 onOpenAboutDialog: _openAboutDialog,
                 canUndo: _undoStack.isNotEmpty,
                 canRedo: _redoStack.isNotEmpty,
+                canClear: _annotations.isNotEmpty,
+                hasCapture: _activeCapture != null,
                 isSidebarOpen: _isSidebarOpen,
                 isDarkMode: _isDarkMode,
                 shortcuts: _shortcuts,
@@ -749,6 +873,8 @@ class _MainScreenState extends State<MainScreen> {
                         ToolSidebar(
                           activeTool: _activeTool,
                           onToolSelected: (tool) => setState(() => _activeTool = tool),
+                          shapeKind: _currentToolProperties.shapeKind,
+                          onShapeKindSelected: (kind) => _updateActiveToolProperty(shapeKind: kind),
                           isSidebarOpen: _isSidebarOpen,
                           onToggleSidebar: () => setState(() => _isSidebarOpen = !_isSidebarOpen),
                           isDarkMode: _isDarkMode,
@@ -769,16 +895,23 @@ class _MainScreenState extends State<MainScreen> {
                                 }
                               });
                               if (ann != null) {
+                                // Adopt the item's style into the tool defaults
+                                // without rewriting the item or logging undo.
                                 _updateActiveToolProperty(
+                                  syncOnly: true,
                                   activeColor: ann.color,
                                   textBackgroundColor: ann.backgroundColor,
+                                  fillColor: ann.fillColor,
                                   strokeWidth: ann.strokeWidth,
                                   fontSize: ann.fontSize,
                                   opacity: ann.opacity,
                                   isFilled: ann.fill,
                                   borderRadius: ann.borderRadius,
+                                  shapeKind: ann.shapeKind,
                                   lineStyle: ann.lineStyle,
                                   blurType: ann.blurType,
+                                  blurStrength: ann.blurStrength,
+                                  hasShadow: ann.hasShadow,
                                   isDoubleArrow: ann.isDoubleArrow,
                                 );
                                 setState(() {
@@ -788,14 +921,18 @@ class _MainScreenState extends State<MainScreen> {
                             },
                             activeColor: _currentToolProperties.activeColor,
                             textBackgroundColor: _currentToolProperties.textBackgroundColor,
+                            fillColor: _currentToolProperties.fillColor,
                             strokeWidth: _currentToolProperties.strokeWidth,
                             opacity: _currentToolProperties.opacity,
                             rotation: _rotation,
                             fontSize: _currentToolProperties.fontSize,
                             isFilled: _currentToolProperties.isFilled,
                             borderRadius: _currentToolProperties.borderRadius,
+                            shapeKind: _currentToolProperties.shapeKind,
                             lineStyle: _currentToolProperties.lineStyle,
                             blurType: _currentToolProperties.blurType,
+                            blurStrength: _currentToolProperties.blurStrength,
+                            hasShadow: _currentToolProperties.hasShadow,
                             isDoubleArrow: _currentToolProperties.isDoubleArrow,
                             stepCounter: _stepCounter,
                             onAnnotationAdded: _onAnnotationAdded,
@@ -805,16 +942,15 @@ class _MainScreenState extends State<MainScreen> {
                             onApplyCrop: _handleApplyCrop,
                             onSampleColor: (color) {
                               _updateActiveToolProperty(activeColor: color);
-                              _scaffoldMessengerKey.currentState?.showSnackBar(
-                                SnackBar(
-                                  content: Text('Sampled Color: #${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}'),
-                                  duration: const Duration(seconds: 2),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
+                              _showToast(
+                                'Sampled colour #${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
                               );
                             },
+                            // Snapshot the bitmap *before* the flood fill
+                            // overwrites the file, otherwise undo would restore
+                            // the already-filled image.
+                            onBeforeCanvasFill: () => _pushUndoState(captureImage: true),
                             onPerformCanvasFill: (pos) {
-                              _pushUndoState();
                               setState(() {
                                 _imageRevision++;
                               });
@@ -845,6 +981,14 @@ class _MainScreenState extends State<MainScreen> {
                                   onColorChanged: (color) => _updateActiveToolProperty(activeColor: color),
                                   textBackgroundColor: _currentToolProperties.textBackgroundColor,
                                   onTextBackgroundColorChanged: (c) => _updateActiveToolProperty(textBackgroundColor: c),
+                                  fillColor: _currentToolProperties.fillColor,
+                                  onFillColorChanged: (c) => _updateActiveToolProperty(fillColor: c),
+                                  shapeKind: _currentToolProperties.shapeKind,
+                                  onShapeKindChanged: (k) => _updateActiveToolProperty(shapeKind: k),
+                                  blurStrength: _currentToolProperties.blurStrength,
+                                  onBlurStrengthChanged: (v) => _updateActiveToolProperty(blurStrength: v),
+                                  hasShadow: _currentToolProperties.hasShadow,
+                                  onShadowChanged: (v) => _updateActiveToolProperty(hasShadow: v),
                                   strokeWidth: _currentToolProperties.strokeWidth,
                                   onStrokeWidthChanged: (val) => _updateActiveToolProperty(strokeWidth: val),
                                   opacity: _currentToolProperties.opacity,
@@ -871,39 +1015,9 @@ class _MainScreenState extends State<MainScreen> {
                                   onFlattenCanvas: _annotations.isNotEmpty ? _handleFlattenCanvas : null,
                                   onCloseDrawer: () => setState(() => _isPropertiesOpen = false),
                                   selectedAnnotation: _selectedAnnotation,
-                                  onDeleteSelected: () {
-                                    if (_selectedAnnotationId != null) {
-                                      _pushUndoState();
-                                      setState(() {
-                                        _annotations.removeWhere((a) => a.id == _selectedAnnotationId);
-                                        _selectedAnnotationId = null;
-                                      });
-                                    }
-                                  },
-                                  onBringToFront: () {
-                                    if (_selectedAnnotationId != null) {
-                                      _pushUndoState();
-                                      setState(() {
-                                        final idx = _annotations.indexWhere((a) => a.id == _selectedAnnotationId);
-                                        if (idx != -1 && idx < _annotations.length - 1) {
-                                          final item = _annotations.removeAt(idx);
-                                          _annotations.add(item);
-                                        }
-                                      });
-                                    }
-                                  },
-                                  onSendToBack: () {
-                                    if (_selectedAnnotationId != null) {
-                                      _pushUndoState();
-                                      setState(() {
-                                        final idx = _annotations.indexWhere((a) => a.id == _selectedAnnotationId);
-                                        if (idx > 0) {
-                                          final item = _annotations.removeAt(idx);
-                                          _annotations.insert(0, item);
-                                        }
-                                      });
-                                    }
-                                  },
+                                  onDeleteSelected: _deleteSelectedAnnotation,
+                                  onBringToFront: () => _reorderSelectedAnnotation(toFront: true),
+                                  onSendToBack: () => _reorderSelectedAnnotation(toFront: false),
                                   onDeselect: () {
                                     setState(() {
                                       _selectedAnnotationId = null;

@@ -5,8 +5,9 @@ enum CanvasTool {
   pen,
   arrow,
   line,
-  rectangle,
-  oval,
+  /// Unified vector shape tool. The concrete outline is chosen with
+  /// [ShapeKind] — this replaced the separate rectangle and oval tools.
+  shape,
   highlight,
   stepMarker,
   text,
@@ -15,6 +16,42 @@ enum CanvasTool {
   crop,
   fill,
   colorPicker,
+}
+
+/// Outlines available to [CanvasTool.shape].
+enum ShapeKind {
+  rectangle,
+  ellipse,
+  triangle,
+  diamond,
+  pentagon,
+  hexagon,
+  star,
+  speechBubble,
+}
+
+extension ShapeKindDisplay on ShapeKind {
+  String get label => switch (this) {
+        ShapeKind.rectangle => 'Rectangle',
+        ShapeKind.ellipse => 'Ellipse',
+        ShapeKind.triangle => 'Triangle',
+        ShapeKind.diamond => 'Diamond',
+        ShapeKind.pentagon => 'Pentagon',
+        ShapeKind.hexagon => 'Hexagon',
+        ShapeKind.star => 'Star',
+        ShapeKind.speechBubble => 'Speech Bubble',
+      };
+
+  IconData get icon => switch (this) {
+        ShapeKind.rectangle => Icons.crop_square_rounded,
+        ShapeKind.ellipse => Icons.circle_outlined,
+        ShapeKind.triangle => Icons.change_history_rounded,
+        ShapeKind.diamond => Icons.diamond_outlined,
+        ShapeKind.pentagon => Icons.pentagon_outlined,
+        ShapeKind.hexagon => Icons.hexagon_outlined,
+        ShapeKind.star => Icons.star_border_rounded,
+        ShapeKind.speechBubble => Icons.chat_bubble_outline_rounded,
+      };
 }
 
 enum LineStyle {

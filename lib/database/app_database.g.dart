@@ -630,6 +630,27 @@ class $AnnotationsTable extends Annotations
     type: DriftSqlType.double,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _propsJsonMeta = const VerificationMeta(
+    'propsJson',
+  );
+  @override
+  late final GeneratedColumn<String> propsJson = GeneratedColumn<String>(
+    'props_json',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _zIndexMeta = const VerificationMeta('zIndex');
+  @override
+  late final GeneratedColumn<int> zIndex = GeneratedColumn<int>(
+    'z_index',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -649,6 +670,8 @@ class $AnnotationsTable extends Annotations
     endX,
     endY,
     opacity,
+    propsJson,
+    zIndex,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -781,6 +804,18 @@ class $AnnotationsTable extends Annotations
         opacity.isAcceptableOrUnknown(data['opacity']!, _opacityMeta),
       );
     }
+    if (data.containsKey('props_json')) {
+      context.handle(
+        _propsJsonMeta,
+        propsJson.isAcceptableOrUnknown(data['props_json']!, _propsJsonMeta),
+      );
+    }
+    if (data.containsKey('z_index')) {
+      context.handle(
+        _zIndexMeta,
+        zIndex.isAcceptableOrUnknown(data['z_index']!, _zIndexMeta),
+      );
+    }
     return context;
   }
 
@@ -858,6 +893,14 @@ class $AnnotationsTable extends Annotations
         DriftSqlType.double,
         data['${effectivePrefix}opacity'],
       ),
+      propsJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}props_json'],
+      ),
+      zIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}z_index'],
+      )!,
     );
   }
 
@@ -885,6 +928,14 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
   final double? endX;
   final double? endY;
   final double? opacity;
+
+  /// Every tool property without a dedicated column (corner radius, line style,
+  /// blur mode & strength, shadow, arrowheads, colours, rotation). Stored as one
+  /// JSON blob so adding a tool property never needs another migration.
+  final String? propsJson;
+
+  /// Preserves layer order (back to front) independently of insert time.
+  final int zIndex;
   const DbAnnotation({
     required this.id,
     required this.captureId,
@@ -903,6 +954,8 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     this.endX,
     this.endY,
     this.opacity,
+    this.propsJson,
+    required this.zIndex,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -940,6 +993,10 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     if (!nullToAbsent || opacity != null) {
       map['opacity'] = Variable<double>(opacity);
     }
+    if (!nullToAbsent || propsJson != null) {
+      map['props_json'] = Variable<String>(propsJson);
+    }
+    map['z_index'] = Variable<int>(zIndex);
     return map;
   }
 
@@ -974,6 +1031,10 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
       opacity: opacity == null && nullToAbsent
           ? const Value.absent()
           : Value(opacity),
+      propsJson: propsJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(propsJson),
+      zIndex: Value(zIndex),
     );
   }
 
@@ -1000,6 +1061,8 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
       endX: serializer.fromJson<double?>(json['endX']),
       endY: serializer.fromJson<double?>(json['endY']),
       opacity: serializer.fromJson<double?>(json['opacity']),
+      propsJson: serializer.fromJson<String?>(json['propsJson']),
+      zIndex: serializer.fromJson<int>(json['zIndex']),
     );
   }
   @override
@@ -1023,6 +1086,8 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
       'endX': serializer.toJson<double?>(endX),
       'endY': serializer.toJson<double?>(endY),
       'opacity': serializer.toJson<double?>(opacity),
+      'propsJson': serializer.toJson<String?>(propsJson),
+      'zIndex': serializer.toJson<int>(zIndex),
     };
   }
 
@@ -1044,6 +1109,8 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     Value<double?> endX = const Value.absent(),
     Value<double?> endY = const Value.absent(),
     Value<double?> opacity = const Value.absent(),
+    Value<String?> propsJson = const Value.absent(),
+    int? zIndex,
   }) => DbAnnotation(
     id: id ?? this.id,
     captureId: captureId ?? this.captureId,
@@ -1062,6 +1129,8 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     endX: endX.present ? endX.value : this.endX,
     endY: endY.present ? endY.value : this.endY,
     opacity: opacity.present ? opacity.value : this.opacity,
+    propsJson: propsJson.present ? propsJson.value : this.propsJson,
+    zIndex: zIndex ?? this.zIndex,
   );
   DbAnnotation copyWithCompanion(AnnotationsCompanion data) {
     return DbAnnotation(
@@ -1090,6 +1159,8 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
       endX: data.endX.present ? data.endX.value : this.endX,
       endY: data.endY.present ? data.endY.value : this.endY,
       opacity: data.opacity.present ? data.opacity.value : this.opacity,
+      propsJson: data.propsJson.present ? data.propsJson.value : this.propsJson,
+      zIndex: data.zIndex.present ? data.zIndex.value : this.zIndex,
     );
   }
 
@@ -1112,7 +1183,9 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
           ..write('startY: $startY, ')
           ..write('endX: $endX, ')
           ..write('endY: $endY, ')
-          ..write('opacity: $opacity')
+          ..write('opacity: $opacity, ')
+          ..write('propsJson: $propsJson, ')
+          ..write('zIndex: $zIndex')
           ..write(')'))
         .toString();
   }
@@ -1136,6 +1209,8 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     endX,
     endY,
     opacity,
+    propsJson,
+    zIndex,
   );
   @override
   bool operator ==(Object other) =>
@@ -1157,7 +1232,9 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
           other.startY == this.startY &&
           other.endX == this.endX &&
           other.endY == this.endY &&
-          other.opacity == this.opacity);
+          other.opacity == this.opacity &&
+          other.propsJson == this.propsJson &&
+          other.zIndex == this.zIndex);
 }
 
 class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
@@ -1178,6 +1255,8 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
   final Value<double?> endX;
   final Value<double?> endY;
   final Value<double?> opacity;
+  final Value<String?> propsJson;
+  final Value<int> zIndex;
   final Value<int> rowid;
   const AnnotationsCompanion({
     this.id = const Value.absent(),
@@ -1197,6 +1276,8 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     this.endX = const Value.absent(),
     this.endY = const Value.absent(),
     this.opacity = const Value.absent(),
+    this.propsJson = const Value.absent(),
+    this.zIndex = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   AnnotationsCompanion.insert({
@@ -1217,6 +1298,8 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     this.endX = const Value.absent(),
     this.endY = const Value.absent(),
     this.opacity = const Value.absent(),
+    this.propsJson = const Value.absent(),
+    this.zIndex = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        captureId = Value(captureId),
@@ -1243,6 +1326,8 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     Expression<double>? endX,
     Expression<double>? endY,
     Expression<double>? opacity,
+    Expression<String>? propsJson,
+    Expression<int>? zIndex,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1263,6 +1348,8 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
       if (endX != null) 'end_x': endX,
       if (endY != null) 'end_y': endY,
       if (opacity != null) 'opacity': opacity,
+      if (propsJson != null) 'props_json': propsJson,
+      if (zIndex != null) 'z_index': zIndex,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1285,6 +1372,8 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     Value<double?>? endX,
     Value<double?>? endY,
     Value<double?>? opacity,
+    Value<String?>? propsJson,
+    Value<int>? zIndex,
     Value<int>? rowid,
   }) {
     return AnnotationsCompanion(
@@ -1305,6 +1394,8 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
       endX: endX ?? this.endX,
       endY: endY ?? this.endY,
       opacity: opacity ?? this.opacity,
+      propsJson: propsJson ?? this.propsJson,
+      zIndex: zIndex ?? this.zIndex,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1363,6 +1454,12 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     if (opacity.present) {
       map['opacity'] = Variable<double>(opacity.value);
     }
+    if (propsJson.present) {
+      map['props_json'] = Variable<String>(propsJson.value);
+    }
+    if (zIndex.present) {
+      map['z_index'] = Variable<int>(zIndex.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1389,6 +1486,8 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
           ..write('endX: $endX, ')
           ..write('endY: $endY, ')
           ..write('opacity: $opacity, ')
+          ..write('propsJson: $propsJson, ')
+          ..write('zIndex: $zIndex, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2327,6 +2426,8 @@ typedef $$AnnotationsTableCreateCompanionBuilder =
       Value<double?> endX,
       Value<double?> endY,
       Value<double?> opacity,
+      Value<String?> propsJson,
+      Value<int> zIndex,
       Value<int> rowid,
     });
 typedef $$AnnotationsTableUpdateCompanionBuilder =
@@ -2348,6 +2449,8 @@ typedef $$AnnotationsTableUpdateCompanionBuilder =
       Value<double?> endX,
       Value<double?> endY,
       Value<double?> opacity,
+      Value<String?> propsJson,
+      Value<int> zIndex,
       Value<int> rowid,
     });
 
@@ -2442,6 +2545,16 @@ class $$AnnotationsTableFilterComposer
 
   ColumnFilters<double> get opacity => $composableBuilder(
     column: $table.opacity,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get propsJson => $composableBuilder(
+    column: $table.propsJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get zIndex => $composableBuilder(
+    column: $table.zIndex,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2539,6 +2652,16 @@ class $$AnnotationsTableOrderingComposer
     column: $table.opacity,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get propsJson => $composableBuilder(
+    column: $table.propsJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get zIndex => $composableBuilder(
+    column: $table.zIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$AnnotationsTableAnnotationComposer
@@ -2608,6 +2731,12 @@ class $$AnnotationsTableAnnotationComposer
 
   GeneratedColumn<double> get opacity =>
       $composableBuilder(column: $table.opacity, builder: (column) => column);
+
+  GeneratedColumn<String> get propsJson =>
+      $composableBuilder(column: $table.propsJson, builder: (column) => column);
+
+  GeneratedColumn<int> get zIndex =>
+      $composableBuilder(column: $table.zIndex, builder: (column) => column);
 }
 
 class $$AnnotationsTableTableManager
@@ -2658,6 +2787,8 @@ class $$AnnotationsTableTableManager
                 Value<double?> endX = const Value.absent(),
                 Value<double?> endY = const Value.absent(),
                 Value<double?> opacity = const Value.absent(),
+                Value<String?> propsJson = const Value.absent(),
+                Value<int> zIndex = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AnnotationsCompanion(
                 id: id,
@@ -2677,6 +2808,8 @@ class $$AnnotationsTableTableManager
                 endX: endX,
                 endY: endY,
                 opacity: opacity,
+                propsJson: propsJson,
+                zIndex: zIndex,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2698,6 +2831,8 @@ class $$AnnotationsTableTableManager
                 Value<double?> endX = const Value.absent(),
                 Value<double?> endY = const Value.absent(),
                 Value<double?> opacity = const Value.absent(),
+                Value<String?> propsJson = const Value.absent(),
+                Value<int> zIndex = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AnnotationsCompanion.insert(
                 id: id,
@@ -2717,6 +2852,8 @@ class $$AnnotationsTableTableManager
                 endX: endX,
                 endY: endY,
                 opacity: opacity,
+                propsJson: propsJson,
+                zIndex: zIndex,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

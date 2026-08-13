@@ -43,7 +43,11 @@ class DatabaseService {
       height: Value(item.height),
     ));
 
-    final companions = item.annotations.map((a) => _convertAnnotationToCompanion(item.id, a)).toList();
+    // The list order *is* the layer order, so persist the index alongside.
+    final companions = [
+      for (var i = 0; i < item.annotations.length; i++)
+        _convertAnnotationToCompanion(item.id, item.annotations[i], i),
+    ];
     await db.saveAnnotationsForCapture(item.id, companions);
   }
 
@@ -108,91 +112,94 @@ class DatabaseService {
     return await db.getSetting(key);
   }
 
+  /// Tool names written by older builds, before the separate rectangle and
+  /// oval tools were merged into the multi-shape [CanvasTool.shape].
+  static const Map<String, ShapeKind> _legacyShapeTools = {
+    'rectangle': ShapeKind.rectangle,
+    'oval': ShapeKind.ellipse,
+  };
+
   // Annotation conversion helpers
   static Annotation _convertAnnotationFromDb(DbAnnotation a) {
-    final tool = CanvasTool.values.firstWhere(
-      (t) => t.name == a.tool,
-      orElse: () => CanvasTool.pen,
-    );
+    final legacyShape = _legacyShapeTools[a.tool];
+    final tool = legacyShape != null
+        ? CanvasTool.shape
+        : CanvasTool.values.firstWhere(
+            (t) => t.name == a.tool,
+            orElse: () => CanvasTool.pen,
+          );
 
     List<Offset> points = [];
     if (a.pointsJson != null && a.pointsJson!.isNotEmpty) {
       try {
         final List<dynamic> list = jsonDecode(a.pointsJson!);
-        points = list.map((p) => Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble())).toList();
+        points = list
+            .map((p) => Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()))
+            .toList();
       } catch (e) {
         debugPrint('SnipSnap DB error: $e');
       }
     }
 
-    Rect? rect;
-    Color? backgroundColor;
-    double rotation = 0.0;
-    if (a.rectJson != null && a.rectJson!.isNotEmpty) {
-      try {
-        final Map<String, dynamic> map = jsonDecode(a.rectJson!);
-        if (map.containsKey('l') && map.containsKey('t') && map.containsKey('r') && map.containsKey('b')) {
-          rect = Rect.fromLTRB(
-            (map['l'] as num).toDouble(),
-            (map['t'] as num).toDouble(),
-            (map['r'] as num).toDouble(),
-            (map['b'] as num).toDouble(),
-          );
-        }
-        if (map.containsKey('bgColor')) {
-          backgroundColor = Color(map['bgColor'] as int);
-        }
-        if (map.containsKey('rot')) {
-          rotation = (map['rot'] as num).toDouble();
-        }
-      } catch (e) {
-        debugPrint('SnipSnap DB error: $e');
-      }
-    }
-
-    return Annotation(
+    var annotation = Annotation(
       id: a.id,
       tool: tool,
       color: Color(a.color),
-      backgroundColor: backgroundColor,
       strokeWidth: a.strokeWidth,
       fontSize: a.fontSize,
       fill: a.isFilled,
       text: a.textContent,
       stepNumber: a.stepNumber != 0 ? a.stepNumber : null,
       points: points,
-      rect: rect,
       startPoint: a.startX != null && a.startY != null ? Offset(a.startX!, a.startY!) : null,
       endPoint: a.endX != null && a.endY != null ? Offset(a.endX!, a.endY!) : null,
       opacity: a.opacity ?? 1.0,
-      rotation: rotation,
     );
+
+    // v3+ rows carry every extra property in one blob.
+    if (a.propsJson != null && a.propsJson!.isNotEmpty) {
+      try {
+        annotation = annotation.withPropsJson(jsonDecode(a.propsJson!) as Map<String, dynamic>);
+      } catch (e) {
+        debugPrint('SnipSnap DB error: $e');
+      }
+    } else if (a.rectJson != null && a.rectJson!.isNotEmpty) {
+      // Legacy (schema <= 2) layout: rect, background colour and rotation were
+      // packed into rectJson.
+      try {
+        final map = jsonDecode(a.rectJson!) as Map<String, dynamic>;
+        annotation = annotation.copyWith(
+          rect: map.containsKey('l')
+              ? Rect.fromLTRB(
+                  (map['l'] as num).toDouble(),
+                  (map['t'] as num).toDouble(),
+                  (map['r'] as num).toDouble(),
+                  (map['b'] as num).toDouble(),
+                )
+              : null,
+          backgroundColor:
+              map.containsKey('bgColor') ? Color(map['bgColor'] as int) : null,
+          rotation: (map['rot'] as num?)?.toDouble(),
+        );
+      } catch (e) {
+        debugPrint('SnipSnap DB error: $e');
+      }
+    }
+
+    // Applied last: the old tool name is the authoritative record of which
+    // shape the user drew, and must win over any default in propsJson.
+    if (legacyShape != null) {
+      annotation = annotation.copyWith(shapeKind: legacyShape);
+    }
+
+    return annotation;
   }
 
-  static AnnotationsCompanion _convertAnnotationToCompanion(String captureId, Annotation a) {
-    String? pointsJson;
-    if (a.points.isNotEmpty) {
-      pointsJson = jsonEncode(a.points.map((p) => {'x': p.dx, 'y': p.dy}).toList());
-    }
-
-    String? rectJson;
-    final map = <String, dynamic>{};
-    if (a.rect != null) {
-      map['l'] = a.rect!.left;
-      map['t'] = a.rect!.top;
-      map['r'] = a.rect!.right;
-      map['b'] = a.rect!.bottom;
-    }
-    if (a.backgroundColor != null) {
-      map['bgColor'] = a.backgroundColor!.toARGB32();
-    }
-    if (a.rotation != 0.0) {
-      map['rot'] = a.rotation;
-    }
-    if (map.isNotEmpty) {
-      rectJson = jsonEncode(map);
-    }
-
+  static AnnotationsCompanion _convertAnnotationToCompanion(
+    String captureId,
+    Annotation a,
+    int zIndex,
+  ) {
     return AnnotationsCompanion(
       id: Value(a.id),
       captureId: Value(captureId),
@@ -203,14 +210,17 @@ class DatabaseService {
       isFilled: Value(a.fill),
       textContent: Value(a.text),
       stepNumber: Value(a.stepNumber ?? 0),
-      pointsJson: Value(pointsJson),
-      rectJson: Value(rectJson),
+      pointsJson: Value(a.points.isEmpty
+          ? null
+          : jsonEncode(a.points.map((p) => {'x': p.dx, 'y': p.dy}).toList())),
+      propsJson: Value(jsonEncode(a.toPropsJson())),
       createdAt: Value(DateTime.now()),
       startX: Value(a.startPoint?.dx),
       startY: Value(a.startPoint?.dy),
       endX: Value(a.endPoint?.dx),
       endY: Value(a.endPoint?.dy),
       opacity: Value(a.opacity),
+      zIndex: Value(zIndex),
     );
   }
 }

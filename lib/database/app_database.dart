@@ -39,6 +39,14 @@ class Annotations extends Table {
   RealColumn get endY => real().nullable()();
   RealColumn get opacity => real().nullable()();
 
+  /// Every tool property without a dedicated column (corner radius, line style,
+  /// blur mode & strength, shadow, arrowheads, colours, rotation). Stored as one
+  /// JSON blob so adding a tool property never needs another migration.
+  TextColumn get propsJson => text().nullable()();
+
+  /// Preserves layer order (back to front) independently of insert time.
+  IntColumn get zIndex => integer().withDefault(const Constant(0))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -69,7 +77,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration {
@@ -81,6 +89,10 @@ class AppDatabase extends _$AppDatabase {
           await m.addColumn(annotations, annotations.endX);
           await m.addColumn(annotations, annotations.endY);
           await m.addColumn(annotations, annotations.opacity);
+        }
+        if (from < 3) {
+          await m.addColumn(annotations, annotations.propsJson);
+          await m.addColumn(annotations, annotations.zIndex);
         }
       },
     );
@@ -101,7 +113,13 @@ class AppDatabase extends _$AppDatabase {
 
   // Annotations CRUD
   Future<List<DbAnnotation>> getAnnotationsForCapture(String captureId) =>
-      (select(annotations)..where((t) => t.captureId.equals(captureId))..orderBy([(t) => OrderingTerm(expression: t.createdAt)])).get();
+      (select(annotations)
+            ..where((t) => t.captureId.equals(captureId))
+            ..orderBy([
+              (t) => OrderingTerm(expression: t.zIndex),
+              (t) => OrderingTerm(expression: t.createdAt),
+            ]))
+          .get();
 
   Future<void> saveAnnotationsForCapture(String captureId, List<AnnotationsCompanion> annotationList) async {
     await transaction(() async {

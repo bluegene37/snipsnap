@@ -1,19 +1,24 @@
 import 'package:flutter/material.dart';
 import '../utils/constants.dart';
 
+const Object _unset = Object();
+
 class ToolProperties {
   final Color activeColor;
   final double strokeWidth;
   final double opacity;
   final double fontSize;
   final bool isFilled;
-  final Color textBackgroundColor;
+  final Color? textBackgroundColor;
+  final Color? fillColor;
   final int stepCounter;
-  final double blurRadius;
+  final double blurStrength;
   final double borderRadius;
+  final ShapeKind shapeKind;
   final LineStyle lineStyle;
   final BlurType blurType;
   final bool isDoubleArrow;
+  final bool hasShadow;
 
   const ToolProperties({
     required this.activeColor,
@@ -21,13 +26,16 @@ class ToolProperties {
     this.opacity = 1.0,
     this.fontSize = 18.0,
     this.isFilled = false,
-    this.textBackgroundColor = Colors.transparent,
+    this.textBackgroundColor,
+    this.fillColor,
     this.stepCounter = 1,
-    this.blurRadius = 12.0,
+    this.blurStrength = 14.0,
     this.borderRadius = 8.0,
+    this.shapeKind = ShapeKind.rectangle,
     this.lineStyle = LineStyle.solid,
     this.blurType = BlurType.gaussian,
     this.isDoubleArrow = false,
+    this.hasShadow = false,
   });
 
   ToolProperties copyWith({
@@ -36,13 +44,16 @@ class ToolProperties {
     double? opacity,
     double? fontSize,
     bool? isFilled,
-    Color? textBackgroundColor,
+    Object? textBackgroundColor = _unset,
+    Object? fillColor = _unset,
     int? stepCounter,
-    double? blurRadius,
+    double? blurStrength,
     double? borderRadius,
+    ShapeKind? shapeKind,
     LineStyle? lineStyle,
     BlurType? blurType,
     bool? isDoubleArrow,
+    bool? hasShadow,
   }) {
     return ToolProperties(
       activeColor: activeColor ?? this.activeColor,
@@ -50,28 +61,50 @@ class ToolProperties {
       opacity: opacity ?? this.opacity,
       fontSize: fontSize ?? this.fontSize,
       isFilled: isFilled ?? this.isFilled,
-      textBackgroundColor: textBackgroundColor ?? this.textBackgroundColor,
+      textBackgroundColor: identical(textBackgroundColor, _unset)
+          ? this.textBackgroundColor
+          : textBackgroundColor as Color?,
+      fillColor: identical(fillColor, _unset) ? this.fillColor : fillColor as Color?,
       stepCounter: stepCounter ?? this.stepCounter,
-      blurRadius: blurRadius ?? this.blurRadius,
+      blurStrength: blurStrength ?? this.blurStrength,
       borderRadius: borderRadius ?? this.borderRadius,
+      shapeKind: shapeKind ?? this.shapeKind,
       lineStyle: lineStyle ?? this.lineStyle,
       blurType: blurType ?? this.blurType,
       isDoubleArrow: isDoubleArrow ?? this.isDoubleArrow,
+      hasShadow: hasShadow ?? this.hasShadow,
     );
   }
 
   static Map<CanvasTool, ToolProperties> createDefaults() {
     return {
       CanvasTool.select: const ToolProperties(activeColor: AppColors.accent),
-      CanvasTool.pen: const ToolProperties(activeColor: Color(0xFFEF4444), strokeWidth: 3.0, opacity: 1.0),
-      CanvasTool.arrow: const ToolProperties(activeColor: AppColors.accent, strokeWidth: 3.5, opacity: 1.0),
-      CanvasTool.rectangle: const ToolProperties(activeColor: Color(0xFF0EA5E9), strokeWidth: 3.0, isFilled: false, opacity: 1.0),
-      CanvasTool.oval: const ToolProperties(activeColor: Color(0xFF8B5CF6), strokeWidth: 3.0, isFilled: false, opacity: 1.0),
-      CanvasTool.text: const ToolProperties(activeColor: Colors.white, fontSize: 18.0, textBackgroundColor: Color(0xCC000000), opacity: 1.0),
-      CanvasTool.stepMarker: const ToolProperties(activeColor: AppColors.accent, fontSize: 16.0, stepCounter: 1, opacity: 1.0),
-      CanvasTool.highlight: const ToolProperties(activeColor: Color(0x99FFEB3B), strokeWidth: 22.0, opacity: 0.6),
-      CanvasTool.blur: const ToolProperties(activeColor: Colors.grey, blurRadius: 14.0, opacity: 1.0),
-      CanvasTool.ruler: const ToolProperties(activeColor: Color(0xFFF59E0B), strokeWidth: 2.5, opacity: 1.0),
+      CanvasTool.pen: const ToolProperties(
+          activeColor: Color(0xFFEF4444), strokeWidth: 3.0, opacity: 1.0, hasShadow: true),
+      CanvasTool.arrow: const ToolProperties(
+          activeColor: AppColors.accent, strokeWidth: 3.5, opacity: 1.0, hasShadow: true),
+      CanvasTool.line: const ToolProperties(
+          activeColor: AppColors.accent, strokeWidth: 3.0, opacity: 1.0, hasShadow: true),
+      CanvasTool.shape: const ToolProperties(
+          activeColor: Color(0xFF0EA5E9),
+          strokeWidth: 3.0,
+          isFilled: false,
+          opacity: 1.0,
+          shapeKind: ShapeKind.rectangle),
+      CanvasTool.text: const ToolProperties(
+          activeColor: Colors.white,
+          fontSize: 18.0,
+          isFilled: true,
+          textBackgroundColor: Color(0xCC000000),
+          opacity: 1.0),
+      CanvasTool.stepMarker: const ToolProperties(
+          activeColor: AppColors.accent, fontSize: 16.0, stepCounter: 1, opacity: 1.0),
+      CanvasTool.highlight: const ToolProperties(
+          activeColor: Color(0xFFFDE047), strokeWidth: 18.0, opacity: 1.0),
+      CanvasTool.blur: const ToolProperties(
+          activeColor: Colors.grey, blurStrength: 14.0, opacity: 1.0, blurType: BlurType.pixelate),
+      CanvasTool.ruler: const ToolProperties(
+          activeColor: Color(0xFFF59E0B), strokeWidth: 2.0, opacity: 1.0),
       CanvasTool.fill: const ToolProperties(activeColor: AppColors.accent, isFilled: true),
       CanvasTool.colorPicker: const ToolProperties(activeColor: AppColors.accent),
       CanvasTool.crop: const ToolProperties(activeColor: AppColors.accent),
