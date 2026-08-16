@@ -57,6 +57,13 @@ class AnnotationRenderer {
 
       default:
         if (ann.startPoint != null && ann.endPoint != null) {
+          if (ann.tool == CanvasTool.arrow && ann.controlPoint != null) {
+            final minX = math.min(ann.startPoint!.dx, math.min(ann.endPoint!.dx, ann.controlPoint!.dx));
+            final maxX = math.max(ann.startPoint!.dx, math.max(ann.endPoint!.dx, ann.controlPoint!.dx));
+            final minY = math.min(ann.startPoint!.dy, math.min(ann.endPoint!.dy, ann.controlPoint!.dy));
+            final maxY = math.max(ann.startPoint!.dy, math.max(ann.endPoint!.dy, ann.controlPoint!.dy));
+            return Rect.fromLTRB(minX, minY, maxX, maxY).inflate(ann.strokeWidth / 2);
+          }
           return Rect.fromPoints(ann.startPoint!, ann.endPoint!);
         }
         return Rect.zero;
@@ -130,6 +137,24 @@ class AnnotationRenderer {
             .contains(point);
 
       case CanvasTool.arrow:
+        if (ann.startPoint == null || ann.endPoint == null) return false;
+        if (ann.controlPoint != null) {
+          final tolerance = ann.strokeWidth / 2 + hitPadding;
+          Offset prev = ann.startPoint!;
+          const steps = 16;
+          for (int i = 1; i <= steps; i++) {
+            final t = i / steps;
+            final curr = _bezierPoint(ann.startPoint!, ann.controlPoint!, ann.endPoint!, t);
+            if (_distanceToSegment(point, prev, curr) <= tolerance) {
+              return true;
+            }
+            prev = curr;
+          }
+          return false;
+        }
+        return _distanceToSegment(point, ann.startPoint!, ann.endPoint!) <=
+            (ann.strokeWidth / 2 + hitPadding);
+
       case CanvasTool.line:
       case CanvasTool.ruler:
         if (ann.startPoint == null || ann.endPoint == null) return false;
@@ -201,6 +226,14 @@ class AnnotationRenderer {
     t = t.clamp(0.0, 1.0);
     final projection = Offset(v.dx + t * (w.dx - v.dx), v.dy + t * (w.dy - v.dy));
     return (p - projection).distance;
+  }
+
+  static Offset _bezierPoint(Offset p0, Offset p1, Offset p2, double t) {
+    final u = 1.0 - t;
+    return Offset(
+      u * u * p0.dx + 2 * u * t * p1.dx + t * t * p2.dx,
+      u * u * p0.dy + 2 * u * t * p1.dy + t * t * p2.dy,
+    );
   }
 
   static double _stepRadius(Annotation ann) => ann.fontSize > 0 ? ann.fontSize : 16.0;
@@ -438,6 +471,59 @@ class AnnotationRenderer {
 
     final paint = _strokePaint(ann);
     final strokeW = ann.strokeWidth;
+    final cp = ann.controlPoint;
+
+    final fillPaint = Paint()
+      ..color = paint.color
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+
+    if (cp != null) {
+      // Curved Bezier arrow
+      final endTangent = (end - cp);
+      final endAngle = endTangent.distance > 0.1
+          ? math.atan2(endTangent.dy, endTangent.dx)
+          : math.atan2(end.dy - start.dy, end.dx - start.dx);
+
+      final startTangent = (start - cp);
+      final startAngle = startTangent.distance > 0.1
+          ? math.atan2(startTangent.dy, startTangent.dx)
+          : math.atan2(start.dy - end.dy, start.dx - end.dx);
+
+      final headLength = math.max(12.0, strokeW * 4.0);
+      final headHalfWidth = headLength * 0.45;
+
+      Path headPath(Offset tip, double angle) {
+        final baseCenter = Offset(
+          tip.dx - headLength * math.cos(angle),
+          tip.dy - headLength * math.sin(angle),
+        );
+        final normal = Offset(-math.sin(angle), math.cos(angle));
+        return Path()
+          ..moveTo(tip.dx, tip.dy)
+          ..lineTo(baseCenter.dx + normal.dx * headHalfWidth, baseCenter.dy + normal.dy * headHalfWidth)
+          ..lineTo(baseCenter.dx - normal.dx * headHalfWidth, baseCenter.dy - normal.dy * headHalfWidth)
+          ..close();
+      }
+
+      final shaftPath = Path()
+        ..moveTo(start.dx, start.dy)
+        ..quadraticBezierTo(cp.dx, cp.dy, end.dx, end.dy);
+
+      _withShadow(canvas, ann, () {
+        if (ann.lineStyle == LineStyle.dashed) {
+          _drawDashedPath2(canvas, shaftPath, paint);
+        } else {
+          canvas.drawPath(shaftPath, paint);
+        }
+        canvas.drawPath(headPath(end, endAngle), fillPaint);
+        if (ann.isDoubleArrow) {
+          canvas.drawPath(headPath(start, startAngle), fillPaint);
+        }
+      });
+      return;
+    }
+
     final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
 
     // Head scales with stroke weight but never overwhelms a short arrow.
@@ -466,11 +552,6 @@ class AnnotationRenderer {
         ..lineTo(baseCenter.dx - normal.dx * headHalfWidth, baseCenter.dy - normal.dy * headHalfWidth)
         ..close();
     }
-
-    final fillPaint = Paint()
-      ..color = paint.color
-      ..style = PaintingStyle.fill
-      ..isAntiAlias = true;
 
     _withShadow(canvas, ann, () {
       if (ann.lineStyle == LineStyle.dashed) {
@@ -711,7 +792,20 @@ class AnnotationRenderer {
     final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!);
     if (rect.width < 1 || rect.height < 1) return;
 
-    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(4));
+    final rrect = RRect.fromRectAndRadius(
+      rect,
+      Radius.circular(ann.borderRadius > 0 ? ann.borderRadius : 4),
+    );
+
+    // Solid Blackout Redaction Bar (Security Standard for Passwords / PII)
+    if (ann.blurType == BlurType.solid) {
+      final fillPaint = Paint()
+        ..color = Colors.black.withValues(alpha: ann.opacity)
+        ..style = PaintingStyle.fill
+        ..isAntiAlias = true;
+      canvas.drawRRect(rrect, fillPaint);
+      return;
+    }
 
     if (baseImage != null && imageRect != null) {
       canvas.save();
@@ -865,7 +959,7 @@ class AnnotationRenderer {
           fontSize: ann.fontSize,
           fontWeight: FontWeight.w600,
           height: 1.25,
-          shadows: showBg
+          shadows: (showBg && !ann.hasShadow)
               ? null
               : const [
                   Shadow(color: Color(0xB3000000), offset: Offset(0, 1), blurRadius: 4),
@@ -883,8 +977,16 @@ class AnnotationRenderer {
           tp.width + _textPadX * 2,
           tp.height + _textPadY * 2,
         ),
-        Radius.circular(ann.borderRadius.clamp(0.0, 16.0)),
+        Radius.circular(ann.borderRadius.clamp(0.0, 32.0)),
       );
+
+      if (ann.hasShadow) {
+        final shadowPaint = Paint()
+          ..color = Colors.black.withValues(alpha: 0.35 * ann.opacity)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+        canvas.drawRRect(bgRect.shift(const Offset(0, 2)), shadowPaint);
+      }
+
       canvas.drawRRect(
         bgRect,
         Paint()
@@ -937,6 +1039,23 @@ class AnnotationRenderer {
     canvas.drawLine(topCenter, rotHandle, Paint()..color = AppColors.accent..strokeWidth = 1.5);
     canvas.drawCircle(rotHandle, 5.5, handleFill);
     canvas.drawCircle(rotHandle, 5.5, handleBorder);
+
+    // Render curvature handle for Arrows (Shottr/Snagit style)
+    if (ann.tool == CanvasTool.arrow && ann.startPoint != null && ann.endPoint != null) {
+      final curveHandlePos = ann.controlPoint ?? ((ann.startPoint! + ann.endPoint!) / 2);
+      if (ann.controlPoint != null) {
+        final mid = (ann.startPoint! + ann.endPoint!) / 2;
+        canvas.drawLine(
+          mid,
+          curveHandlePos,
+          Paint()
+            ..color = const Color(0xFFF59E0B).withValues(alpha: 0.6)
+            ..strokeWidth = 1.2,
+        );
+      }
+      canvas.drawCircle(curveHandlePos, 6.0, Paint()..color = const Color(0xFFF59E0B)..style = PaintingStyle.fill);
+      canvas.drawCircle(curveHandlePos, 6.0, Paint()..color = Colors.white..strokeWidth = 2.0..style = PaintingStyle.stroke);
+    }
 
     if (rotated) canvas.restore();
   }

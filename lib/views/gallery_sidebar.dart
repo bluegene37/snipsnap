@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import '../models/capture_item.dart';
+import '../services/storage_service.dart';
 import '../utils/constants.dart';
 
 class GallerySidebar extends StatelessWidget {
@@ -10,6 +11,8 @@ class GallerySidebar extends StatelessWidget {
   final ValueChanged<CaptureItem> onSelectItem;
   final ValueChanged<CaptureItem> onDeleteItem;
   final VoidCallback onClose;
+  final VoidCallback? onOpenLibraryLocation;
+  final ValueChanged<CaptureItem>? onRevealItemInFolder;
   final bool isDarkMode;
 
   final double zoomScale;
@@ -22,6 +25,8 @@ class GallerySidebar extends StatelessWidget {
     required this.onSelectItem,
     required this.onDeleteItem,
     required this.onClose,
+    this.onOpenLibraryLocation,
+    this.onRevealItemInFolder,
     this.isDarkMode = true,
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
@@ -68,6 +73,50 @@ class GallerySidebar extends StatelessWidget {
                 Text(
                   'Screenshots',
                   style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(width: 10),
+
+                // Open Screenshots Library Folder Button
+                Tooltip(
+                  message: 'Open Screenshots Library Folder in Finder/Explorer',
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () {
+                        if (onOpenLibraryLocation != null) {
+                          onOpenLibraryLocation!();
+                        } else {
+                          StorageService.openLibraryFolder();
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isDarkMode
+                              ? Colors.white.withValues(alpha: 0.08)
+                              : Colors.black.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: borderColor),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.folder_open_rounded, size: 13, color: AppColors.accent),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Open Folder',
+                              style: TextStyle(
+                                color: textColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
 
                 const Spacer(),
@@ -303,15 +352,32 @@ class GallerySidebar extends StatelessWidget {
                                         ],
                                       ),
                                     ),
-                                    IconButton(
-                                      icon: const Icon(Icons.delete_outline_rounded, size: 14),
-                                      color: subTextColor,
-                                      hoverColor: Colors.redAccent.withValues(alpha: 0.2),
-                                      onPressed: () => onDeleteItem(item),
-                                      padding: EdgeInsets.zero,
-                                      constraints:
-                                          const BoxConstraints(minWidth: 20, minHeight: 20),
-                                    ),
+                                     IconButton(
+                                       icon: const Icon(Icons.folder_open_rounded, size: 14),
+                                       color: subTextColor,
+                                       hoverColor: AppColors.accent.withValues(alpha: 0.2),
+                                       tooltip: 'Reveal in Finder / Explorer',
+                                       onPressed: () {
+                                         if (onRevealItemInFolder != null) {
+                                           onRevealItemInFolder!(item);
+                                         } else {
+                                           StorageService.revealFileInFolder(item.filePath);
+                                         }
+                                       },
+                                       padding: EdgeInsets.zero,
+                                       constraints:
+                                           const BoxConstraints(minWidth: 20, minHeight: 20),
+                                     ),
+                                     IconButton(
+                                       icon: const Icon(Icons.delete_outline_rounded, size: 14),
+                                       color: subTextColor,
+                                       hoverColor: Colors.redAccent.withValues(alpha: 0.2),
+                                       tooltip: 'Delete Capture',
+                                       onPressed: () => onDeleteItem(item),
+                                       padding: EdgeInsets.zero,
+                                       constraints:
+                                           const BoxConstraints(minWidth: 20, minHeight: 20),
+                                     ),
                                   ],
                                 ),
                               ],

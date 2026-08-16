@@ -93,19 +93,19 @@ class ToolSidebar extends StatelessWidget {
   });
 
   static const tools = [
-    ToolSidebarItem(CanvasTool.select, Icons.pan_tool_alt_rounded, 'Select', 'Select & move annotations  (V)'),
+    ToolSidebarItem(CanvasTool.select, Icons.crop_free_rounded, 'Select', 'Select & Cut region / annotations  (S/V)'),
     ToolSidebarItem(CanvasTool.pen, Icons.edit_rounded, 'Pen', 'Freehand drawing pen  (P)'),
     ToolSidebarItem(CanvasTool.line, Icons.horizontal_rule_rounded, 'Line', 'Draw straight line  (L)'),
     ToolSidebarItem(CanvasTool.arrow, Icons.north_east_rounded, 'Arrow', 'Draw directional arrow  (A)'),
     // Shape is rendered separately so it can carry a shape-kind flyout.
-    ToolSidebarItem(CanvasTool.shape, Icons.category_rounded, 'Shape', 'Rectangle, ellipse, star & more  (S)'),
+    ToolSidebarItem(CanvasTool.shape, Icons.category_rounded, 'Shape', 'Rectangle, ellipse, star & more  (U)'),
     ToolSidebarItem(CanvasTool.highlight, Icons.brush_rounded, 'Highlight', 'Freehand highlighter brush  (H)'),
     ToolSidebarItem(CanvasTool.text, Icons.text_fields_rounded, 'Text', 'Add text annotation label  (T)'),
     ToolSidebarItem(CanvasTool.stepMarker, Icons.pin_drop_rounded, 'Step', 'Numbered step pins 1, 2, 3…  (N)'),
     ToolSidebarItem(CanvasTool.blur, Icons.blur_on_rounded, 'Blur', 'Obfuscate / blur sensitive area  (B)'),
     ToolSidebarItem(CanvasTool.ruler, Icons.straighten_rounded, 'Ruler', 'Measure pixel distance  (M)'),
-    ToolSidebarItem(CanvasTool.fill, Icons.format_color_fill_rounded, 'Fill', 'Paint bucket fill shape or image  (G)'),
-    ToolSidebarItem(CanvasTool.crop, Icons.crop_rounded, 'Crop', 'Crop canvas & image area  (C)'),
+    ToolSidebarItem(CanvasTool.fill, Icons.format_color_fill_rounded, 'Fill', 'Paint bucket fill (connected / global)  (G)'),
+    ToolSidebarItem(CanvasTool.crop, Icons.crop_rounded, 'Crop', 'Crop & expand canvas bounds  (C)'),
   ];
 
   @override

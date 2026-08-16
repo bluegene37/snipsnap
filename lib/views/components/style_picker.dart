@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import '../../models/annotation.dart';
@@ -32,6 +33,7 @@ class StylePicker extends StatelessWidget {
   final VoidCallback? onCloseDrawer;
   final int stepCounter;
   final VoidCallback? onResetStepCounter;
+  final VoidCallback? onRenumberSteps;
   final VoidCallback? onActivateEyedropper;
   final double borderRadius;
   final ValueChanged<double>? onBorderRadiusChanged;
@@ -46,6 +48,11 @@ class StylePicker extends StatelessWidget {
   final VoidCallback? onBringToFront;
   final VoidCallback? onSendToBack;
   final VoidCallback? onDeselect;
+
+  final double fillTolerance;
+  final ValueChanged<double>? onFillToleranceChanged;
+  final bool isGlobalFill;
+  final ValueChanged<bool>? onGlobalFillChanged;
 
   const StylePicker({
     super.key,
@@ -77,6 +84,7 @@ class StylePicker extends StatelessWidget {
     this.onCloseDrawer,
     this.stepCounter = 1,
     this.onResetStepCounter,
+    this.onRenumberSteps,
     this.onActivateEyedropper,
     this.borderRadius = 8.0,
     this.onBorderRadiusChanged,
@@ -91,6 +99,10 @@ class StylePicker extends StatelessWidget {
     this.onBringToFront,
     this.onSendToBack,
     this.onDeselect,
+    this.fillTolerance = 15.0,
+    this.onFillToleranceChanged,
+    this.isGlobalFill = false,
+    this.onGlobalFillChanged,
   });
 
   void _showColorPickerDialog(BuildContext context) {
@@ -165,18 +177,22 @@ class StylePicker extends StatelessWidget {
     final showFont = effectiveTool == CanvasTool.text || effectiveTool == CanvasTool.stepMarker;
     final showFill = [CanvasTool.shape, CanvasTool.text].contains(effectiveTool);
 
-    // A drop shadow only makes sense for vector markup drawn over the image.
+    // A drop shadow adds depth to vector annotations, text callouts and step markers over screenshots.
     final showShadow = [
       CanvasTool.pen,
       CanvasTool.arrow,
       CanvasTool.line,
       CanvasTool.shape,
+      CanvasTool.text,
+      CanvasTool.stepMarker,
     ].contains(effectiveTool);
 
-    // Corner radius only affects shapes that actually have corners.
-    final showCornerRadius = effectiveTool == CanvasTool.shape &&
-        (effectiveShapeKind == ShapeKind.rectangle ||
-            effectiveShapeKind == ShapeKind.speechBubble);
+    // Corner radius applies to rectangular shapes, speech bubbles, text background badges, and blur redaction boxes.
+    final showCornerRadius = (effectiveTool == CanvasTool.shape &&
+            (effectiveShapeKind == ShapeKind.rectangle ||
+                effectiveShapeKind == ShapeKind.speechBubble)) ||
+        (effectiveTool == CanvasTool.text && isFilled) ||
+        (effectiveTool == CanvasTool.blur);
 
     final bgColor = isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
     final textColor = isDarkMode ? Colors.white : Colors.black87;
@@ -206,10 +222,10 @@ class StylePicker extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.tune_rounded, color: AppColors.accent, size: 18),
+                    const Icon(Icons.palette_rounded, color: AppColors.accent, size: 18),
                     const SizedBox(width: 8),
                     Text(
-                      selectedAnnotation != null ? 'Item Properties' : 'Tool Properties',
+                      'Styles & Properties',
                       style: TextStyle(
                         color: textColor,
                         fontSize: 15,
@@ -230,85 +246,155 @@ class StylePicker extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Divider(color: borderColor, height: 1),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
 
-            // Selected Item Info & Layer Actions Card
-            if (selectedAnnotation != null) ...[
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.accent.withValues(alpha: 0.4)),
+            // 1. QUICK STYLES HEADER (Snagit Style)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Quick Styles',
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.check_circle_rounded, color: AppColors.accent, size: 14),
-                            const SizedBox(width: 6),
-                            Text(
-                              'SELECTED: ${selectedAnnotation!.tool.name.toUpperCase()}',
-                              style: const TextStyle(
-                                color: AppColors.accent,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (onDeselect != null)
-                          GestureDetector(
-                            onTap: onDeselect,
-                            child: Icon(Icons.close_rounded, size: 16, color: subTextColor),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        if (onBringToFront != null)
-                          IconButton(
-                            icon: const Icon(Icons.flip_to_front_rounded, size: 18),
-                            tooltip: 'Bring to Front',
-                            color: textColor,
-                            onPressed: onBringToFront,
-                            constraints: const BoxConstraints(),
-                            padding: const EdgeInsets.all(6),
-                          ),
-                        if (onSendToBack != null)
-                          IconButton(
-                            icon: const Icon(Icons.flip_to_back_rounded, size: 18),
-                            tooltip: 'Send to Back',
-                            color: textColor,
-                            onPressed: onSendToBack,
-                            constraints: const BoxConstraints(),
-                            padding: const EdgeInsets.all(6),
-                          ),
-                        if (onDeleteSelected != null)
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
-                            tooltip: 'Delete Item',
-                            onPressed: onDeleteSelected,
-                            constraints: const BoxConstraints(),
-                            padding: const EdgeInsets.all(6),
-                          ),
-                      ],
-                    ),
-                  ],
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: cardBg,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Theme: ',
+                        style: TextStyle(color: subTextColor, fontSize: 11),
+                      ),
+                      Text(
+                        'Basic',
+                        style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(width: 2),
+                      Icon(Icons.arrow_drop_down_rounded, size: 14, color: subTextColor),
+                    ],
+                  ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Quick Styles Grid for Fill Tool
+            if (activeTool == CanvasTool.fill) ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _PaintBucketStyleCard(
+                    color: const Color(0xFFEF4444), // Crimson Red
+                    isSelected: selectedColor.toARGB32() == 0xFFEF4444 && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFFEF4444));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                  ),
+                  _PaintBucketStyleCard(
+                    color: const Color(0xFF8B5CF6), // Purple
+                    isSelected: selectedColor.toARGB32() == 0xFF8B5CF6 && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFF8B5CF6));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                  ),
+                  _PaintBucketStyleCard(
+                    color: const Color(0xFF06B6D4), // Teal
+                    isSelected: selectedColor.toARGB32() == 0xFF06B6D4 && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFF06B6D4));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                  ),
+                  _PaintBucketStyleCard(
+                    color: const Color(0xFFF59E0B), // Orange/Amber
+                    isSelected: selectedColor.toARGB32() == 0xFFF59E0B && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFFF59E0B));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                  ),
+                  _PaintBucketStyleCard(
+                    color: Colors.transparent, // Transparent Fill
+                    isTransparent: true,
+                    isSelected: opacity <= 0.05 || selectedColor.a == 0,
+                    onTap: () {
+                      onColorChanged(Colors.transparent);
+                      onOpacityChanged(0.0);
+                    },
+                    isDarkMode: isDarkMode,
+                  ),
+                  _PaintBucketStyleCard(
+                    color: const Color(0xFFFFFFFF), // Pure White
+                    isSelected: selectedColor.toARGB32() == 0xFFFFFFFF && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFFFFFFFF));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                  ),
+                  _PaintBucketStyleCard(
+                    color: const Color(0xFF64748B), // Slate Gray
+                    isSelected: selectedColor.toARGB32() == 0xFF64748B && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFF64748B));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                  ),
+                  _PaintBucketStyleCard(
+                    color: const Color(0xFF000000), // Pure Black
+                    isSelected: selectedColor.toARGB32() == 0xFF000000 && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFF000000));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
             ],
 
-            // Dedicated Fill Tool Info Card
-            if (activeTool == CanvasTool.fill) ...[
+            // 2. TOOL PROPERTIES HEADER
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  selectedAnnotation != null ? 'Item Properties' : 'Tool Properties',
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Tooltip(
+                  message: 'Tool options & settings',
+                  child: Icon(Icons.help_outline_rounded, size: 16, color: subTextColor),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Divider(color: borderColor, height: 1),
+            const SizedBox(height: 14),
+
+            // Selection Tool Info Card
+            if (activeTool == CanvasTool.select && selectedAnnotation == null) ...[
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -321,38 +407,225 @@ class StylePicker extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.format_color_fill_rounded, color: selectedColor, size: 22),
+                        const Icon(Icons.crop_free_rounded, color: AppColors.accent, size: 18),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Paint Bucket Fill',
-                            style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 13),
+                        Text(
+                          'Selection (Cut & Move)',
+                          style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '• Drag over the image to create a selection.\n• Drag inside the selection to cut and move it (leaves transparency behind).\n• Press Delete to erase selection to transparent.\n• Press Esc to deselect/commit.',
+                      style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Crop Tool Info Card
+            if (activeTool == CanvasTool.crop) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.crop_rounded, color: AppColors.accent, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Crop & Canvas Bounds',
+                          style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '• Drag handles inward to crop image.\n• Drag handles outward to expand canvas with transparent space.\n• Click "Apply Crop" to commit changes.',
+                      style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Dedicated Fill Tool Properties Card
+            if (activeTool == CanvasTool.fill) ...[
+              // Eyedropper and Fill Color Buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text('Eyedropper', style: TextStyle(color: subTextColor, fontSize: 11, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 6),
+                        InkWell(
+                          onTap: onActivateEyedropper,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: cardBg,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: borderColor),
+                            ),
+                            child: Center(
+                              child: Icon(Icons.colorize_rounded, color: textColor, size: 20),
+                            ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Click any shape or canvas region to flood-fill with the selected color below.',
-                      style: TextStyle(color: subTextColor, fontSize: 11),
-                    ),
-                    if (onActivateEyedropper != null) ...[
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.colorize_rounded, size: 14),
-                          label: const Text('Pick Color from Screen', style: TextStyle(fontSize: 11)),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.accent,
-                            side: const BorderSide(color: AppColors.accent),
-                            padding: const EdgeInsets.symmetric(vertical: 6),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text('Fill', style: TextStyle(color: subTextColor, fontSize: 11, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 6),
+                        InkWell(
+                          onTap: () => _showColorPickerDialog(context),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            height: 42,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: cardBg,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: borderColor),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  width: 22,
+                                  height: 22,
+                                  decoration: BoxDecoration(
+                                    color: opacity > 0.05 ? selectedColor : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: isDarkMode ? Colors.white30 : Colors.black26),
+                                  ),
+                                  child: opacity <= 0.05
+                                      ? const ClipRRect(
+                                          borderRadius: BorderRadius.all(Radius.circular(3)),
+                                          child: _MiniCheckerboard(),
+                                        )
+                                      : null,
+                                ),
+                                const SizedBox(width: 4),
+                                Icon(Icons.arrow_drop_down_rounded, color: subTextColor, size: 18),
+                              ],
+                            ),
                           ),
-                          onPressed: onActivateEyedropper,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Tolerance Slider
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Tolerance:', style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: borderColor),
+                    ),
+                    child: Text('${fillTolerance.toInt()}%', style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              SliderTheme(
+                data: SliderThemeData(
+                  activeTrackColor: AppColors.accent,
+                  inactiveTrackColor: borderColor,
+                  thumbColor: AppColors.accent,
+                  trackHeight: 3,
+                ),
+                child: Slider(
+                  value: fillTolerance.clamp(0.0, 100.0),
+                  min: 0.0,
+                  max: 100.0,
+                  onChanged: onFillToleranceChanged,
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Opacity Slider
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Opacity:', style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: borderColor),
+                    ),
+                    child: Text('${(opacity * 100).toInt()}%', style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              SliderTheme(
+                data: SliderThemeData(
+                  activeTrackColor: AppColors.accent,
+                  inactiveTrackColor: borderColor,
+                  thumbColor: AppColors.accent,
+                  trackHeight: 3,
+                ),
+                child: Slider(
+                  value: opacity.clamp(0.0, 1.0),
+                  min: 0.0,
+                  max: 1.0,
+                  onChanged: onOpacityChanged,
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Global Fill Checkbox
+              InkWell(
+                onTap: () => onGlobalFillChanged?.call(!isGlobalFill),
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: Checkbox(
+                          value: isGlobalFill,
+                          onChanged: (val) => onGlobalFillChanged?.call(val ?? false),
+                          activeColor: AppColors.accent,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Global Fill',
+                        style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w500),
+                      ),
                     ],
-                  ],
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -403,20 +676,41 @@ class StylePicker extends StatelessWidget {
                         ),
                       ],
                     ),
-                    if (stepCounter > 1 && onResetStepCounter != null) ...[
+                    if ((stepCounter > 1 && onResetStepCounter != null) || onRenumberSteps != null) ...[
                       const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.restart_alt_rounded, size: 14),
-                          label: const Text('Reset to #1', style: TextStyle(fontSize: 11)),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.accent,
-                            side: const BorderSide(color: AppColors.accent),
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                          ),
-                          onPressed: onResetStepCounter,
-                        ),
+                      Row(
+                        children: [
+                          if (stepCounter > 1 && onResetStepCounter != null)
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.restart_alt_rounded, size: 14),
+                                label: const Text('Reset #1', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppColors.accent,
+                                  side: const BorderSide(color: AppColors.accent),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+                                ),
+                                onPressed: onResetStepCounter,
+                              ),
+                            ),
+                          if (stepCounter > 1 && onResetStepCounter != null && onRenumberSteps != null)
+                            const SizedBox(width: 6),
+                          if (onRenumberSteps != null)
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.format_list_numbered_rounded, size: 14),
+                                label: const Text('Renumber', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppColors.accent,
+                                  side: const BorderSide(color: AppColors.accent),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+                                ),
+                                onPressed: onRenumberSteps,
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ],
@@ -844,10 +1138,10 @@ class StylePicker extends StatelessWidget {
               const SizedBox(height: 16),
             ],
 
-            // Blur Mode (Gaussian Blur vs Pixelate Mosaic)
+            // Blur Mode (Gaussian Blur vs Pixelate Mosaic vs Solid Blackout)
             if (effectiveTool == CanvasTool.blur) ...[
               Text(
-                'BLUR MODE',
+                'REDACTION MODE',
                 style: TextStyle(
                   color: subTextColor,
                   fontSize: 11,
@@ -860,7 +1154,7 @@ class StylePicker extends StatelessWidget {
                 children: [
                   Expanded(
                     child: FilterChip(
-                      label: const Center(child: Text('Gaussian', style: TextStyle(fontSize: 11))),
+                      label: const Center(child: Text('Blur', style: TextStyle(fontSize: 10.5))),
                       selected: blurType == BlurType.gaussian,
                       selectedColor: AppColors.accent.withValues(alpha: 0.3),
                       checkmarkColor: AppColors.accent,
@@ -869,10 +1163,10 @@ class StylePicker extends StatelessWidget {
                       },
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 4),
                   Expanded(
                     child: FilterChip(
-                      label: const Center(child: Text('Pixelate', style: TextStyle(fontSize: 11))),
+                      label: const Center(child: Text('Pixelate', style: TextStyle(fontSize: 10.5))),
                       selected: blurType == BlurType.pixelate,
                       selectedColor: AppColors.accent.withValues(alpha: 0.3),
                       checkmarkColor: AppColors.accent,
@@ -881,54 +1175,70 @@ class StylePicker extends StatelessWidget {
                       },
                     ),
                   ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: FilterChip(
+                      label: const Center(child: Text('Blackout', style: TextStyle(fontSize: 10.5))),
+                      selected: blurType == BlurType.solid,
+                      selectedColor: AppColors.accent.withValues(alpha: 0.3),
+                      checkmarkColor: AppColors.accent,
+                      onSelected: (selected) {
+                        if (selected) onBlurTypeChanged?.call(BlurType.solid);
+                      },
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
 
-              // Obscuration strength: gaussian sigma, or mosaic block size.
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    blurType == BlurType.pixelate ? 'BLOCK SIZE' : 'BLUR STRENGTH',
-                    style: TextStyle(
-                      color: subTextColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.8,
+              if (blurType != BlurType.solid) ...[
+                // Obscuration strength: gaussian sigma, or mosaic block size.
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      blurType == BlurType.pixelate ? 'BLOCK SIZE' : 'BLUR STRENGTH',
+                      style: TextStyle(
+                        color: subTextColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.8,
+                      ),
                     ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: cardBg,
-                      borderRadius: BorderRadius.circular(4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: cardBg,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '${blurStrength.toInt()} px',
+                        style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
                     ),
-                    child: Text(
-                      '${blurStrength.toInt()} px',
-                      style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-              SliderTheme(
-                data: SliderThemeData(
-                  activeTrackColor: AppColors.accent,
-                  inactiveTrackColor: borderColor,
-                  thumbColor: AppColors.accent,
-                  trackHeight: 3,
+                  ],
                 ),
-                child: Slider(
-                  value: blurStrength.clamp(2.0, 50.0),
-                  min: 2.0,
-                  max: 50.0,
-                  onChanged: (v) => onBlurStrengthChanged?.call(v),
+                SliderTheme(
+                  data: SliderThemeData(
+                    activeTrackColor: AppColors.accent,
+                    inactiveTrackColor: borderColor,
+                    thumbColor: AppColors.accent,
+                    trackHeight: 3,
+                  ),
+                  child: Slider(
+                    value: blurStrength.clamp(2.0, 50.0),
+                    min: 2.0,
+                    max: 50.0,
+                    onChanged: (v) => onBlurStrengthChanged?.call(v),
+                  ),
                 ),
-              ),
+              ],
               Text(
-                blurType == BlurType.pixelate
-                    ? 'Mosaic blocks fully discard the original pixels — safest for redacting sensitive data.'
-                    : 'Gaussian blur softens the region; use a high strength for sensitive content.',
+                blurType == BlurType.solid
+                    ? 'Solid blackout permanently covers sensitive passwords, API keys, or PII.'
+                    : (blurType == BlurType.pixelate
+                        ? 'Mosaic blocks fully discard the original pixels — safe for redacting data.'
+                        : 'Gaussian blur softens the region; use a high strength for sensitive content.'),
                 style: TextStyle(color: subTextColor, fontSize: 10.5, height: 1.3),
               ),
               const SizedBox(height: 16),
@@ -1384,4 +1694,128 @@ class _RadiusPresetChip extends StatelessWidget {
     );
   }
 }
+
+class _PaintBucketStyleCard extends StatelessWidget {
+  final Color color;
+  final bool isTransparent;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final bool isDarkMode;
+
+  const _PaintBucketStyleCard({
+    required this.color,
+    this.isTransparent = false,
+    required this.isSelected,
+    required this.onTap,
+    required this.isDarkMode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cardBg = isDarkMode ? const Color(0xFF221F33) : const Color(0xFFEFEBF7);
+    final borderColor =
+        isSelected ? const Color(0xFF38BDF8) : (isDarkMode ? Colors.white12 : Colors.black12);
+
+    return Tooltip(
+      message: isTransparent
+          ? 'Transparent / Erase Fill'
+          : '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: borderColor, width: isSelected ? 2 : 1),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF38BDF8).withValues(alpha: 0.4),
+                      blurRadius: 6,
+                    )
+                  ]
+                : null,
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (isTransparent)
+                const Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.all(Radius.circular(7)),
+                    child: _MiniCheckerboard(),
+                  ),
+                ),
+              // Paint bucket icon pouring liquid
+              Transform.rotate(
+                angle: -0.4,
+                child: Icon(
+                  Icons.format_color_fill_rounded,
+                  size: 26,
+                  color: isTransparent
+                      ? (isDarkMode ? Colors.white70 : Colors.black87)
+                      : (color == Colors.transparent
+                          ? (isDarkMode ? Colors.white70 : Colors.black87)
+                          : color),
+                ),
+              ),
+              if (isSelected)
+                Positioned(
+                  top: 2,
+                  right: 2,
+                  child: Container(
+                    padding: const EdgeInsets.all(1.5),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF38BDF8),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.star_rounded, size: 10, color: Colors.white),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniCheckerboard extends StatelessWidget {
+  const _MiniCheckerboard();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: const Size(48, 48),
+      painter: _MiniCheckerPainter(),
+    );
+  }
+}
+
+class _MiniCheckerPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    const s = 6.0;
+    final p1 = Paint()..color = const Color(0xFF8E8E93).withValues(alpha: 0.4);
+    final p2 = Paint()..color = const Color(0xFFE5E5EA).withValues(alpha: 0.4);
+    int r = 0;
+    for (double y = 0; y < size.height; y += s) {
+      int c = 0;
+      for (double x = 0; x < size.width; x += s) {
+        canvas.drawRect(
+          Rect.fromLTWH(x, y, math.min(s, size.width - x), math.min(s, size.height - y)),
+          (r + c) % 2 == 0 ? p1 : p2,
+        );
+        c++;
+      }
+      r++;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 

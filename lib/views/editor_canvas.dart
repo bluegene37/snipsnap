@@ -10,8 +10,10 @@ import 'package:image/image.dart' as img;
 import 'package:uuid/uuid.dart';
 
 import '../models/annotation.dart';
+import '../services/clipboard_service.dart';
 import '../services/render_service.dart';
 import '../utils/constants.dart';
+import '../utils/image_operations.dart';
 import 'components/annotation_renderer.dart';
 
 class EditorCanvas extends StatefulWidget {
@@ -52,6 +54,8 @@ class EditorCanvas extends StatefulWidget {
   final double blurStrength;
   final bool hasShadow;
   final bool isDoubleArrow;
+  final double fillTolerance;
+  final bool isGlobalFill;
 
   const EditorCanvas({
     super.key,
@@ -89,6 +93,8 @@ class EditorCanvas extends StatefulWidget {
     this.blurStrength = 14.0,
     this.hasShadow = false,
     this.isDoubleArrow = false,
+    this.fillTolerance = 15.0,
+    this.isGlobalFill = false,
   });
 
   @override
@@ -103,6 +109,7 @@ enum _AnnHandle {
   bottomLeft,
   bottomRight,
   rotate,
+  curve,
 }
 
 enum _CropHandle {
@@ -138,6 +145,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
   /// Decoded source pixels, used to render blur/pixelate regions on screen with
   /// exactly the same code path the exporter uses.
   ui.Image? _baseImage;
+  img.Image? _cachedSourceImage;
   int _baseImageToken = 0;
 
   // Selection / transform state
@@ -147,6 +155,17 @@ class _EditorCanvasState extends State<EditorCanvas> {
   bool _isResizingAnnotation = false;
   bool _isRotatingAnnotation = false;
   _AnnHandle _currentAnnHandle = _AnnHandle.none;
+
+  // Marquee Selection & Cut-and-Move Floating State
+  Rect? _selectionMarquee;
+  Rect? _floatingSelectionOriginRect;
+  Rect? _floatingSelectionRect;
+  img.Image? _cutSelectionImage;
+  ui.Image? _floatingSelectionUiImage;
+  bool _hasExtractedSelection = false;
+  bool _isDraggingSelection = false;
+  _CropHandle _currentSelectionHandle = _CropHandle.none;
+  Rect? _selectionGestureOriginRect;
 
   /// Geometry captured when a transform gesture begins so every frame is
   /// computed from the original shape instead of accumulating rounding drift.
@@ -158,6 +177,17 @@ class _EditorCanvasState extends State<EditorCanvas> {
   bool _isDraggingCrop = false;
   _CropHandle _currentCropHandle = _CropHandle.none;
   Rect? _cropOrigin;
+
+  // Inline text editing state
+  String? _editingAnnotationId;
+  Offset? _inlineTextPos;
+  final TextEditingController _inlineTextController = TextEditingController();
+  final FocusNode _inlineTextFocusNode = FocusNode(debugLabel: 'InlineTextEditor');
+
+  // Eyedropper Magnifier state
+  Offset? _hoverPos;
+  Color? _hoverColor;
+  ({int x, int y})? _hoverPixelPos;
 
   // Drawing state
   Annotation? _currentAnnotation;
@@ -191,7 +221,12 @@ class _EditorCanvasState extends State<EditorCanvas> {
   void dispose() {
     _baseImage?.dispose();
     _baseImage = null;
+    _cachedSourceImage = null;
+    _floatingSelectionUiImage?.dispose();
+    _floatingSelectionUiImage = null;
     _focusNode.dispose();
+    _inlineTextFocusNode.dispose();
+    _inlineTextController.dispose();
     _transformationController.dispose();
     super.dispose();
   }
@@ -211,6 +246,18 @@ class _EditorCanvasState extends State<EditorCanvas> {
     }
 
     if (oldWidget.activeTool != widget.activeTool) {
+      if (oldWidget.activeTool == CanvasTool.select && _hasExtractedSelection) {
+        _commitFloatingSelection();
+      } else {
+        _floatingSelectionUiImage?.dispose();
+        _floatingSelectionUiImage = null;
+        _cutSelectionImage = null;
+        _floatingSelectionRect = null;
+        _floatingSelectionOriginRect = null;
+        _hasExtractedSelection = false;
+        _selectionMarquee = null;
+      }
+
       _selectedAnnotationId = null;
       if (widget.activeTool != CanvasTool.crop) {
         _activeCropRect = null;
@@ -245,20 +292,30 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
     if (path == null) {
       _baseImage?.dispose();
-      if (mounted) setState(() => _baseImage = null);
+      if (mounted) {
+        setState(() {
+          _baseImage = null;
+          _cachedSourceImage = null;
+        });
+      }
       return;
     }
 
-    final image = await RenderService.decodeImageFile(path);
-    // A newer load (or disposal) won the race — drop this frame's native memory.
-    if (!mounted || token != _baseImageToken) {
-      image?.dispose();
-      return;
-    }
-    setState(() {
-      _baseImage?.dispose();
-      _baseImage = image;
-    });
+    try {
+      final bytes = await File(path).readAsBytes();
+      final decodedImg = img.decodeImage(bytes);
+      final image = await RenderService.decodeImageFile(path);
+      // A newer load (or disposal) won the race — drop this frame's native memory.
+      if (!mounted || token != _baseImageToken) {
+        image?.dispose();
+        return;
+      }
+      setState(() {
+        _baseImage?.dispose();
+        _baseImage = image;
+        _cachedSourceImage = decodedImg;
+      });
+    } catch (_) {}
   }
 
   void _checkFileExists() {
@@ -397,6 +454,12 @@ class _EditorCanvasState extends State<EditorCanvas> {
     final local = AnnotationRenderer.toLocalSpace(ann, pos);
     const r = AnnotationRenderer.handleHitRadius;
 
+    // Curvature handle for Arrow
+    if (ann.tool == CanvasTool.arrow && ann.startPoint != null && ann.endPoint != null) {
+      final curvePos = ann.controlPoint ?? ((ann.startPoint! + ann.endPoint!) / 2);
+      if ((local - curvePos).distance <= r + 4.0) return _AnnHandle.curve;
+    }
+
     final rotPos = bounds.topCenter - const Offset(0, AnnotationRenderer.rotationHandleGap);
     if ((local - rotPos).distance <= r) return _AnnHandle.rotate;
     if ((local - bounds.topLeft).distance <= r) return _AnnHandle.topLeft;
@@ -486,8 +549,6 @@ class _EditorCanvasState extends State<EditorCanvas> {
     final origin = _cropOrigin;
     if (origin == null) return;
 
-    // The crop box is confined to the image, never the surrounding letterbox.
-    final limit = _imageRect;
     double left = origin.left;
     double top = origin.top;
     double right = origin.right;
@@ -495,14 +556,12 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
     switch (_currentCropHandle) {
       case _CropHandle.move:
-        final newLeft = (origin.left + totalDelta.dx)
-            .clamp(limit.left, math.max(limit.left, limit.right - origin.width))
-            .toDouble();
-        final newTop = (origin.top + totalDelta.dy)
-            .clamp(limit.top, math.max(limit.top, limit.bottom - origin.height))
-            .toDouble();
+        left += totalDelta.dx;
+        top += totalDelta.dy;
+        right += totalDelta.dx;
+        bottom += totalDelta.dy;
         setState(() {
-          _activeCropRect = Rect.fromLTWH(newLeft, newTop, origin.width, origin.height);
+          _activeCropRect = Rect.fromLTRB(left, top, right, bottom);
         });
         return;
       case _CropHandle.topLeft:
@@ -538,10 +597,24 @@ class _EditorCanvasState extends State<EditorCanvas> {
     }
 
     const minSize = 20.0;
-    left = left.clamp(limit.left, math.max(limit.left, right - minSize));
-    top = top.clamp(limit.top, math.max(limit.top, bottom - minSize));
-    right = right.clamp(left + minSize, limit.right);
-    bottom = bottom.clamp(top + minSize, limit.bottom);
+    if (right - left < minSize) {
+      if (_currentCropHandle == _CropHandle.left ||
+          _currentCropHandle == _CropHandle.topLeft ||
+          _currentCropHandle == _CropHandle.bottomLeft) {
+        left = right - minSize;
+      } else {
+        right = left + minSize;
+      }
+    }
+    if (bottom - top < minSize) {
+      if (_currentCropHandle == _CropHandle.top ||
+          _currentCropHandle == _CropHandle.topLeft ||
+          _currentCropHandle == _CropHandle.topRight) {
+        top = bottom - minSize;
+      } else {
+        bottom = top + minSize;
+      }
+    }
 
     setState(() => _activeCropRect = Rect.fromLTRB(left, top, right, bottom));
   }
@@ -712,6 +785,51 @@ class _EditorCanvasState extends State<EditorCanvas> {
       }
     }
 
+    // Selection tool workflow
+    if (widget.activeTool == CanvasTool.select) {
+      // 1. If clicking active floating selection handle or body
+      if (_floatingSelectionRect != null) {
+        final handle = _hitTestCropRect(pos, _floatingSelectionRect!);
+        if (handle != _CropHandle.none) {
+          if (!_hasExtractedSelection) {
+            _extractFloatingSelection();
+          }
+          setState(() {
+            _isDraggingSelection = true;
+            _currentSelectionHandle = handle;
+            _selectionGestureOriginRect = _floatingSelectionRect;
+          });
+          return;
+        } else {
+          // Clicked outside floating selection -> commit it!
+          _commitFloatingSelection();
+        }
+      }
+
+      // 2. Check if an existing annotation was grabbed
+      final hit = _hitTestAnnotation(pos);
+      if (hit != null) {
+        _pushHistoryCheckpoint();
+        setState(() {
+          _selectedAnnotationId = hit.id;
+          _gestureOrigin = hit;
+          _isDraggingAnnotation = true;
+          _currentAnnHandle = _AnnHandle.body;
+        });
+        widget.onSelectAnnotation?.call(hit);
+        return;
+      }
+
+      // 3. Start drag marquee box on image
+      setState(() {
+        _selectedAnnotationId = null;
+        _drawStart = pos;
+        _selectionMarquee = Rect.fromPoints(pos, pos);
+      });
+      widget.onSelectAnnotation?.call(null);
+      return;
+    }
+
     // Transform the current selection when its handles or body are grabbed.
     final selected = _selectedAnnotation;
     if (selected != null) {
@@ -722,15 +840,16 @@ class _EditorCanvasState extends State<EditorCanvas> {
           _gestureOrigin = selected;
           _isDraggingAnnotation = handle == _AnnHandle.body;
           _isRotatingAnnotation = handle == _AnnHandle.rotate;
-          _isResizingAnnotation = !_isDraggingAnnotation && !_isRotatingAnnotation;
+          _isResizingAnnotation = !_isDraggingAnnotation &&
+              !_isRotatingAnnotation &&
+              handle != _AnnHandle.curve;
           _currentAnnHandle = handle;
         });
         return;
       }
     }
 
-    // Existing items can be grabbed directly with any tool active, matching the
-    // "always live" selection behaviour of Snagit's editor.
+    // Existing items can be grabbed directly with any tool active
     final hit = _hitTestAnnotation(pos);
     if (hit != null) {
       _pushHistoryCheckpoint();
@@ -744,12 +863,6 @@ class _EditorCanvasState extends State<EditorCanvas> {
       return;
     }
 
-    if (widget.activeTool == CanvasTool.select) {
-      setState(() => _selectedAnnotationId = null);
-      widget.onSelectAnnotation?.call(null);
-      return;
-    }
-
     setState(() {
       _selectedAnnotationId = null;
       _isDraggingAnnotation = false;
@@ -759,8 +872,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
       _gestureOrigin = null;
     });
 
-    // Click-to-place tools are created on tap-up so a stray drag cannot spawn
-    // duplicates.
+    // Click-to-place tools are created on tap-up so a stray drag cannot spawn duplicates.
     if (widget.activeTool == CanvasTool.stepMarker ||
         widget.activeTool == CanvasTool.text ||
         widget.activeTool == CanvasTool.fill ||
@@ -784,7 +896,89 @@ class _EditorCanvasState extends State<EditorCanvas> {
       return;
     }
 
+    if (_isDraggingSelection && _selectionGestureOriginRect != null) {
+      final origin = _selectionGestureOriginRect!;
+      if (_currentSelectionHandle == _CropHandle.move) {
+        setState(() {
+          _floatingSelectionRect = origin.shift(totalDelta);
+        });
+      } else {
+        double left = origin.left;
+        double top = origin.top;
+        double right = origin.right;
+        double bottom = origin.bottom;
+        switch (_currentSelectionHandle) {
+          case _CropHandle.topLeft:
+            left += totalDelta.dx;
+            top += totalDelta.dy;
+            break;
+          case _CropHandle.topRight:
+            right += totalDelta.dx;
+            top += totalDelta.dy;
+            break;
+          case _CropHandle.bottomLeft:
+            left += totalDelta.dx;
+            bottom += totalDelta.dy;
+            break;
+          case _CropHandle.bottomRight:
+            right += totalDelta.dx;
+            bottom += totalDelta.dy;
+            break;
+          case _CropHandle.top:
+            top += totalDelta.dy;
+            break;
+          case _CropHandle.bottom:
+            bottom += totalDelta.dy;
+            break;
+          case _CropHandle.left:
+            left += totalDelta.dx;
+            break;
+          case _CropHandle.right:
+            right += totalDelta.dx;
+            break;
+          default:
+            break;
+        }
+        const minSize = 10.0;
+        if (right - left < minSize) {
+          if (_currentSelectionHandle == _CropHandle.left ||
+              _currentSelectionHandle == _CropHandle.topLeft ||
+              _currentSelectionHandle == _CropHandle.bottomLeft) {
+            left = right - minSize;
+          } else {
+            right = left + minSize;
+          }
+        }
+        if (bottom - top < minSize) {
+          if (_currentSelectionHandle == _CropHandle.top ||
+              _currentSelectionHandle == _CropHandle.topLeft ||
+              _currentSelectionHandle == _CropHandle.topRight) {
+            top = bottom - minSize;
+          } else {
+            bottom = top + minSize;
+          }
+        }
+        setState(() {
+          _floatingSelectionRect = Rect.fromLTRB(left, top, right, bottom);
+        });
+      }
+      return;
+    }
+
+    if (widget.activeTool == CanvasTool.select && _drawStart != null) {
+      setState(() {
+        _selectionMarquee = Rect.fromPoints(_drawStart!, pos);
+      });
+      return;
+    }
+
     final origin = _gestureOrigin;
+
+    if (_currentAnnHandle == _AnnHandle.curve && origin != null) {
+      final local = AnnotationRenderer.toLocalSpace(origin, pos);
+      _replaceAnnotation(origin.copyWith(controlPoint: local), live: true);
+      return;
+    }
 
     if (_isRotatingAnnotation && origin != null) {
       final center = AnnotationRenderer.boundingRect(origin).center;
@@ -814,15 +1008,14 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
     if (widget.activeTool == CanvasTool.crop && _drawStart != null) {
       final end = _constrainEndPoint(_drawStart!, pos, CanvasTool.crop);
-      setState(() => _activeCropRect = Rect.fromPoints(_drawStart!, end).intersect(_imageRect));
+      setState(() => _activeCropRect = Rect.fromPoints(_drawStart!, end));
       return;
     }
 
     if (_currentAnnotation == null || _drawStart == null) return;
 
     if (_freehandTools.contains(widget.activeTool)) {
-      // Skip sub-pixel samples: fewer points means a smoother path and a much
-      // smaller annotation to store and re-render.
+      // Skip sub-pixel samples
       if (_currentPoints.isEmpty || (pos - _currentPoints.last).distance >= 1.5) {
         _currentPoints = [..._currentPoints, pos];
         setState(() => _currentAnnotation = _currentAnnotation!.copyWith(points: _currentPoints));
@@ -834,7 +1027,6 @@ class _EditorCanvasState extends State<EditorCanvas> {
     var end = _constrainEndPoint(start, pos, widget.activeTool);
 
     if (_isAltDown && _dragToDrawTools.contains(widget.activeTool)) {
-      // Alt/Option grows the shape outwards from the initial click point.
       final half = end - start;
       start = _drawStart! - half;
     }
@@ -854,7 +1046,38 @@ class _EditorCanvasState extends State<EditorCanvas> {
       return;
     }
 
-    if (_isRotatingAnnotation || _isResizingAnnotation || _isDraggingAnnotation) {
+    if (_isDraggingSelection) {
+      setState(() {
+        _isDraggingSelection = false;
+        _currentSelectionHandle = _CropHandle.none;
+        _selectionGestureOriginRect = null;
+      });
+      return;
+    }
+
+    if (widget.activeTool == CanvasTool.select && _selectionMarquee != null) {
+      final marquee = _selectionMarquee!;
+      if (marquee.width >= 5 && marquee.height >= 5) {
+        setState(() {
+          _floatingSelectionRect = marquee;
+          _floatingSelectionOriginRect = marquee;
+          _hasExtractedSelection = false;
+          _selectionMarquee = null;
+          _drawStart = null;
+        });
+      } else {
+        setState(() {
+          _selectionMarquee = null;
+          _drawStart = null;
+        });
+      }
+      return;
+    }
+
+    if (_isRotatingAnnotation ||
+        _isResizingAnnotation ||
+        _isDraggingAnnotation ||
+        _currentAnnHandle == _AnnHandle.curve) {
       final settled = _selectedAnnotation;
       setState(() {
         _isRotatingAnnotation = false;
@@ -863,7 +1086,6 @@ class _EditorCanvasState extends State<EditorCanvas> {
         _currentAnnHandle = _AnnHandle.none;
         _gestureOrigin = null;
       });
-      // Re-sync the property panel with the final geometry.
       if (settled != null) widget.onSelectAnnotation?.call(settled);
       return;
     }
@@ -886,8 +1108,6 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
     if (drawn == null) return;
 
-    // Discard accidental micro-drags instead of leaving invisible artefacts on
-    // the canvas.
     if (_freehandTools.contains(drawn.tool)) {
       if (drawn.points.length < 2) return;
     } else {
@@ -900,10 +1120,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
     widget.onSelectAnnotation?.call(drawn);
   }
 
-  /// Double clicks are detected by hand rather than with a
-  /// `DoubleTapGestureRecognizer`, because adding that recognizer to the arena
-  /// delays every single tap until the double-tap window expires — placing a
-  /// step marker or text box would feel sluggish.
+  /// Double clicks are detected by hand
   bool _consumeDoubleTap(Offset pos) {
     final now = DateTime.now();
     final isDouble = now.difference(_lastTapAt) < const Duration(milliseconds: 350) &&
@@ -921,12 +1138,28 @@ class _EditorCanvasState extends State<EditorCanvas> {
     final pos = details.localPosition;
     final hit = _hitTestAnnotation(pos);
 
+    if (widget.activeTool == CanvasTool.select) {
+      if (_floatingSelectionRect != null) {
+        if (!_floatingSelectionRect!.contains(pos)) {
+          _commitFloatingSelection();
+        }
+      }
+      if (hit != null) {
+        setState(() => _selectedAnnotationId = hit.id);
+        widget.onSelectAnnotation?.call(hit);
+      } else {
+        setState(() => _selectedAnnotationId = null);
+        widget.onSelectAnnotation?.call(null);
+      }
+      return;
+    }
+
     if (_consumeDoubleTap(pos)) {
       // Double-click a text callout to edit it in place.
       if (hit != null && hit.tool == CanvasTool.text) {
         setState(() => _selectedAnnotationId = hit.id);
         widget.onSelectAnnotation?.call(hit);
-        _promptForText(hit.startPoint ?? pos, existing: hit);
+        _startInlineTextEdit(hit.startPoint ?? pos, existing: hit);
         return;
       }
     }
@@ -966,7 +1199,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
         widget.onSelectAnnotation?.call(annotation);
         break;
       case CanvasTool.text:
-        _promptForText(pos);
+        _startInlineTextEdit(pos);
         break;
       case CanvasTool.select:
         setState(() => _selectedAnnotationId = null);
@@ -978,92 +1211,61 @@ class _EditorCanvasState extends State<EditorCanvas> {
   }
 
   // ---------------------------------------------------------------------------
-  // Text entry
+  // Inline On-Canvas Text Editing
   // ---------------------------------------------------------------------------
 
-  void _promptForText(Offset pos, {Annotation? existing}) {
-    final controller = TextEditingController(text: existing?.text ?? '');
-    controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length);
+  void _startInlineTextEdit(Offset pos, {Annotation? existing}) {
+    setState(() {
+      _editingAnnotationId = existing?.id;
+      _inlineTextPos = existing?.startPoint ?? pos;
+      _inlineTextController.text = existing?.text ?? '';
+      _inlineTextController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _inlineTextController.text.length,
+      );
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _inlineTextFocusNode.requestFocus();
+    });
+  }
 
-    final dialogBg = widget.isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
-    final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
-    final hintColor = widget.isDarkMode ? Colors.white38 : Colors.black38;
+  void _commitInlineText() {
+    if (_inlineTextPos == null) return;
+    final text = _inlineTextController.text.trim();
+    final pos = _inlineTextPos!;
+    final editingId = _editingAnnotationId;
 
-    void submit(BuildContext ctx) {
-      final value = controller.text.trim();
-      Navigator.pop(ctx);
-      if (value.isEmpty) {
-        // Clearing the text of an existing callout removes it.
-        if (existing != null) {
-          widget.onAnnotationsUpdated
-              ?.call(widget.annotations.where((a) => a.id != existing.id).toList());
-          setState(() => _selectedAnnotationId = null);
-          widget.onSelectAnnotation?.call(null);
-        }
-        return;
+    setState(() {
+      _inlineTextPos = null;
+      _editingAnnotationId = null;
+    });
+
+    if (text.isEmpty) {
+      if (editingId != null) {
+        widget.onAnnotationsUpdated?.call(
+          widget.annotations.where((a) => a.id != editingId).toList(),
+        );
+        setState(() => _selectedAnnotationId = null);
+        widget.onSelectAnnotation?.call(null);
       }
+      _focusNode.requestFocus();
+      return;
+    }
 
+    if (editingId != null) {
+      final existing = widget.annotations.where((a) => a.id == editingId).firstOrNull;
       if (existing != null) {
         _pushHistoryCheckpoint();
-        _replaceAnnotation(existing.copyWith(text: value), live: true);
-        return;
+        _replaceAnnotation(existing.copyWith(text: text), live: true);
       }
-
+    } else {
       final annotation = _buildAnnotationForTool(CanvasTool.text, pos)
-          .copyWith(text: value, endPoint: null);
+          .copyWith(text: text, endPoint: null);
       widget.onAnnotationAdded(annotation);
       setState(() => _selectedAnnotationId = annotation.id);
       widget.onSelectAnnotation?.call(annotation);
     }
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: dialogBg,
-        title: Text(
-          existing != null ? 'Edit Text Annotation' : 'Add Text Annotation',
-          style: TextStyle(color: textColor),
-        ),
-        content: SizedBox(
-          width: 380,
-          child: TextField(
-            controller: controller,
-            autofocus: true,
-            maxLines: 6,
-            minLines: 1,
-            textInputAction: TextInputAction.newline,
-            style: TextStyle(color: textColor),
-            decoration: InputDecoration(
-              hintText: 'Enter label or comment...',
-              hintStyle: TextStyle(color: hintColor),
-              helperText: 'Shift+Enter for a new line',
-              helperStyle: TextStyle(color: hintColor, fontSize: 11),
-              enabledBorder: const UnderlineInputBorder(
-                borderSide: BorderSide(color: AppColors.accent),
-              ),
-            ),
-            onSubmitted: (_) => submit(ctx),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: widget.isDarkMode ? Colors.white54 : Colors.black54),
-            ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.accent),
-            onPressed: () => submit(ctx),
-            child: Text(
-              existing != null ? 'Update' : 'Add Text',
-              style: const TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    ).then((_) => controller.dispose());
+    _focusNode.requestFocus();
   }
 
   // ---------------------------------------------------------------------------
@@ -1085,25 +1287,220 @@ class _EditorCanvasState extends State<EditorCanvas> {
   }
 
   Future<void> _sampleColorAt(Offset localPos) async {
-    final path = widget.imagePath;
-    if (path == null || !File(path).existsSync()) return;
+    img.Image? decoded = _cachedSourceImage;
+    if (decoded == null) {
+      final path = widget.imagePath;
+      if (path == null || !File(path).existsSync()) return;
+      try {
+        decoded = img.decodeImage(await File(path).readAsBytes());
+        _cachedSourceImage = decoded;
+      } catch (e) {
+        debugPrint('Error loading image for sample: $e');
+        return;
+      }
+    }
+    if (decoded == null) return;
+
+    final pixelPos = _canvasPointToImagePixel(localPos, decoded.width, decoded.height);
+    if (pixelPos == null) return;
+
+    final pixel = decoded.getPixel(pixelPos.x, pixelPos.y);
+    final sampled = Color.fromARGB(
+      pixel.a.toInt(),
+      pixel.r.toInt(),
+      pixel.g.toInt(),
+      pixel.b.toInt(),
+    );
+    final hex = '#${sampled.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
+    await ClipboardService.copyText(hex);
+    widget.onSampleColor?.call(sampled);
+    widget.onToolSelected?.call(CanvasTool.select);
+  }
+
+  Future<ui.Image?> _imageToUiImage(img.Image image) async {
     try {
-      final decoded = img.decodeImage(await File(path).readAsBytes());
+      final pngBytes = Uint8List.fromList(img.encodePng(image));
+      final codec = await ui.instantiateImageCodec(pngBytes);
+      final frame = await codec.getNextFrame();
+      codec.dispose();
+      return frame.image;
+    } catch (e) {
+      debugPrint('Error converting image to ui.Image: $e');
+      return null;
+    }
+  }
+
+  Future<void> _extractFloatingSelection() async {
+    if (_hasExtractedSelection) return;
+    final origin = _floatingSelectionOriginRect;
+    final path = widget.imagePath;
+    if (origin == null || path == null || !File(path).existsSync()) return;
+
+    try {
+      img.Image? decoded = _cachedSourceImage;
+      if (decoded == null) {
+        decoded = img.decodeImage(await File(path).readAsBytes());
+        _cachedSourceImage = decoded;
+      }
       if (decoded == null) return;
 
-      final pixelPos = _canvasPointToImagePixel(localPos, decoded.width, decoded.height);
-      if (pixelPos == null) return;
+      final imageRect = _imageRect;
+      if (imageRect.isEmpty) return;
 
-      final pixel = decoded.getPixel(pixelPos.x, pixelPos.y);
-      widget.onSampleColor?.call(Color.fromARGB(
-        pixel.a.toInt(),
-        pixel.r.toInt(),
-        pixel.g.toInt(),
-        pixel.b.toInt(),
-      ));
-      widget.onToolSelected?.call(CanvasTool.select);
+      final scaleX = decoded.width / imageRect.width;
+      final scaleY = decoded.height / imageRect.height;
+
+      final relLeft = origin.left - imageRect.left;
+      final relTop = origin.top - imageRect.top;
+      final relRight = origin.right - imageRect.left;
+      final relBottom = origin.bottom - imageRect.top;
+
+      final pxX = (relLeft * scaleX).round().clamp(0, decoded.width - 1);
+      final pxY = (relTop * scaleY).round().clamp(0, decoded.height - 1);
+      final pxW = ((relRight - relLeft) * scaleX).round().clamp(1, decoded.width - pxX);
+      final pxH = ((relBottom - relTop) * scaleY).round().clamp(1, decoded.height - pxY);
+
+      final beforeFill = widget.onBeforeCanvasFill;
+      if (beforeFill != null) await beforeFill();
+
+      final extracted = ImageOperations.cutRegion(
+        image: decoded,
+        x: pxX,
+        y: pxY,
+        width: pxW,
+        height: pxH,
+      );
+      if (extracted == null) return;
+
+      final uiImg = await _imageToUiImage(extracted);
+      if (!mounted) {
+        uiImg?.dispose();
+        return;
+      }
+
+      await File(path).writeAsBytes(Uint8List.fromList(img.encodePng(decoded)));
+      await FileImage(File(path)).evict();
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+
+      setState(() {
+        _cutSelectionImage = extracted;
+        _floatingSelectionUiImage?.dispose();
+        _floatingSelectionUiImage = uiImg;
+        _hasExtractedSelection = true;
+      });
+
+      await _loadBaseImage();
     } catch (e) {
-      debugPrint('Error sampling color: $e');
+      debugPrint('Error extracting floating selection: $e');
+    }
+  }
+
+  Future<void> _commitFloatingSelection() async {
+    if (!_hasExtractedSelection || _cutSelectionImage == null || _floatingSelectionRect == null) {
+      _floatingSelectionUiImage?.dispose();
+      if (mounted) {
+        setState(() {
+          _floatingSelectionUiImage = null;
+          _cutSelectionImage = null;
+          _floatingSelectionRect = null;
+          _floatingSelectionOriginRect = null;
+          _hasExtractedSelection = false;
+        });
+      }
+      return;
+    }
+
+    final path = widget.imagePath;
+    final currentRect = _floatingSelectionRect!;
+    final cutImg = _cutSelectionImage!;
+
+    try {
+      img.Image? decoded = _cachedSourceImage;
+      if (decoded == null && path != null && File(path).existsSync()) {
+        decoded = img.decodeImage(await File(path).readAsBytes());
+        _cachedSourceImage = decoded;
+      }
+      if (decoded != null && path != null) {
+        final imageRect = _imageRect;
+        final scaleX = decoded.width / imageRect.width;
+        final scaleY = decoded.height / imageRect.height;
+
+        final relLeft = currentRect.left - imageRect.left;
+        final relTop = currentRect.top - imageRect.top;
+        final relRight = currentRect.right - imageRect.left;
+        final relBottom = currentRect.bottom - imageRect.top;
+
+        final dstX = (relLeft * scaleX).round();
+        final dstY = (relTop * scaleY).round();
+        final dstW = ((relRight - relLeft) * scaleX).round();
+        final dstH = ((relBottom - relTop) * scaleY).round();
+
+        ImageOperations.pasteRegion(
+          destinationImage: decoded,
+          subImage: cutImg,
+          dstX: dstX,
+          dstY: dstY,
+          dstWidth: dstW,
+          dstHeight: dstH,
+        );
+
+        await File(path).writeAsBytes(Uint8List.fromList(img.encodePng(decoded)));
+        await FileImage(File(path)).evict();
+        PaintingBinding.instance.imageCache.clear();
+        PaintingBinding.instance.imageCache.clearLiveImages();
+      }
+    } catch (e) {
+      debugPrint('Error committing floating selection: $e');
+    } finally {
+      _floatingSelectionUiImage?.dispose();
+      if (mounted) {
+        setState(() {
+          _floatingSelectionUiImage = null;
+          _cutSelectionImage = null;
+          _floatingSelectionRect = null;
+          _floatingSelectionOriginRect = null;
+          _hasExtractedSelection = false;
+        });
+        await _loadBaseImage();
+      }
+    }
+  }
+
+  Future<void> _deleteFloatingSelection() async {
+    if (_floatingSelectionRect == null) return;
+    if (!_hasExtractedSelection) {
+      await _extractFloatingSelection();
+    }
+    _floatingSelectionUiImage?.dispose();
+    setState(() {
+      _floatingSelectionUiImage = null;
+      _cutSelectionImage = null;
+      _floatingSelectionRect = null;
+      _floatingSelectionOriginRect = null;
+      _hasExtractedSelection = false;
+    });
+  }
+
+  Future<void> _copyFloatingSelectionToClipboard({bool cut = false}) async {
+    if (_floatingSelectionRect == null) return;
+    if (!_hasExtractedSelection) {
+      await _extractFloatingSelection();
+    }
+    if (_cutSelectionImage == null) return;
+
+    try {
+      final pngBytes = Uint8List.fromList(img.encodePng(_cutSelectionImage!));
+      final tempDir = Directory.systemTemp;
+      final tempFile = File('${tempDir.path}/snipsnap_sel_${DateTime.now().millisecondsSinceEpoch}.png');
+      await tempFile.writeAsBytes(pngBytes);
+      await ClipboardService.copyImageToClipboard(tempFile.path);
+
+      if (cut) {
+        await _deleteFloatingSelection();
+      }
+    } catch (e) {
+      debugPrint('Error copying selection to clipboard: $e');
     }
   }
 
@@ -1111,32 +1508,39 @@ class _EditorCanvasState extends State<EditorCanvas> {
     final path = widget.imagePath;
     if (path == null || !File(path).existsSync()) return;
     try {
-      final decoded = img.decodeImage(await File(path).readAsBytes());
+      img.Image? decoded = _cachedSourceImage;
+      if (decoded == null) {
+        decoded = img.decodeImage(await File(path).readAsBytes());
+        _cachedSourceImage = decoded;
+      }
       if (decoded == null) return;
 
       final pixelPos = _canvasPointToImagePixel(localPos, decoded.width, decoded.height);
       if (pixelPos == null) return;
 
-      // Snapshot the pre-fill bitmap *before* it is overwritten, otherwise the
-      // undo stack would capture the already-filled image.
+      // Snapshot the pre-fill bitmap *before* it is overwritten for undo.
       final beforeFill = widget.onBeforeCanvasFill;
       if (beforeFill != null) await beforeFill();
 
-      final fill = widget.activeColor;
-      img.fillFlood(
-        decoded,
-        x: pixelPos.x,
-        y: pixelPos.y,
-        color: img.ColorRgba8(
-          (fill.r * 255).round(),
-          (fill.g * 255).round(),
-          (fill.b * 255).round(),
-          (fill.a * 255).round(),
-        ),
-        threshold: 24,
+      final modified = ImageOperations.floodFill(
+        image: decoded,
+        startX: pixelPos.x,
+        startY: pixelPos.y,
+        fillColor: widget.activeColor,
+        tolerancePercent: widget.fillTolerance,
+        opacity: widget.opacity,
+        isGlobal: widget.isGlobalFill,
       );
 
-      await File(path).writeAsBytes(Uint8List.fromList(img.encodePng(decoded)));
+      if (!modified) return;
+
+      final pngBytes = Uint8List.fromList(img.encodePng(decoded));
+      await File(path).writeAsBytes(pngBytes);
+      await FileImage(File(path)).evict();
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+
+      await _loadBaseImage();
       widget.onPerformCanvasFill?.call(localPos);
     } catch (e) {
       debugPrint('Error performing flood fill: $e');
@@ -1152,6 +1556,10 @@ class _EditorCanvasState extends State<EditorCanvas> {
     final key = event.logicalKey;
 
     if (key == LogicalKeyboardKey.delete || key == LogicalKeyboardKey.backspace) {
+      if (_floatingSelectionRect != null) {
+        _deleteFloatingSelection();
+        return KeyEventResult.handled;
+      }
       if (_selectedAnnotationId != null) {
         _deleteSelectedAnnotation();
         return KeyEventResult.handled;
@@ -1160,32 +1568,71 @@ class _EditorCanvasState extends State<EditorCanvas> {
     }
 
     if (key == LogicalKeyboardKey.escape) {
+      if (_floatingSelectionRect != null) {
+        _commitFloatingSelection();
+        return KeyEventResult.handled;
+      }
       setState(() {
         _selectedAnnotationId = null;
         _activeCropRect = null;
         _currentAnnotation = null;
         _drawStart = null;
+        _selectionMarquee = null;
       });
       widget.onSelectAnnotation?.call(null);
       widget.onToolSelected?.call(CanvasTool.select);
       return KeyEventResult.handled;
     }
 
+    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+      if (_floatingSelectionRect != null) {
+        _commitFloatingSelection();
+        return KeyEventResult.handled;
+      }
+      if (widget.activeTool == CanvasTool.crop && _activeCropRect != null) {
+        _applyCrop();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
     // Nudge the selection with the arrow keys; Shift jumps 10px at a time.
     final nudges = <LogicalKeyboardKey, Offset>{
-      LogicalKeyboardKey.arrowLeft: Offset(-1, 0),
-      LogicalKeyboardKey.arrowRight: Offset(1, 0),
-      LogicalKeyboardKey.arrowUp: Offset(0, -1),
-      LogicalKeyboardKey.arrowDown: Offset(0, 1),
+      LogicalKeyboardKey.arrowLeft: const Offset(-1, 0),
+      LogicalKeyboardKey.arrowRight: const Offset(1, 0),
+      LogicalKeyboardKey.arrowUp: const Offset(0, -1),
+      LogicalKeyboardKey.arrowDown: const Offset(0, 1),
     };
     final nudge = nudges[key];
     if (nudge != null) {
+      if (_floatingSelectionRect != null) {
+        if (!_hasExtractedSelection) {
+          _extractFloatingSelection();
+        }
+        setState(() {
+          _floatingSelectionRect =
+              _floatingSelectionRect!.shift(nudge * (_isShiftDown ? 10.0 : 1.0));
+        });
+        return KeyEventResult.handled;
+      }
       if (_selectedAnnotationId == null) return KeyEventResult.ignored;
       _nudgeSelectedAnnotation(nudge * (_isShiftDown ? 10.0 : 1.0));
       return KeyEventResult.handled;
     }
 
     if (_isCommandDown) {
+      if (key == LogicalKeyboardKey.keyC) {
+        if (_floatingSelectionRect != null) {
+          _copyFloatingSelectionToClipboard(cut: false);
+          return KeyEventResult.handled;
+        }
+      }
+      if (key == LogicalKeyboardKey.keyX) {
+        if (_floatingSelectionRect != null) {
+          _copyFloatingSelectionToClipboard(cut: true);
+          return KeyEventResult.handled;
+        }
+      }
       if (key == LogicalKeyboardKey.keyD) {
         _duplicateSelectedAnnotation();
         return KeyEventResult.handled;
@@ -1196,21 +1643,14 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
     if (event is KeyRepeatEvent) return KeyEventResult.ignored;
 
-    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
-      if (widget.activeTool == CanvasTool.crop && _activeCropRect != null) {
-        _applyCrop();
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
-    }
-
     final toolKeys = <LogicalKeyboardKey, CanvasTool>{
       LogicalKeyboardKey.keyV: CanvasTool.select,
+      LogicalKeyboardKey.keyS: CanvasTool.select,
       LogicalKeyboardKey.keyP: CanvasTool.pen,
       LogicalKeyboardKey.keyL: CanvasTool.line,
       LogicalKeyboardKey.keyA: CanvasTool.arrow,
       LogicalKeyboardKey.keyR: CanvasTool.shape,
-      LogicalKeyboardKey.keyS: CanvasTool.shape,
+      LogicalKeyboardKey.keyU: CanvasTool.shape,
       LogicalKeyboardKey.keyH: CanvasTool.highlight,
       LogicalKeyboardKey.keyT: CanvasTool.text,
       LogicalKeyboardKey.keyN: CanvasTool.stepMarker,
@@ -1251,6 +1691,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
       case _AnnHandle.bottomLeft:
         return SystemMouseCursors.resizeUpRightDownLeft;
       case _AnnHandle.rotate:
+      case _AnnHandle.curve:
         return SystemMouseCursors.grab;
       case _AnnHandle.body:
         return SystemMouseCursors.move;
@@ -1260,6 +1701,31 @@ class _EditorCanvasState extends State<EditorCanvas> {
   }
 
   void _updateCursor(Offset pos) {
+    if (widget.activeTool == CanvasTool.colorPicker) {
+      final cached = _cachedSourceImage;
+      if (cached != null) {
+        final pixelPos = _canvasPointToImagePixel(pos, cached.width, cached.height);
+        if (pixelPos != null) {
+          final pixel = cached.getPixel(pixelPos.x, pixelPos.y);
+          final color = Color.fromARGB(
+            pixel.a.toInt(),
+            pixel.r.toInt(),
+            pixel.g.toInt(),
+            pixel.b.toInt(),
+          );
+          setState(() {
+            _hoverPos = pos;
+            _hoverColor = color;
+            _hoverPixelPos = pixelPos;
+          });
+        } else {
+          if (_hoverPos != null) setState(() => _hoverPos = null);
+        }
+      }
+    } else {
+      if (_hoverPos != null) setState(() => _hoverPos = null);
+    }
+
     MouseCursor next;
 
     final selected = _selectedAnnotation;
@@ -1279,7 +1745,20 @@ class _EditorCanvasState extends State<EditorCanvas> {
         _CropHandle.none => SystemMouseCursors.precise,
       };
     } else if (widget.activeTool == CanvasTool.select) {
-      next = _hitTestAnnotation(pos) != null ? SystemMouseCursors.move : SystemMouseCursors.basic;
+      if (_floatingSelectionRect != null) {
+        final handle = _hitTestCropRect(pos, _floatingSelectionRect!);
+        next = switch (handle) {
+          _CropHandle.move => SystemMouseCursors.move,
+          _CropHandle.topLeft || _CropHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
+          _CropHandle.topRight || _CropHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
+          _CropHandle.top || _CropHandle.bottom => SystemMouseCursors.resizeUpDown,
+          _CropHandle.left || _CropHandle.right => SystemMouseCursors.resizeLeftRight,
+          _CropHandle.none =>
+            _hitTestAnnotation(pos) != null ? SystemMouseCursors.move : SystemMouseCursors.precise,
+        };
+      } else {
+        next = _hitTestAnnotation(pos) != null ? SystemMouseCursors.move : SystemMouseCursors.precise;
+      }
     } else if (widget.activeTool == CanvasTool.colorPicker ||
         widget.activeTool == CanvasTool.fill) {
       next = SystemMouseCursors.precise;
@@ -1381,6 +1860,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
                                     annotations: widget.annotations,
                                     currentAnnotation: _currentAnnotation,
                                     selectedAnnotationId: _selectedAnnotationId,
+                                    editingAnnotationId: _editingAnnotationId,
                                     baseImage: _baseImage,
                                     showHud: _currentAnnotation != null ||
                                         _isResizingAnnotation ||
@@ -1391,13 +1871,41 @@ class _EditorCanvasState extends State<EditorCanvas> {
                             ),
                           ),
 
+                          // Floating Selection Overlay (Marquee / Cut-and-Move)
+                          if (widget.activeTool == CanvasTool.select &&
+                              (_selectionMarquee != null || _floatingSelectionRect != null)) ...[
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: CustomPaint(
+                                  painter: _FloatingSelectionPainter(
+                                    marqueeRect: _selectionMarquee,
+                                    floatingRect: _floatingSelectionRect,
+                                    floatingImage: _floatingSelectionUiImage,
+                                    nativeImageSize: _baseImage != null
+                                        ? Size(_baseImage!.width.toDouble(),
+                                            _baseImage!.height.toDouble())
+                                        : null,
+                                    imageRect: _imageRect,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+
                           if (_activeCropRect != null &&
                               _activeCropRect!.width > 10 &&
                               _activeCropRect!.height > 10) ...[
                             Positioned.fill(
                               child: IgnorePointer(
                                 child: CustomPaint(
-                                  painter: _CropOverlayPainter(cropRect: _activeCropRect!),
+                                  painter: _CropOverlayPainter(
+                                    cropRect: _activeCropRect!,
+                                    imageRect: _imageRect,
+                                    nativeImageSize: _baseImage != null
+                                        ? Size(_baseImage!.width.toDouble(),
+                                            _baseImage!.height.toDouble())
+                                        : null,
+                                  ),
                                 ),
                               ),
                             ),
@@ -1405,6 +1913,15 @@ class _EditorCanvasState extends State<EditorCanvas> {
                           ],
 
                           if (selectedBounds != Rect.zero) _buildDeleteChip(selectedBounds),
+
+                          // Inline on-canvas text editing overlay
+                          if (_inlineTextPos != null) _buildInlineTextEditor(),
+
+                          // Eyedropper magnifier loupe HUD
+                          if (widget.activeTool == CanvasTool.colorPicker &&
+                              _hoverPos != null &&
+                              _hoverColor != null)
+                            _buildMagnifierLoupe(),
                         ],
                       ),
                     ),
@@ -1536,6 +2053,164 @@ class _EditorCanvasState extends State<EditorCanvas> {
       ),
     );
   }
+
+  Widget _buildInlineTextEditor() {
+    final pos = _inlineTextPos;
+    if (pos == null) return const SizedBox.shrink();
+
+    final showBg = widget.isFilled &&
+        widget.textBackgroundColor != null &&
+        widget.textBackgroundColor!.a > 0;
+
+    return Positioned(
+      left: math.max(10, pos.dx - 8),
+      top: math.max(10, pos.dy - 6),
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 120, maxWidth: 450),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: showBg
+                ? (widget.textBackgroundColor ?? Colors.black87)
+                : (widget.isDarkMode ? AppColors.darkSurface : Colors.white),
+            borderRadius: BorderRadius.circular(widget.borderRadius.clamp(4.0, 16.0)),
+            border: Border.all(color: AppColors.accent, width: 2.0),
+            boxShadow: const [
+              BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
+            ],
+          ),
+          child: IntrinsicWidth(
+            child: TextField(
+              focusNode: _inlineTextFocusNode,
+              controller: _inlineTextController,
+              autofocus: true,
+              maxLines: null,
+              keyboardType: TextInputType.multiline,
+              style: TextStyle(
+                color: widget.activeColor,
+                fontSize: widget.fontSize,
+                fontWeight: FontWeight.w600,
+                height: 1.25,
+              ),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+                hintText: 'Type text here...',
+                hintStyle: TextStyle(color: Colors.white38, fontSize: 13),
+              ),
+              onSubmitted: (_) => _commitInlineText(),
+              onTapOutside: (_) => _commitInlineText(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMagnifierLoupe() {
+    final pos = _hoverPos;
+    final color = _hoverColor;
+    final pixelPos = _hoverPixelPos;
+    final cached = _cachedSourceImage;
+    if (pos == null || color == null || pixelPos == null || cached == null) {
+      return const SizedBox.shrink();
+    }
+
+    final hex = '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
+    final rgb = 'RGB(${(color.r * 255).round()}, ${(color.g * 255).round()}, ${(color.b * 255).round()})';
+
+    final size = _canvasSize;
+    double left = pos.dx + 20;
+    double top = pos.dy - 120;
+    if (left + 120 > size.width) left = pos.dx - 120;
+    if (top < 10) top = pos.dy + 25;
+
+    return Positioned(
+      left: left.clamp(10.0, math.max(10.0, size.width - 130)),
+      top: top.clamp(10.0, math.max(10.0, size.height - 150)),
+      child: IgnorePointer(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // Circular 9x9 Zoom Grid Loupe
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2.5),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 3)),
+                ],
+              ),
+              child: ClipOval(
+                child: CustomPaint(
+                  size: const Size(80, 80),
+                  painter: _LoupeGridPainter(
+                    sourceImage: cached,
+                    centerPixel: pixelPos,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 5),
+            // Color readout badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: widget.isDarkMode ? AppColors.darkSurfaceVariant : Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.accent, width: 1.0),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 0.8),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        hex,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'monospace',
+                          color: widget.isDarkMode ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    rgb,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: widget.isDarkMode ? Colors.white70 : Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _SteadyCheckerboardPainter extends CustomPainter {
@@ -1571,19 +2246,50 @@ class _SteadyCheckerboardPainter extends CustomPainter {
 
 class _CropOverlayPainter extends CustomPainter {
   final Rect cropRect;
+  final Rect imageRect;
+  final Size? nativeImageSize;
 
-  _CropOverlayPainter({required this.cropRect});
+  _CropOverlayPainter({
+    required this.cropRect,
+    required this.imageRect,
+    this.nativeImageSize,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final fullRect =
-        (Offset.zero & size).expandToInclude(cropRect).inflate(100.0);
+    // 1. Dark dimming mask on outside of cropRect
+    final fullRect = (Offset.zero & size).expandToInclude(cropRect).inflate(100.0);
     final path = Path()
       ..addRect(fullRect)
       ..addRect(cropRect)
       ..fillType = PathFillType.evenOdd;
     canvas.drawPath(path, Paint()..color = Colors.black.withValues(alpha: 0.55));
 
+    // 2. If cropRect extends outside imageRect, highlight the transparent canvas expansion area
+    if (cropRect.left < imageRect.left ||
+        cropRect.top < imageRect.top ||
+        cropRect.right > imageRect.right ||
+        cropRect.bottom > imageRect.bottom) {
+      final expandedPath = Path()
+        ..addRect(cropRect)
+        ..addRect(imageRect.intersect(cropRect));
+      expandedPath.fillType = PathFillType.evenOdd;
+      canvas.drawPath(
+        expandedPath,
+        Paint()..color = AppColors.accent.withValues(alpha: 0.15),
+      );
+    }
+
+    // 3. Draw original image boundary if cropRect is adjusted
+    if (cropRect != imageRect && imageRect.width > 0 && imageRect.height > 0) {
+      final origBorderPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.5)
+        ..strokeWidth = 1.0
+        ..style = PaintingStyle.stroke;
+      canvas.drawRect(imageRect, origBorderPaint);
+    }
+
+    // 4. Accent crop border
     canvas.drawRect(
       cropRect,
       Paint()
@@ -1592,7 +2298,7 @@ class _CropOverlayPainter extends CustomPainter {
         ..style = PaintingStyle.stroke,
     );
 
-    // Rule-of-thirds guides, as used by every mainstream crop UI.
+    // 5. Rule-of-thirds guides
     final guidePaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.28)
       ..strokeWidth = 1.0;
@@ -1603,6 +2309,7 @@ class _CropOverlayPainter extends CustomPainter {
       canvas.drawLine(Offset(cropRect.left, dy), Offset(cropRect.right, dy), guidePaint);
     }
 
+    // 6. 8 Square handles
     const handleSize = 9.0;
     void drawSquareHandle(Offset center) {
       final rect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
@@ -1630,9 +2337,18 @@ class _CropOverlayPainter extends CustomPainter {
       drawSquareHandle(c);
     }
 
+    // 7. Dimensions badge
+    int pixelW = cropRect.width.round();
+    int pixelH = cropRect.height.round();
+    if (nativeImageSize != null && imageRect.width > 0) {
+      final scale = nativeImageSize!.width / imageRect.width;
+      pixelW = (cropRect.width * scale).round();
+      pixelH = (cropRect.height * scale).round();
+    }
+
     final tp = TextPainter(
       text: TextSpan(
-        text: '${cropRect.width.round()} × ${cropRect.height.round()} px',
+        text: '$pixelW × $pixelH px',
         style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
       ),
       textDirection: TextDirection.ltr,
@@ -1652,13 +2368,166 @@ class _CropOverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CropOverlayPainter oldDelegate) =>
-      oldDelegate.cropRect != cropRect;
+      oldDelegate.cropRect != cropRect || oldDelegate.imageRect != imageRect;
+}
+
+class _FloatingSelectionPainter extends CustomPainter {
+  final Rect? marqueeRect;
+  final Rect? floatingRect;
+  final ui.Image? floatingImage;
+  final Size? nativeImageSize;
+  final Rect? imageRect;
+
+  _FloatingSelectionPainter({
+    this.marqueeRect,
+    this.floatingRect,
+    this.floatingImage,
+    this.nativeImageSize,
+    this.imageRect,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = floatingRect ?? marqueeRect;
+    if (rect == null || rect.width < 1 || rect.height < 1) return;
+
+    // 1. If we have a floating extracted bitmap, render it
+    if (floatingImage != null && floatingRect != null) {
+      canvas.save();
+      final srcRect = Rect.fromLTWH(
+        0,
+        0,
+        floatingImage!.width.toDouble(),
+        floatingImage!.height.toDouble(),
+      );
+      canvas.drawImageRect(
+        floatingImage!,
+        srcRect,
+        floatingRect!,
+        Paint()..filterQuality = FilterQuality.medium,
+      );
+      canvas.restore();
+    } else if (marqueeRect != null) {
+      canvas.drawRect(
+        marqueeRect!,
+        Paint()..color = const Color(0xFF38BDF8).withValues(alpha: 0.15),
+      );
+    }
+
+    // 2. Dashed Marquee / Selection Boundary Border
+    final borderPaint = Paint()
+      ..color = const Color(0xFF38BDF8)
+      ..strokeWidth = 1.6
+      ..style = PaintingStyle.stroke;
+
+    final shadowBorderPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.6)
+      ..strokeWidth = 1.6
+      ..style = PaintingStyle.stroke;
+
+    _drawDashedRect(canvas, rect, borderPaint, shadowBorderPaint);
+
+    // 3. 8 Resize Handles
+    if (floatingRect != null) {
+      const handleSize = 9.0;
+      void drawSquareHandle(Offset center) {
+        final hRect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
+        canvas.drawRect(hRect.shift(const Offset(0, 1)), Paint()..color = Colors.black38);
+        canvas.drawRect(hRect, Paint()..color = Colors.white);
+        canvas.drawRect(
+          hRect,
+          Paint()
+            ..color = const Color(0xFF38BDF8)
+            ..strokeWidth = 1.4
+            ..style = PaintingStyle.stroke,
+        );
+      }
+
+      for (final c in [
+        rect.topLeft,
+        rect.topRight,
+        rect.bottomLeft,
+        rect.bottomRight,
+        rect.topCenter,
+        rect.bottomCenter,
+        rect.centerLeft,
+        rect.centerRight,
+      ]) {
+        drawSquareHandle(c);
+      }
+    }
+
+    // 4. Dimensions Pill Badge
+    int pixelW = rect.width.round();
+    int pixelH = rect.height.round();
+    if (nativeImageSize != null && imageRect != null && imageRect!.width > 0) {
+      final scale = nativeImageSize!.width / imageRect!.width;
+      pixelW = (rect.width * scale).round();
+      pixelH = (rect.height * scale).round();
+    }
+
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '$pixelW × $pixelH px',
+        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final badgeCenter = Offset(rect.center.dx, rect.top - 16);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: badgeCenter, width: tp.width + 12, height: tp.height + 6),
+        const Radius.circular(10),
+      ),
+      Paint()..color = const Color(0xFF0284C7),
+    );
+    tp.paint(canvas, badgeCenter - Offset(tp.width / 2, tp.height / 2));
+  }
+
+  void _drawDashedRect(Canvas canvas, Rect rect, Paint paint, Paint shadowPaint) {
+    const dashWidth = 5.0;
+    const dashSpace = 4.0;
+
+    void drawDashedLine(Offset start, Offset end) {
+      final dx = end.dx - start.dx;
+      final dy = end.dy - start.dy;
+      final distance = math.sqrt(dx * dx + dy * dy);
+      if (distance <= 0) return;
+      final ux = dx / distance;
+      final uy = dy / distance;
+
+      double current = 0.0;
+      bool draw = true;
+      while (current < distance) {
+        final length = math.min(draw ? dashWidth : dashSpace, distance - current);
+        if (draw) {
+          final p1 = Offset(start.dx + ux * current, start.dy + uy * current);
+          final p2 = Offset(p1.dx + ux * length, p1.dy + uy * length);
+          canvas.drawLine(
+              p1 + const Offset(0.5, 0.5), p2 + const Offset(0.5, 0.5), shadowPaint);
+          canvas.drawLine(p1, p2, paint);
+        }
+        current += length;
+        draw = !draw;
+      }
+    }
+
+    drawDashedLine(rect.topLeft, rect.topRight);
+    drawDashedLine(rect.topRight, rect.bottomRight);
+    drawDashedLine(rect.bottomRight, rect.bottomLeft);
+    drawDashedLine(rect.bottomLeft, rect.topLeft);
+  }
+
+  @override
+  bool shouldRepaint(covariant _FloatingSelectionPainter oldDelegate) => true;
 }
 
 class _AnnotationPainter extends CustomPainter {
   final List<Annotation> annotations;
   final Annotation? currentAnnotation;
   final String? selectedAnnotationId;
+  final String? editingAnnotationId;
   final ui.Image? baseImage;
   final bool showHud;
 
@@ -1666,6 +2535,7 @@ class _AnnotationPainter extends CustomPainter {
     required this.annotations,
     this.currentAnnotation,
     this.selectedAnnotationId,
+    this.editingAnnotationId,
     this.baseImage,
     this.showHud = false,
   });
@@ -1682,14 +2552,18 @@ class _AnnotationPainter extends CustomPainter {
             canvasSize: size,
           );
 
+    final visibleAnnotations = editingAnnotationId != null
+        ? annotations.where((a) => a.id != editingAnnotationId).toList()
+        : annotations;
+
     AnnotationRenderer.paintAll(
       canvas,
-      [...annotations, ?currentAnnotation],
+      [...visibleAnnotations, ?currentAnnotation],
       baseImage: image,
       imageRect: imageRect,
     );
 
-    if (selectedAnnotationId != null) {
+    if (selectedAnnotationId != null && selectedAnnotationId != editingAnnotationId) {
       for (final ann in annotations) {
         if (ann.id == selectedAnnotationId) {
           AnnotationRenderer.paintSelection(canvas, ann);
@@ -1709,7 +2583,82 @@ class _AnnotationPainter extends CustomPainter {
     return !listEquals(oldDelegate.annotations, annotations) ||
         oldDelegate.currentAnnotation != currentAnnotation ||
         oldDelegate.selectedAnnotationId != selectedAnnotationId ||
+        oldDelegate.editingAnnotationId != editingAnnotationId ||
         oldDelegate.baseImage != baseImage ||
         oldDelegate.showHud != showHud;
   }
+}
+
+class _LoupeGridPainter extends CustomPainter {
+  final img.Image sourceImage;
+  final ({int x, int y}) centerPixel;
+
+  _LoupeGridPainter({required this.sourceImage, required this.centerPixel});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const gridCount = 9; // 9x9 zoomed pixel grid
+    final cellSize = size.width / gridCount;
+    const halfGrid = gridCount ~/ 2;
+
+    for (int dy = -halfGrid; dy <= halfGrid; dy++) {
+      for (int dx = -halfGrid; dx <= halfGrid; dx++) {
+        final sampleX = (centerPixel.x + dx).clamp(0, sourceImage.width - 1);
+        final sampleY = (centerPixel.y + dy).clamp(0, sourceImage.height - 1);
+        final pixel = sourceImage.getPixel(sampleX, sampleY);
+
+        final cellColor = Color.fromARGB(
+          pixel.a.toInt(),
+          pixel.r.toInt(),
+          pixel.g.toInt(),
+          pixel.b.toInt(),
+        );
+
+        final cellRect = Rect.fromLTWH(
+          (dx + halfGrid) * cellSize,
+          (dy + halfGrid) * cellSize,
+          cellSize + 0.5,
+          cellSize + 0.5,
+        );
+
+        canvas.drawRect(cellRect, Paint()..color = cellColor);
+
+        // Grid cell outline
+        canvas.drawRect(
+          cellRect,
+          Paint()
+            ..color = Colors.white.withValues(alpha: 0.12)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.5,
+        );
+      }
+    }
+
+    // Center pixel crosshair target
+    final centerRect = Rect.fromLTWH(
+      halfGrid * cellSize,
+      halfGrid * cellSize,
+      cellSize,
+      cellSize,
+    );
+    canvas.drawRect(
+      centerRect,
+      Paint()
+        ..color = Colors.black
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0,
+    );
+    canvas.drawRect(
+      centerRect,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _LoupeGridPainter oldDelegate) =>
+      oldDelegate.centerPixel.x != centerPixel.x ||
+      oldDelegate.centerPixel.y != centerPixel.y;
 }

@@ -24,6 +24,10 @@ class Annotation {
   final List<Offset> points;
   final Offset? startPoint;
   final Offset? endPoint;
+
+  /// Optional Bezier control point for curved arrows.
+  final Offset? controlPoint;
+
   final String? text;
   final double fontSize;
   final int? stepNumber;
@@ -58,6 +62,7 @@ class Annotation {
     this.points = const [],
     this.startPoint,
     this.endPoint,
+    this.controlPoint,
     this.text,
     this.fontSize = 18.0,
     this.stepNumber,
@@ -87,6 +92,7 @@ class Annotation {
     List<Offset>? points,
     Offset? startPoint,
     Offset? endPoint,
+    Object? controlPoint = _unset,
     String? text,
     double? fontSize,
     int? stepNumber,
@@ -113,6 +119,9 @@ class Annotation {
       points: points ?? this.points,
       startPoint: startPoint ?? this.startPoint,
       endPoint: endPoint ?? this.endPoint,
+      controlPoint: identical(controlPoint, _unset)
+          ? this.controlPoint
+          : controlPoint as Offset?,
       text: text ?? this.text,
       fontSize: fontSize ?? this.fontSize,
       stepNumber: stepNumber ?? this.stepNumber,
@@ -135,6 +144,7 @@ class Annotation {
     return copyWith(
       startPoint: startPoint != null ? startPoint! + delta : null,
       endPoint: endPoint != null ? endPoint! + delta : null,
+      controlPoint: controlPoint != null ? controlPoint! + delta : null,
       points: points.map((p) => p + delta).toList(),
       rect: rect?.shift(delta),
     );
@@ -152,6 +162,7 @@ class Annotation {
       'isDoubleArrow': isDoubleArrow,
       'hasShadow': hasShadow,
       'rotation': rotation,
+      if (controlPoint != null) 'controlPoint': {'x': controlPoint!.dx, 'y': controlPoint!.dy},
       if (backgroundColor != null) 'backgroundColor': backgroundColor!.toARGB32(),
       if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
       if (rect != null)
@@ -172,6 +183,15 @@ class Annotation {
       );
     }
 
+    Offset? parsedControlPoint;
+    final cpMap = map['controlPoint'];
+    if (cpMap is Map) {
+      parsedControlPoint = Offset(
+        (cpMap['x'] as num).toDouble(),
+        (cpMap['y'] as num).toDouble(),
+      );
+    }
+
     return copyWith(
       borderRadius: (map['borderRadius'] as num?)?.toDouble(),
       shapeKind: _enumByName(ShapeKind.values, map['shapeKind'] as String?),
@@ -181,6 +201,7 @@ class Annotation {
       isDoubleArrow: map['isDoubleArrow'] as bool?,
       hasShadow: map['hasShadow'] as bool?,
       rotation: (map['rotation'] as num?)?.toDouble(),
+      controlPoint: parsedControlPoint,
       backgroundColor: map.containsKey('backgroundColor')
           ? Color(map['backgroundColor'] as int)
           : backgroundColor,
@@ -210,6 +231,7 @@ class Annotation {
         listEquals(other.points, points) &&
         other.startPoint == startPoint &&
         other.endPoint == endPoint &&
+        other.controlPoint == controlPoint &&
         other.text == text &&
         other.fontSize == fontSize &&
         other.stepNumber == stepNumber &&
@@ -237,6 +259,7 @@ class Annotation {
         Object.hashAll(points),
         startPoint,
         endPoint,
+        controlPoint,
         text,
         fontSize,
         stepNumber,

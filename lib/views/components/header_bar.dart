@@ -440,32 +440,61 @@ class HeaderBar extends StatelessWidget {
   }
 
   Widget _buildViewGroup() {
+    final borderColor = isDarkMode ? Colors.white10 : Colors.black12;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
           icon: Icon(
             isSidebarOpen ? Icons.photo_library_rounded : Icons.photo_library_outlined,
-            color: isSidebarOpen ? AppColors.accent : _iconColor,
-            size: 20,
+            size: 18,
           ),
+          color: isSidebarOpen ? AppColors.accent : _iconColor,
           tooltip: isSidebarOpen
               ? 'Hide Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})'
               : 'Show Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})',
+          style: IconButton.styleFrom(
+            backgroundColor: isSidebarOpen
+                ? AppColors.accent.withValues(alpha: 0.16)
+                : (isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant),
+            minimumSize: const Size(36, 36),
+            padding: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: isSidebarOpen
+                  ? const BorderSide(color: AppColors.accent, width: 1.2)
+                  : BorderSide(color: borderColor),
+            ),
+          ),
           onPressed: onToggleSidebar,
         ),
-        if (onToggleProperties != null)
+        if (onToggleProperties != null) ...[
+          const SizedBox(width: 6),
           IconButton(
             icon: Icon(
               isPropertiesOpen ? Icons.tune_rounded : Icons.tune_outlined,
-              color: isPropertiesOpen ? AppColors.accent : _iconColor,
-              size: 20,
+              size: 18,
             ),
+            color: isPropertiesOpen ? AppColors.accent : _iconColor,
             tooltip: isPropertiesOpen
                 ? 'Hide Tool Properties'
                 : 'Show Tool Properties',
+            style: IconButton.styleFrom(
+              backgroundColor: isPropertiesOpen
+                  ? AppColors.accent.withValues(alpha: 0.16)
+                  : (isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant),
+              minimumSize: const Size(36, 36),
+              padding: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: isPropertiesOpen
+                    ? const BorderSide(color: AppColors.accent, width: 1.2)
+                    : BorderSide(color: borderColor),
+              ),
+            ),
             onPressed: onToggleProperties,
           ),
+        ],
       ],
     );
   }
@@ -473,30 +502,43 @@ class HeaderBar extends StatelessWidget {
   /// Low-frequency app settings live behind one menu so they never compete
   /// with the editing controls for space.
   Widget _buildOverflowMenu() {
-    return PopupMenuButton<String>(
-      tooltip: 'More',
-      position: PopupMenuPosition.under,
-      icon: Icon(Icons.more_vert_rounded, color: _iconColor, size: 20),
-      color: isDarkMode ? AppColors.darkSurfaceVariant : Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: isDarkMode ? Colors.white12 : Colors.black12),
-      ),
-      onSelected: (val) => switch (val) {
-        'shortcuts' => onOpenShortcutSettings(),
-        'theme' => onToggleThemeMode(),
-        'about' => onOpenAboutDialog(),
-        _ => null,
-      },
-      itemBuilder: (ctx) => [
-        _overflowItem('shortcuts', Icons.keyboard_rounded, 'Keyboard Shortcuts…'),
-        _overflowItem(
-          'theme',
-          isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-          isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+    final borderColor = isDarkMode ? Colors.white10 : Colors.black12;
+    return Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: PopupMenuButton<String>(
+        tooltip: 'More Options',
+        position: PopupMenuPosition.under,
+        color: isDarkMode ? AppColors.darkSurfaceVariant : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: isDarkMode ? Colors.white12 : Colors.black12),
         ),
-        _overflowItem('about', Icons.info_outline_rounded, 'About SnipSnap'),
-      ],
+        onSelected: (val) => switch (val) {
+          'shortcuts' => onOpenShortcutSettings(),
+          'theme' => onToggleThemeMode(),
+          'about' => onOpenAboutDialog(),
+          _ => null,
+        },
+        itemBuilder: (ctx) => [
+          _overflowItem('shortcuts', Icons.keyboard_rounded, 'Keyboard Shortcuts…'),
+          _overflowItem(
+            'theme',
+            isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+            isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+          ),
+          _overflowItem('about', Icons.info_outline_rounded, 'About SnipSnap'),
+        ],
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: borderColor),
+          ),
+          child: Icon(Icons.more_vert_rounded, color: _iconColor, size: 18),
+        ),
+      ),
     );
   }
 
@@ -537,10 +579,11 @@ class _Pill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
       decoration: BoxDecoration(
         color: isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: borderColor),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: children),
@@ -564,14 +607,14 @@ class _PillIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return IconButton(
-      icon: Icon(icon, size: 18),
+      icon: Icon(icon, size: 17),
       color: color,
       // Disabled buttons must keep the explicit colour above, otherwise the
       // theme greys them a second time and they become nearly invisible.
       disabledColor: color,
       tooltip: tooltip,
       visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints(minWidth: 34, minHeight: 32),
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
       padding: EdgeInsets.zero,
       onPressed: onPressed,
     );
@@ -601,6 +644,7 @@ class _HeaderButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final borderColor = isDarkMode ? Colors.white10 : Colors.black12;
     final bgColor = isPrimary
         ? AppColors.accent.withValues(alpha: 0.16)
         : (isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant);
@@ -611,16 +655,16 @@ class _HeaderButton extends StatelessWidget {
     final style = ElevatedButton.styleFrom(
       backgroundColor: bgColor,
       foregroundColor: fgColor,
-      disabledBackgroundColor: bgColor.withValues(alpha: 0.4),
+      disabledBackgroundColor: bgColor.withValues(alpha: 0.35),
       disabledForegroundColor: isDarkMode ? Colors.white24 : Colors.black26,
       elevation: 0,
-      padding: EdgeInsets.symmetric(horizontal: showLabel ? 11 : 9, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: showLabel ? 12 : 9, vertical: 8),
       minimumSize: const Size(0, 36),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
         side: isPrimary
-            ? BorderSide(color: AppColors.accent.withValues(alpha: enabled ? 0.55 : 0.2))
-            : BorderSide.none,
+            ? BorderSide(color: AppColors.accent.withValues(alpha: enabled ? 0.6 : 0.2), width: 1.2)
+            : BorderSide(color: borderColor, width: 1.0),
       ),
     );
 
@@ -632,7 +676,7 @@ class _HeaderButton extends StatelessWidget {
               icon: Icon(icon, size: 15),
               label: Text(
                 label,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
               ),
               onPressed: enabled ? onPressed : null,
             )

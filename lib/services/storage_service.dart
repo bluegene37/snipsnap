@@ -198,4 +198,70 @@ class StorageService {
   static Future<void> deleteCaptureItem(String id) async {
     await DatabaseService.deleteCaptureFromDb(id);
   }
+
+  /// Returns the default screenshot captures library directory
+  static Future<Directory> getLibraryDirectory() async {
+    final docsDir = await getApplicationDocumentsDirectory();
+    final snapDir = Directory(p.join(docsDir.path, 'SnipSnap', 'Captures'));
+    try {
+      if (!await snapDir.exists()) {
+        await snapDir.create(recursive: true);
+      }
+    } catch (e) {
+      debugPrint('SnipSnap getLibraryDirectory create note: $e');
+    }
+    return snapDir;
+  }
+
+  /// Opens the screenshots library directory in the native file manager (Finder / Explorer / Files)
+  static Future<bool> openLibraryFolder() async {
+    try {
+      final dir = await getLibraryDirectory();
+      return await openFolder(dir.path);
+    } catch (e) {
+      debugPrint('SnipSnap openLibraryFolder error: $e');
+      return false;
+    }
+  }
+
+  /// Opens a folder path in the native file manager
+  static Future<bool> openFolder(String folderPath) async {
+    try {
+      if (Platform.isMacOS) {
+        final result = await Process.run('open', [folderPath]);
+        return result.exitCode == 0;
+      } else if (Platform.isWindows) {
+        final result = await Process.run('explorer.exe', [folderPath.replaceAll('/', '\\')]);
+        return result.exitCode == 0;
+      } else if (Platform.isLinux) {
+        final result = await Process.run('xdg-open', [folderPath]);
+        return result.exitCode == 0;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('SnipSnap openFolder error: $e');
+      return false;
+    }
+  }
+
+  /// Reveals/selects a specific file inside the native file manager
+  static Future<bool> revealFileInFolder(String filePath) async {
+    try {
+      if (Platform.isMacOS) {
+        final result = await Process.run('open', ['-R', filePath]);
+        return result.exitCode == 0;
+      } else if (Platform.isWindows) {
+        final result = await Process.run('explorer.exe', ['/select,', filePath.replaceAll('/', '\\')]);
+        return result.exitCode == 0;
+      } else if (Platform.isLinux) {
+        final dir = p.dirname(filePath);
+        final result = await Process.run('xdg-open', [dir]);
+        return result.exitCode == 0;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('SnipSnap revealFileInFolder error: $e');
+      return false;
+    }
+  }
 }

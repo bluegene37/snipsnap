@@ -19,6 +19,8 @@ class ToolProperties {
   final BlurType blurType;
   final bool isDoubleArrow;
   final bool hasShadow;
+  final double fillTolerance;
+  final bool isGlobalFill;
 
   const ToolProperties({
     required this.activeColor,
@@ -36,6 +38,8 @@ class ToolProperties {
     this.blurType = BlurType.gaussian,
     this.isDoubleArrow = false,
     this.hasShadow = false,
+    this.fillTolerance = 15.0,
+    this.isGlobalFill = false,
   });
 
   ToolProperties copyWith({
@@ -54,6 +58,8 @@ class ToolProperties {
     BlurType? blurType,
     bool? isDoubleArrow,
     bool? hasShadow,
+    double? fillTolerance,
+    bool? isGlobalFill,
   }) {
     return ToolProperties(
       activeColor: activeColor ?? this.activeColor,
@@ -73,6 +79,8 @@ class ToolProperties {
       blurType: blurType ?? this.blurType,
       isDoubleArrow: isDoubleArrow ?? this.isDoubleArrow,
       hasShadow: hasShadow ?? this.hasShadow,
+      fillTolerance: fillTolerance ?? this.fillTolerance,
+      isGlobalFill: isGlobalFill ?? this.isGlobalFill,
     );
   }
 
@@ -105,7 +113,12 @@ class ToolProperties {
           activeColor: Colors.grey, blurStrength: 14.0, opacity: 1.0, blurType: BlurType.pixelate),
       CanvasTool.ruler: const ToolProperties(
           activeColor: Color(0xFFF59E0B), strokeWidth: 2.0, opacity: 1.0),
-      CanvasTool.fill: const ToolProperties(activeColor: AppColors.accent, isFilled: true),
+      CanvasTool.fill: const ToolProperties(
+          activeColor: Color(0xFFEF4444),
+          isFilled: true,
+          fillTolerance: 15.0,
+          opacity: 1.0,
+          isGlobalFill: false),
       CanvasTool.colorPicker: const ToolProperties(activeColor: AppColors.accent),
       CanvasTool.crop: const ToolProperties(activeColor: AppColors.accent),
     };

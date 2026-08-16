@@ -17,6 +17,7 @@ import '../services/render_service.dart';
 import '../services/shortcut_service.dart';
 import '../services/storage_service.dart';
 import '../utils/constants.dart';
+import '../utils/image_operations.dart';
 import 'components/header_bar.dart';
 import 'components/style_picker.dart';
 import 'components/tool_sidebar.dart';
@@ -114,6 +115,8 @@ class _MainScreenState extends State<MainScreen> {
     double? blurStrength,
     bool? hasShadow,
     bool? isDoubleArrow,
+    double? fillTolerance,
+    bool? isGlobalFill,
     bool syncOnly = false,
   }) {
     final selectedAnn = _selectedAnnotation;
@@ -142,6 +145,8 @@ class _MainScreenState extends State<MainScreen> {
         blurStrength: blurStrength,
         hasShadow: hasShadow,
         isDoubleArrow: isDoubleArrow,
+        fillTolerance: fillTolerance,
+        isGlobalFill: isGlobalFill,
       );
 
       if (syncOnly || _selectedAnnotationId == null) return;
@@ -416,11 +421,52 @@ class _MainScreenState extends State<MainScreen> {
   void _deleteSelectedAnnotation() {
     if (_selectedAnnotationId == null) return;
     _pushUndoState();
+    final deletingAnn = _annotations.where((a) => a.id == _selectedAnnotationId).firstOrNull;
+    final remaining = _annotations.where((a) => a.id != _selectedAnnotationId).toList();
+
+    // Auto re-sequence step markers if a step marker was deleted
+    if (deletingAnn != null && deletingAnn.tool == CanvasTool.stepMarker) {
+      int step = 1;
+      final resequenced = remaining.map((ann) {
+        if (ann.tool == CanvasTool.stepMarker) {
+          final updated = ann.copyWith(stepNumber: step);
+          step++;
+          return updated;
+        }
+        return ann;
+      }).toList();
+      setState(() {
+        _annotations = resequenced;
+        _selectedAnnotationId = null;
+        _stepCounter = step;
+      });
+    } else {
+      setState(() {
+        _annotations = remaining;
+        _selectedAnnotationId = null;
+      });
+    }
+    _syncCurrentCaptureAnnotations();
+  }
+
+  void _renumberStepMarkers() {
+    _pushUndoState();
+    int currentStep = 1;
+    final updated = _annotations.map((ann) {
+      if (ann.tool == CanvasTool.stepMarker) {
+        final renumbered = ann.copyWith(stepNumber: currentStep);
+        currentStep++;
+        return renumbered;
+      }
+      return ann;
+    }).toList();
+
     setState(() {
-      _annotations = _annotations.where((a) => a.id != _selectedAnnotationId).toList();
-      _selectedAnnotationId = null;
+      _annotations = updated;
+      _stepCounter = currentStep;
     });
     _syncCurrentCaptureAnnotations();
+    _showToast('Step numbers resequenced (1 to ${currentStep - 1})');
   }
 
   /// Moves the selected annotation to the top or the bottom of the paint order.
@@ -657,8 +703,29 @@ class _MainScreenState extends State<MainScreen> {
         isDarkMode: _isDarkMode,
         onConfirm: (options) async {
           await Future.delayed(const Duration(milliseconds: 150));
+          final gradient = (options.gradientIndex != null &&
+                  options.gradientIndex! >= 0 &&
+                  options.gradientIndex! < AppColors.framingGradients.length)
+              ? AppColors.framingGradients[options.gradientIndex!]
+              : null;
+
+          final exportBytes = (options.framingPadding > 0 ||
+                  options.cornerRadius > 0 ||
+                  options.shadowBlur > 0 ||
+                  gradient != null)
+              ? await RenderService.renderFlattenedPng(
+                  imagePath: _activeCapture!.filePath,
+                  annotations: _annotations,
+                  canvasSize: _canvasSize,
+                  framingPadding: options.framingPadding,
+                  cornerRadius: options.cornerRadius,
+                  shadowBlur: options.shadowBlur,
+                  framingGradient: gradient,
+                ) ?? bytes
+              : bytes;
+
           final savedPath = await StorageService.exportImageDialogWithFormat(
-            bytes: bytes,
+            bytes: exportBytes,
             fileName: options.fileName,
             isJpg: options.format == SaveFormat.jpg,
             jpgQuality: options.quality,
@@ -744,19 +811,26 @@ class _MainScreenState extends State<MainScreen> {
       final scaleX = decoded.width / imageRect.width;
       final scaleY = decoded.height / imageRect.height;
 
-      final relLeft = (cropRect.left - imageRect.left).clamp(0.0, imageRect.width);
-      final relTop = (cropRect.top - imageRect.top).clamp(0.0, imageRect.height);
-      final relRight = (cropRect.right - imageRect.left).clamp(0.0, imageRect.width);
-      final relBottom = (cropRect.bottom - imageRect.top).clamp(0.0, imageRect.height);
+      final relLeft = cropRect.left - imageRect.left;
+      final relTop = cropRect.top - imageRect.top;
+      final relRight = cropRect.right - imageRect.left;
+      final relBottom = cropRect.bottom - imageRect.top;
       if (relRight - relLeft <= 5 || relBottom - relTop <= 5) return;
 
-      final cropX = (relLeft * scaleX).round().clamp(0, decoded.width - 1);
-      final cropY = (relTop * scaleY).round().clamp(0, decoded.height - 1);
-      final cropW = ((relRight - relLeft) * scaleX).round().clamp(1, decoded.width - cropX);
-      final cropH = ((relBottom - relTop) * scaleY).round().clamp(1, decoded.height - cropY);
+      final targetLeft = (relLeft * scaleX).round();
+      final targetTop = (relTop * scaleY).round();
+      final targetWidth = ((relRight - relLeft) * scaleX).round();
+      final targetHeight = ((relBottom - relTop) * scaleY).round();
 
-      final cropped = img.copyCrop(decoded, x: cropX, y: cropY, width: cropW, height: cropH);
-      await _replaceActiveImageBytes(Uint8List.fromList(img.encodePng(cropped)));
+      final result = ImageOperations.expandOrCropCanvas(
+        sourceImage: decoded,
+        targetLeft: targetLeft,
+        targetTop: targetTop,
+        targetWidth: targetWidth,
+        targetHeight: targetHeight,
+      );
+
+      await _replaceActiveImageBytes(Uint8List.fromList(img.encodePng(result)));
 
       setState(() {
         _imageRevision++;
@@ -766,7 +840,13 @@ class _MainScreenState extends State<MainScreen> {
       });
       _syncCurrentCaptureAnnotations();
 
-      _showToast('Cropped to $cropW × $cropH px (Cmd+Z to undo)');
+      final isExpanded = targetLeft < 0 ||
+          targetTop < 0 ||
+          targetLeft + targetWidth > decoded.width ||
+          targetTop + targetHeight > decoded.height;
+      _showToast(isExpanded
+          ? 'Canvas expanded to ${result.width} × ${result.height} px (Cmd+Z to undo)'
+          : 'Cropped to ${result.width} × ${result.height} px (Cmd+Z to undo)');
     } catch (e) {
       debugPrint('SnipSnap crop error: $e');
       _showToast('Failed to crop image');
@@ -934,6 +1014,8 @@ class _MainScreenState extends State<MainScreen> {
                             blurStrength: _currentToolProperties.blurStrength,
                             hasShadow: _currentToolProperties.hasShadow,
                             isDoubleArrow: _currentToolProperties.isDoubleArrow,
+                            fillTolerance: _currentToolProperties.fillTolerance,
+                            isGlobalFill: _currentToolProperties.isGlobalFill,
                             stepCounter: _stepCounter,
                             onAnnotationAdded: _onAnnotationAdded,
                             onAnnotationsUpdated: _onAnnotationsUpdated,
@@ -1007,10 +1089,15 @@ class _MainScreenState extends State<MainScreen> {
                                   onBlurTypeChanged: (b) => _updateActiveToolProperty(blurType: b),
                                   isDoubleArrow: _currentToolProperties.isDoubleArrow,
                                   onDoubleArrowChanged: (d) => _updateActiveToolProperty(isDoubleArrow: d),
+                                  fillTolerance: _currentToolProperties.fillTolerance,
+                                  onFillToleranceChanged: (t) => _updateActiveToolProperty(fillTolerance: t),
+                                  isGlobalFill: _currentToolProperties.isGlobalFill,
+                                  onGlobalFillChanged: (g) => _updateActiveToolProperty(isGlobalFill: g),
                                   activeTool: _activeTool,
                                   isDarkMode: _isDarkMode,
                                   stepCounter: _stepCounter,
                                   onResetStepCounter: () => setState(() => _stepCounter = 1),
+                                  onRenumberSteps: _renumberStepMarkers,
                                   onActivateEyedropper: () => setState(() => _activeTool = CanvasTool.colorPicker),
                                   onFlattenCanvas: _annotations.isNotEmpty ? _handleFlattenCanvas : null,
                                   onCloseDrawer: () => setState(() => _isPropertiesOpen = false),
@@ -1132,6 +1219,18 @@ class _MainScreenState extends State<MainScreen> {
                       }
                     } catch (_) {}
                     StorageService.saveHistory(_captures);
+                  },
+                  onOpenLibraryLocation: () async {
+                    final opened = await StorageService.openLibraryFolder();
+                    if (!opened) {
+                      _showToast('Could not open screenshots folder');
+                    }
+                  },
+                  onRevealItemInFolder: (item) async {
+                    final revealed = await StorageService.revealFileInFolder(item.filePath);
+                    if (!revealed) {
+                      _showToast('Could not reveal file in folder');
+                    }
                   },
                   onClose: () => setState(() => _isSidebarOpen = false),
                 ),

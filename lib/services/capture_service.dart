@@ -41,8 +41,25 @@ class CaptureService {
         // User pressed ESC or cancelled region capture: Return null cleanly!
         return null;
       } else if (Platform.isWindows) {
-        // Launch Windows Snipping Tool / Snip & Sketch
+        // Launch Windows Snipping Tool / Snip & Sketch to clipboard
         await Process.run('snippingtool', ['/clip']);
+        // Read clipboard image and persist to targetPath
+        final winPath = targetPath.replaceAll('/', '\\').replaceAll('"', '\\"');
+        final script = '''
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+Start-Sleep -Milliseconds 600
+if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
+  \$img = [System.Windows.Forms.Clipboard]::GetImage()
+  if (\$img -ne \$null) {
+    \$img.Save("$winPath", [System.Drawing.Imaging.ImageFormat]::Png)
+  }
+}
+''';
+        final result = await Process.run('powershell', ['-NoProfile', '-Command', script]);
+        if (result.exitCode == 0 && await File(targetPath).exists()) {
+          final len = await File(targetPath).length();
+          if (len > 0) return targetPath;
+        }
         return null;
       } else if (Platform.isLinux) {
         var result = await Process.run('gnome-screenshot', ['-a', '-f', targetPath]);

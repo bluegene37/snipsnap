@@ -1,12 +1,22 @@
+import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/models/app_shortcut.dart';
 import 'package:snipsnap/models/tool_properties.dart';
 import 'package:snipsnap/services/shortcut_service.dart';
+import 'package:snipsnap/services/storage_service.dart';
 import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/views/components/tool_sidebar.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  const channel = MethodChannel('plugins.flutter.io/path_provider');
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+    return Directory.systemTemp.path;
+  });
+
   test('CustomShortcut model and JSON serialization', () {
     final shortcut = CustomShortcut(
       action: AppShortcutAction.interactiveSnip,
@@ -90,5 +100,11 @@ void main() {
   test('Flatten shortcut display properties', () {
     expect(AppShortcutAction.flattenCanvas.displayName, 'Flatten Annotations');
     expect(AppShortcutAction.flattenCanvas.description, contains('Bake all annotations'));
+  });
+
+  test('StorageService library directory contains SnipSnap/Captures path', () async {
+    final dir = await StorageService.getLibraryDirectory();
+    expect(dir.path, contains('SnipSnap'));
+    expect(dir.path, contains('Captures'));
   });
 }

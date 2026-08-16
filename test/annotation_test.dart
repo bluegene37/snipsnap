@@ -243,6 +243,51 @@ void main() {
       );
       expect(restored.shapeKind, ShapeKind.star);
     });
+
+    test('curved Bezier arrow round-trips controlPoint and computes curved bounds & hit-test', () {
+      final arrow = Annotation(
+        id: 'a1',
+        tool: CanvasTool.arrow,
+        color: Colors.red,
+        startPoint: const Offset(0, 0),
+        endPoint: const Offset(100, 0),
+        controlPoint: const Offset(50, 50),
+        strokeWidth: 4.0,
+      );
+
+      // JSON props roundtrip
+      final encoded = jsonEncode(arrow.toPropsJson());
+      final restored = arrow.withPropsJson(jsonDecode(encoded) as Map<String, dynamic>);
+      expect(restored.controlPoint, const Offset(50, 50));
+
+      // Translated
+      final moved = arrow.translated(const Offset(10, 20));
+      expect(moved.controlPoint, const Offset(60, 70));
+
+      // Bounding box includes the arc apex
+      final bounds = AnnotationRenderer.boundingRect(arrow);
+      expect(bounds.bottom, greaterThan(25.0));
+
+      // Hit testing hits the curved arc near apex
+      expect(AnnotationRenderer.hitTest(arrow, const Offset(50, 25)), isTrue);
+      // Straight line midpoint should not hit the curved arrow
+      expect(AnnotationRenderer.hitTest(arrow, const Offset(50, 0)), isFalse);
+    });
+
+    test('solid blackout redaction bar survives JSON round-trip', () {
+      final blur = Annotation(
+        id: 'b1',
+        tool: CanvasTool.blur,
+        color: Colors.black,
+        blurType: BlurType.solid,
+        startPoint: const Offset(10, 10),
+        endPoint: const Offset(100, 40),
+      );
+
+      final encoded = jsonEncode(blur.toPropsJson());
+      final restored = blur.withPropsJson(jsonDecode(encoded) as Map<String, dynamic>);
+      expect(restored.blurType, BlurType.solid);
+    });
   });
 
   group('RenderService coordinate mapping', () {

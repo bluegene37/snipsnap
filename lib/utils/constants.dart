@@ -62,6 +62,7 @@ enum LineStyle {
 enum BlurType {
   gaussian,
   pixelate,
+  solid,
 }
 
 class AppColors {
