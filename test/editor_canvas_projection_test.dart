@@ -159,9 +159,49 @@ void main() {
         _bodyOf(source, 'Annotation? get _selectedAnnotation {'),
         contains('_canvasAnnotations'),
       );
+      // Public since Task 9: `ToolDelegate` declares `hitTestAnnotation`, and
+      // `_EditorCanvasState` satisfies the interface with this same method. The
+      // invariant is unchanged — whatever the name, the body must read the
+      // canvas-space view, because that is the space every caller probes in.
       expect(
-        _bodyOf(source, 'Annotation? _hitTestAnnotation('),
+        _bodyOf(source, 'Annotation? hitTestAnnotation('),
         contains('_canvasAnnotations'),
+      );
+    });
+
+    // -------------------------------------------------------------------------
+    // Task 9's ToolDelegate boundary.
+    //
+    // The handlers in lib/tools/ work entirely in canvas space and never
+    // convert. That is only safe while every delegate member either reads the
+    // canvas-space view or converts on the way out, which is what these pin.
+    // -------------------------------------------------------------------------
+
+    test('the delegate exposes annotations in canvas space', () {
+      expect(
+        source,
+        contains('List<Annotation> get annotations => _canvasAnnotations;'),
+        reason: 'handing widget.annotations (image pixels) to a handler places '
+            'every gesture against the wrong geometry',
+      );
+    });
+
+    test('delegate writes route through the converting helpers', () {
+      expect(
+        _bodyOf(source, 'void onAnnotationAdded('),
+        contains('_emitAnnotation('),
+        reason: 'a handler emits canvas space; the parent stores image pixels',
+      );
+      expect(
+        _bodyOf(source, 'void updateAnnotation('),
+        contains('_replaceAnnotation('),
+        reason: 'same conversion, for edits to an existing annotation',
+      );
+      expect(
+        _bodyOf(source, 'void pushAnnotationsState('),
+        contains('mappedToImageSpace'),
+        reason: 'the list a handler pushes is canvas space and has to be '
+            'converted before it reaches the parent',
       );
     });
   });

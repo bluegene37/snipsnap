@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
-import '../models/annotation.dart';
 import '../utils/constants.dart';
 import 'tool_handler.dart';
 
@@ -15,12 +14,10 @@ class HighlighterToolHandler extends ToolHandler {
   void onPanStart(DragStartDetails details, Offset pos) {
     _drawStart = pos;
     _currentPoints = [pos];
-    final annotation = Annotation(
+    final annotation = buildStyledAnnotation(
       id: _uuid.v4(),
       tool: CanvasTool.highlight,
-      color: delegate.activeColor,
-      strokeWidth: delegate.strokeWidth,
-      opacity: delegate.opacity,
+      startPoint: pos,
       points: _currentPoints,
     );
     delegate.onCurrentAnnotationChanged(annotation);

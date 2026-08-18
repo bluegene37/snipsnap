@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
-import '../models/annotation.dart';
 import '../utils/constants.dart';
 import 'tool_handler.dart';
 
@@ -15,22 +14,12 @@ class ShapeToolHandler extends ToolHandler {
   @override
   void onPanStart(DragStartDetails details, Offset pos) {
     _drawStart = pos;
-    final annotation = Annotation(
+    final annotation = buildStyledAnnotation(
       id: _uuid.v4(),
       tool: toolType,
-      color: delegate.activeColor,
-      strokeWidth: delegate.strokeWidth,
-      opacity: delegate.opacity,
-      fill: delegate.isFilled,
-      fillColor: delegate.fillColor,
-      borderRadius: delegate.borderRadius,
-      shapeKind: delegate.shapeKind,
-      lineStyle: delegate.lineStyle,
-      hasShadow: delegate.hasShadow,
       startPoint: pos,
       endPoint: pos,
     );
-    
     delegate.onCurrentAnnotationChanged(annotation);
   }
 
@@ -69,12 +58,9 @@ class ShapeToolHandler extends ToolHandler {
   @override
   void onPanEnd(DragEndDetails details) {
     final current = delegate.currentAnnotation;
-    if (current != null && current.startPoint != null && current.endPoint != null) {
-      final rect = Rect.fromPoints(current.startPoint!, current.endPoint!);
-      if (rect.width >= 2 && rect.height >= 2) {
-        delegate.onAnnotationAdded(current);
-        delegate.onSelectedAnnotationIdChanged(current.id);
-      }
+    if (current != null && isCommittableDrag(current.startPoint, current.endPoint)) {
+      delegate.onAnnotationAdded(current);
+      delegate.onSelectedAnnotationIdChanged(current.id);
     }
     delegate.onCurrentAnnotationChanged(null);
     _drawStart = null;

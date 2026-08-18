@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import '../models/annotation.dart';
 import '../services/clipboard_service.dart';
 import '../services/render_service.dart';
+import '../tools/tool_handler.dart';
 import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 import '../utils/image_operations.dart';
@@ -134,18 +135,24 @@ enum _CropHandle {
   right,
 }
 
-/// Tools that place a shape by dragging out two corners / endpoints.
-const _dragToDrawTools = {
-  CanvasTool.shape,
-  CanvasTool.arrow,
-  CanvasTool.line,
-  CanvasTool.blur,
-  CanvasTool.ruler,
-};
-
 const _freehandTools = {CanvasTool.pen, CanvasTool.highlight};
 
-class _EditorCanvasState extends State<EditorCanvas> {
+/// Tools whose annotation is created on tap-up, so a stray drag cannot spawn
+/// duplicates. Their handlers still own the placement — the canvas only
+/// declines to start a drag for them.
+const _tapToPlaceTools = {
+  CanvasTool.stepMarker,
+  CanvasTool.text,
+  CanvasTool.fill,
+  CanvasTool.colorPicker,
+};
+
+/// Tools whose tap acts on whatever sits under the cursor. They must run
+/// before the generic "clicking an annotation selects it" fallback, otherwise
+/// the eyedropper and the fill bucket would only ever select.
+const _tapActsUnderCursorTools = {CanvasTool.fill, CanvasTool.colorPicker};
+
+class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   final Uuid _uuid = const Uuid();
   final FocusNode _focusNode = FocusNode(debugLabel: 'EditorCanvas');
   bool _fileExists = false;
@@ -200,7 +207,6 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
   // Drawing state
   Annotation? _currentAnnotation;
-  List<Offset> _currentPoints = [];
   Offset? _drawStart;
 
   MouseCursor _cursor = SystemMouseCursors.basic;
@@ -459,26 +465,19 @@ class _EditorCanvasState extends State<EditorCanvas> {
         keys.contains(LogicalKeyboardKey.controlRight);
   }
 
-  /// Shift-constrains a drag: square/circle for box tools, 15° increments for
-  /// linear tools — the convention shared by Snagit, Shottr, Figma and Sketch.
-  Offset _constrainEndPoint(Offset start, Offset end, CanvasTool tool) {
+  /// Shift-constrains the crop drag to a square. Every other tool's shift
+  /// behaviour now lives in its `ToolHandler`; crop is the one drag the canvas
+  /// still owns outright, because the same rect is also manipulated by the
+  /// crop handles.
+  Offset _constrainCropEndPoint(Offset start, Offset end) {
     if (!_isShiftDown) return end;
-
-    if (tool == CanvasTool.shape || tool == CanvasTool.blur || tool == CanvasTool.crop) {
-      final dx = end.dx - start.dx;
-      final dy = end.dy - start.dy;
-      final size = math.max(dx.abs(), dy.abs());
-      return Offset(
-        start.dx + (dx.isNegative ? -size : size),
-        start.dy + (dy.isNegative ? -size : size),
-      );
-    }
-
-    final delta = end - start;
-    if (delta.distance == 0) return end;
-    final stepRad = tool == CanvasTool.ruler ? (math.pi / 4) : (math.pi / 12); // 45° for ruler, 15° for arrow/line
-    final snapped = (math.atan2(delta.dy, delta.dx) / stepRad).round() * stepRad;
-    return start + Offset(math.cos(snapped), math.sin(snapped)) * delta.distance;
+    final dx = end.dx - start.dx;
+    final dy = end.dy - start.dy;
+    final size = math.max(dx.abs(), dy.abs());
+    return Offset(
+      start.dx + (dx.isNegative ? -size : size),
+      start.dy + (dy.isNegative ? -size : size),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -499,7 +498,11 @@ class _EditorCanvasState extends State<EditorCanvas> {
   /// Topmost annotation under [pos]. A precise pass runs first so a click
   /// inside a hollow shape reaches whatever sits under it; only if nothing is
   /// hit precisely does a bounding-box pass make large hollow shapes grabbable.
-  Annotation? _hitTestAnnotation(Offset pos) {
+  ///
+  /// Public because `ToolDelegate` declares it: the fill tool asks the canvas
+  /// what it just clicked. Canvas space, like everything it returns.
+  @override
+  Annotation? hitTestAnnotation(Offset pos) {
     final canvasAnnotations = _canvasAnnotations;
     for (int i = canvasAnnotations.length - 1; i >= 0; i--) {
       if (AnnotationRenderer.hitTest(canvasAnnotations[i], pos)) {
@@ -801,9 +804,186 @@ class _EditorCanvasState extends State<EditorCanvas> {
   }
 
   // ---------------------------------------------------------------------------
+  // ToolDelegate
+  //
+  // The single boundary between the handlers and this widget. Handlers work
+  // entirely in **canvas** coordinates — that is what gestures, painting and
+  // hit-testing use — while `widget.annotations` is stored in **image pixels**.
+  // Every member below is therefore either a canvas-space read (`annotations`,
+  // `hitTestAnnotation`) or a write that converts on the way out
+  // (`_emitAnnotation`, `_replaceAnnotation`, `pushAnnotationsState`). No
+  // handler ever converts anything itself.
+  // ---------------------------------------------------------------------------
+
+  /// The handler for the active tool. Cached because handlers carry per-gesture
+  /// state (`_drawStart`, the accumulated freehand points) that has to survive
+  /// from `onPanStart` through to `onPanEnd`; rebuilding one per callback would
+  /// reset that mid-drag.
+  ToolHandler? _cachedHandler;
+  CanvasTool? _cachedHandlerTool;
+
+  ToolHandler get _toolHandler {
+    if (_cachedHandlerTool != widget.activeTool || _cachedHandler == null) {
+      _cachedHandler = handlerFor(widget.activeTool, this);
+      _cachedHandlerTool = widget.activeTool;
+    }
+    return _cachedHandler!;
+  }
+
+  /// The annotation a handler most recently handed to [onAnnotationAdded].
+  ///
+  /// Selecting a brand-new annotation has to notify the parent with the object
+  /// itself: it is not in `widget.annotations` yet (the parent's setState has
+  /// not run), so looking it up by id would find nothing and the property panel
+  /// would not follow what was just drawn.
+  Annotation? _justAddedAnnotation;
+
+  /// Canvas-space view. Never `widget.annotations` — that list is image pixels
+  /// and handing it to a handler would place every gesture against the wrong
+  /// geometry.
+  @override
+  List<Annotation> get annotations => _canvasAnnotations;
+
+  @override
+  String? get selectedAnnotationId => _selectedAnnotationId;
+
+  @override
+  Annotation? get currentAnnotation => _currentAnnotation;
+
+  @override
+  Rect? get activeCropRect => _activeCropRect;
+
+  @override
+  Color get activeColor => widget.activeColor;
+
+  @override
+  double get strokeWidth => widget.strokeWidth;
+
+  @override
+  double get opacity => widget.opacity;
+
+  @override
+  double get fontSize => widget.fontSize;
+
+  @override
+  bool get isFilled => widget.isFilled;
+
+  @override
+  Color? get textBackgroundColor => widget.textBackgroundColor;
+
+  @override
+  Color? get fillColor => widget.fillColor;
+
+  @override
+  int get stepCounter => widget.stepCounter;
+
+  @override
+  double get blurStrength => widget.blurStrength;
+
+  @override
+  double get borderRadius => widget.borderRadius;
+
+  @override
+  ShapeKind get shapeKind => widget.shapeKind;
+
+  @override
+  LineStyle get lineStyle => widget.lineStyle;
+
+  @override
+  BlurType get blurType => widget.blurType;
+
+  @override
+  bool get isDoubleArrow => widget.isDoubleArrow;
+
+  @override
+  bool get hasShadow => widget.hasShadow;
+
+  @override
+  double get fillTolerance => widget.fillTolerance;
+
+  @override
+  bool get isGlobalFill => widget.isGlobalFill;
+
+  @override
+  bool get isShiftDown => _isShiftDown;
+
+  @override
+  bool get isAltDown => _isAltDown;
+
+  /// Canvas space in, image pixels out.
+  @override
+  void onAnnotationAdded(Annotation annotation) {
+    _justAddedAnnotation = annotation;
+    _emitAnnotation(annotation);
+  }
+
+  @override
+  void onActiveCropRectChanged(Rect? rect) => setState(() => _activeCropRect = rect);
+
+  @override
+  void onCurrentAnnotationChanged(Annotation? annotation) =>
+      setState(() => _currentAnnotation = annotation);
+
+  @override
+  void onSelectedAnnotationIdChanged(String? id) {
+    setState(() => _selectedAnnotationId = id);
+    // Mirrors what the inline implementation did and only what it did: selecting
+    // a *newly drawn* annotation told the parent, so the property panel opens on
+    // it and the toolbar adopts its style. Re-selecting an existing item (the
+    // fill bucket) and clearing the selection (crop) were both silent.
+    final added = _justAddedAnnotation;
+    _justAddedAnnotation = null;
+    if (id != null && added != null && added.id == id) {
+      widget.onSelectAnnotation?.call(added);
+    }
+  }
+
+  @override
+  void onToolSelected(CanvasTool tool) => widget.onToolSelected?.call(tool);
+
+  @override
+  void onStepCounterIncremented(int step) => widget.onStepCounterIncremented(step);
+
+  @override
+  void showTextPrompt(Offset pos) => _startInlineTextEdit(pos);
+
+  /// A discrete edit to an existing annotation (today: the fill bucket
+  /// recolouring what was clicked). The checkpoint is what makes it one undo
+  /// step, matching the inline fill branch this replaced.
+  @override
+  void updateAnnotation(String id, Annotation updatedAnnotation) {
+    _pushHistoryCheckpoint();
+    _replaceAnnotation(updatedAnnotation, live: true);
+  }
+
+  /// Handlers pass canvas-space lists and the parent stores image pixels, so
+  /// this converts before handing off. No handler calls it today, but the
+  /// interface declares it and an unconverted implementation would be a latent
+  /// coordinate bug waiting for the first caller.
+  @override
+  void pushAnnotationsState(List<Annotation> newAnnotations) {
+    final p = _projection;
+    widget.onAnnotationsUpdated?.call(
+      p.isValid ? newAnnotations.map((a) => a.mappedToImageSpace(p)).toList() : newAnnotations,
+    );
+  }
+
+  @override
+  void onPerformCanvasFill(Offset pos) => _performCanvasFloodFill(pos);
+
+  @override
+  void onSampleColorFromCanvas(Offset pos) => _sampleColorAt(pos);
+
+  // ---------------------------------------------------------------------------
   // Gestures
   // ---------------------------------------------------------------------------
 
+  /// Builds the annotation for the inline text editor.
+  ///
+  /// Still here after the handlers took over drawing because `TextToolHandler`
+  /// only raises the prompt — the annotation cannot exist until the user has
+  /// typed something, which happens in `_commitInlineText`, long after the
+  /// gesture ended.
   Annotation _buildAnnotationForTool(CanvasTool tool, Offset pos) {
     return Annotation(
       id: _uuid.v4(),
@@ -888,7 +1068,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
       }
 
       // 2. Check if an existing annotation was grabbed
-      final hit = _hitTestAnnotation(pos);
+      final hit = hitTestAnnotation(pos);
       if (hit != null) {
         _pushHistoryCheckpoint();
         setState(() {
@@ -931,7 +1111,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
     }
 
     // Existing items can be grabbed directly with any tool active
-    final hit = _hitTestAnnotation(pos);
+    final hit = hitTestAnnotation(pos);
     if (hit != null) {
       _pushHistoryCheckpoint();
       setState(() {
@@ -953,19 +1133,13 @@ class _EditorCanvasState extends State<EditorCanvas> {
       _gestureOrigin = null;
     });
 
-    // Click-to-place tools are created on tap-up so a stray drag cannot spawn duplicates.
-    if (widget.activeTool == CanvasTool.stepMarker ||
-        widget.activeTool == CanvasTool.text ||
-        widget.activeTool == CanvasTool.fill ||
-        widget.activeTool == CanvasTool.colorPicker) {
-      return;
-    }
+    // Click-to-place tools are created on tap-up so a stray drag cannot spawn
+    // duplicates. Their handlers do implement `onPanStart`, so the guard has to
+    // stay here rather than in the handler.
+    if (_tapToPlaceTools.contains(widget.activeTool)) return;
 
     _drawStart = pos;
-    _currentPoints = _freehandTools.contains(widget.activeTool) ? [pos] : [];
-    setState(() {
-      _currentAnnotation = _buildAnnotationForTool(widget.activeTool, pos);
-    });
+    _toolHandler.onPanStart(details, pos);
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
@@ -1088,42 +1262,14 @@ class _EditorCanvasState extends State<EditorCanvas> {
     }
 
     if (widget.activeTool == CanvasTool.crop && _drawStart != null) {
-      final end = _constrainEndPoint(_drawStart!, pos, CanvasTool.crop);
+      final end = _constrainCropEndPoint(_drawStart!, pos);
       setState(() => _activeCropRect = Rect.fromPoints(_drawStart!, end));
       return;
     }
 
+    // Nothing canvas-owned claimed the gesture: it is a tool drawing.
     if (_currentAnnotation == null || _drawStart == null) return;
-
-    if (_freehandTools.contains(widget.activeTool)) {
-      if (widget.activeTool == CanvasTool.highlight && _isShiftDown) {
-        final start = _drawStart!;
-        final dx = (pos.dx - start.dx).abs();
-        final dy = (pos.dy - start.dy).abs();
-        final constrainedPos = dx >= dy ? Offset(pos.dx, start.dy) : Offset(start.dx, pos.dy);
-        _currentPoints = [start, constrainedPos];
-        setState(() => _currentAnnotation = _currentAnnotation!.copyWith(points: _currentPoints));
-        return;
-      }
-      // Skip sub-pixel samples
-      if (_currentPoints.isEmpty || (pos - _currentPoints.last).distance >= 1.5) {
-        _currentPoints = [..._currentPoints, pos];
-        setState(() => _currentAnnotation = _currentAnnotation!.copyWith(points: _currentPoints));
-      }
-      return;
-    }
-
-    var start = _drawStart!;
-    var end = _constrainEndPoint(start, pos, widget.activeTool);
-
-    if (_isAltDown && _dragToDrawTools.contains(widget.activeTool)) {
-      final half = end - start;
-      start = _drawStart! - half;
-    }
-
-    setState(() {
-      _currentAnnotation = _currentAnnotation!.copyWith(startPoint: start, endPoint: end);
-    });
+    _toolHandler.onPanUpdate(details, pos);
   }
 
   void _onPanEnd(DragEndDetails details) {
@@ -1189,25 +1335,11 @@ class _EditorCanvasState extends State<EditorCanvas> {
       return;
     }
 
-    final drawn = _currentAnnotation;
-    setState(() {
-      _currentAnnotation = null;
-      _currentPoints = [];
-      _drawStart = null;
-    });
-
-    if (drawn == null) return;
-
-    if (_freehandTools.contains(drawn.tool)) {
-      if (drawn.points.length < 2) return;
-    } else {
-      final bounds = AnnotationRenderer.boundingRect(drawn);
-      if (bounds.width < 3 && bounds.height < 3) return;
-    }
-
-    _emitAnnotation(drawn);
-    setState(() => _selectedAnnotationId = drawn.id);
-    widget.onSelectAnnotation?.call(drawn);
+    // The handler decides whether the drag was big enough to keep, commits it
+    // through `onAnnotationAdded`, and clears `_currentAnnotation` on its way
+    // out. Only `_drawStart` is the canvas's to reset.
+    _toolHandler.onPanEnd(details);
+    _drawStart = null;
   }
 
   /// Double clicks are detected by hand
@@ -1226,7 +1358,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
     if (widget.activeTool == CanvasTool.crop) return;
 
     final pos = details.localPosition;
-    final hit = _hitTestAnnotation(pos);
+    final hit = hitTestAnnotation(pos);
 
     if (widget.activeTool == CanvasTool.select) {
       if (_floatingSelectionRect != null) {
@@ -1254,22 +1386,11 @@ class _EditorCanvasState extends State<EditorCanvas> {
       }
     }
 
-    if (widget.activeTool == CanvasTool.fill) {
-      if (hit != null) {
-        _pushHistoryCheckpoint();
-        _replaceAnnotation(
-          hit.copyWith(fill: true, fillColor: widget.activeColor),
-          live: true,
-        );
-        setState(() => _selectedAnnotationId = hit.id);
-      } else {
-        _performCanvasFloodFill(pos);
-      }
-      return;
-    }
-
-    if (widget.activeTool == CanvasTool.colorPicker) {
-      _sampleColorAt(pos);
+    // Fill and the eyedropper act on what is under the cursor, so they run
+    // before the fallback below — otherwise clicking a shape with the fill
+    // bucket would merely select it.
+    if (_tapActsUnderCursorTools.contains(widget.activeTool)) {
+      _toolHandler.onTapUp(details, pos);
       return;
     }
 
@@ -1279,25 +1400,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
       return;
     }
 
-    switch (widget.activeTool) {
-      case CanvasTool.stepMarker:
-        final annotation = _buildAnnotationForTool(CanvasTool.stepMarker, pos)
-            .copyWith(stepNumber: widget.stepCounter, endPoint: null);
-        _emitAnnotation(annotation);
-        widget.onStepCounterIncremented(widget.stepCounter + 1);
-        setState(() => _selectedAnnotationId = annotation.id);
-        widget.onSelectAnnotation?.call(annotation);
-        break;
-      case CanvasTool.text:
-        _startInlineTextEdit(pos);
-        break;
-      case CanvasTool.select:
-        setState(() => _selectedAnnotationId = null);
-        widget.onSelectAnnotation?.call(null);
-        break;
-      default:
-        break;
-    }
+    _toolHandler.onTapUp(details, pos);
   }
 
   // ---------------------------------------------------------------------------
@@ -1846,10 +1949,10 @@ class _EditorCanvasState extends State<EditorCanvas> {
           _CropHandle.top || _CropHandle.bottom => SystemMouseCursors.resizeUpDown,
           _CropHandle.left || _CropHandle.right => SystemMouseCursors.resizeLeftRight,
           _CropHandle.none =>
-            _hitTestAnnotation(pos) != null ? SystemMouseCursors.move : SystemMouseCursors.precise,
+            hitTestAnnotation(pos) != null ? SystemMouseCursors.move : SystemMouseCursors.precise,
         };
       } else {
-        next = _hitTestAnnotation(pos) != null ? SystemMouseCursors.move : SystemMouseCursors.precise;
+        next = hitTestAnnotation(pos) != null ? SystemMouseCursors.move : SystemMouseCursors.precise;
       }
     } else if (widget.activeTool == CanvasTool.colorPicker ||
         widget.activeTool == CanvasTool.fill) {

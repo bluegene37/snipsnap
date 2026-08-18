@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
-import '../models/annotation.dart';
 import '../utils/constants.dart';
 import 'tool_handler.dart';
 
@@ -14,12 +13,9 @@ class RulerToolHandler extends ToolHandler {
   @override
   void onPanStart(DragStartDetails details, Offset pos) {
     _drawStart = pos;
-    final annotation = Annotation(
+    final annotation = buildStyledAnnotation(
       id: _uuid.v4(),
       tool: CanvasTool.ruler,
-      color: delegate.activeColor,
-      strokeWidth: delegate.strokeWidth,
-      opacity: delegate.opacity,
       startPoint: pos,
       endPoint: pos,
     );
@@ -64,11 +60,9 @@ class RulerToolHandler extends ToolHandler {
   @override
   void onPanEnd(DragEndDetails details) {
     final current = delegate.currentAnnotation;
-    if (current != null && current.startPoint != null && current.endPoint != null) {
-      if ((current.endPoint! - current.startPoint!).distance >= 3) {
-        delegate.onAnnotationAdded(current);
-        delegate.onSelectedAnnotationIdChanged(current.id);
-      }
+    if (current != null && isCommittableDrag(current.startPoint, current.endPoint)) {
+      delegate.onAnnotationAdded(current);
+      delegate.onSelectedAnnotationIdChanged(current.id);
     }
     delegate.onCurrentAnnotationChanged(null);
     _drawStart = null;

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
-import '../models/annotation.dart';
 import '../utils/constants.dart';
 import 'tool_handler.dart';
 
@@ -14,13 +13,10 @@ class PenToolHandler extends ToolHandler {
   @override
   void onPanStart(DragStartDetails details, Offset pos) {
     _currentPoints = [pos];
-    final annotation = Annotation(
+    final annotation = buildStyledAnnotation(
       id: _uuid.v4(),
       tool: toolType,
-      color: delegate.activeColor,
-      strokeWidth: delegate.strokeWidth,
-      opacity: delegate.opacity,
-      hasShadow: delegate.hasShadow,
+      startPoint: pos,
       points: _currentPoints,
     );
     delegate.onCurrentAnnotationChanged(annotation);

@@ -1,6 +1,19 @@
 import 'package:flutter/material.dart';
 import '../models/annotation.dart';
 import '../utils/constants.dart';
+import 'arrow_tool.dart';
+import 'blur_tool.dart';
+import 'color_picker_tool.dart';
+import 'crop_tool.dart';
+import 'fill_tool.dart';
+import 'highlighter_tool.dart';
+import 'line_tool.dart';
+import 'pen_tool.dart';
+import 'ruler_tool.dart';
+import 'select_tool.dart';
+import 'shape_tool.dart';
+import 'step_marker_tool.dart';
+import 'text_tool.dart';
 
 abstract class ToolDelegate {
   void onAnnotationAdded(Annotation annotation);
@@ -52,4 +65,94 @@ abstract class ToolHandler {
   void onPanUpdate(DragUpdateDetails details, Offset pos);
   void onPanEnd(DragEndDetails details);
   void onTapUp(TapUpDetails details, Offset pos);
+
+  /// A new annotation carrying **every** styling property the delegate exposes.
+  ///
+  /// Not merely a convenience: the moment a freshly drawn annotation is
+  /// selected the parent adopts its style back into the tool defaults
+  /// (`_updateActiveToolProperty(syncOnly: true, ...)` in `main_screen.dart`,
+  /// which reads colour, background, fill colour, stroke, font size, opacity,
+  /// fill, radius, shape kind, line style, blur type, blur strength, shadow and
+  /// double-arrow). A handler that leaves one of those off its constructor call
+  /// hands back a default, and the toolbar control silently resets after every
+  /// stroke. Building them all in one place is what keeps that from drifting.
+  @protected
+  Annotation buildStyledAnnotation({
+    required String id,
+    required CanvasTool tool,
+    Offset? startPoint,
+    Offset? endPoint,
+    List<Offset> points = const [],
+  }) {
+    return Annotation(
+      id: id,
+      tool: tool,
+      color: delegate.activeColor,
+      backgroundColor: delegate.textBackgroundColor,
+      fillColor: delegate.fillColor,
+      strokeWidth: delegate.strokeWidth,
+      opacity: delegate.opacity,
+      fontSize: delegate.fontSize,
+      fill: delegate.isFilled,
+      borderRadius: delegate.borderRadius,
+      shapeKind: delegate.shapeKind,
+      lineStyle: delegate.lineStyle,
+      blurType: delegate.blurType,
+      blurStrength: delegate.blurStrength,
+      hasShadow: delegate.hasShadow,
+      isDoubleArrow: delegate.isDoubleArrow,
+      startPoint: startPoint,
+      endPoint: endPoint,
+      points: points,
+    );
+  }
+
+  /// Whether a finished drag-to-draw gesture is big enough to keep.
+  ///
+  /// The rule is deliberately an `||`, mirroring the canvas's own
+  /// `bounds.width < 3 && bounds.height < 3` discard: a dead-straight
+  /// horizontal line or a zero-height redaction bar has one degenerate axis and
+  /// still has to commit. Per-tool `width >= n && height >= n` variants swallow
+  /// exactly those.
+  @protected
+  bool isCommittableDrag(Offset? start, Offset? end) {
+    if (start == null || end == null) return false;
+    final bounds = Rect.fromPoints(start, end);
+    return bounds.width >= 3 || bounds.height >= 3;
+  }
+}
+
+/// The handler that owns gestures for [tool].
+///
+/// `EditorCanvas` delegates to these rather than implementing gestures inline,
+/// so tool behaviour lives in one place (GEMINI.md 1.1).
+ToolHandler handlerFor(CanvasTool tool, ToolDelegate delegate) {
+  switch (tool) {
+    case CanvasTool.select:
+      return SelectToolHandler(delegate);
+    case CanvasTool.pen:
+      return PenToolHandler(delegate);
+    case CanvasTool.arrow:
+      return ArrowToolHandler(delegate);
+    case CanvasTool.line:
+      return LineToolHandler(delegate);
+    case CanvasTool.shape:
+      return ShapeToolHandler(delegate);
+    case CanvasTool.highlight:
+      return HighlighterToolHandler(delegate);
+    case CanvasTool.stepMarker:
+      return StepMarkerToolHandler(delegate);
+    case CanvasTool.text:
+      return TextToolHandler(delegate);
+    case CanvasTool.blur:
+      return BlurToolHandler(delegate);
+    case CanvasTool.ruler:
+      return RulerToolHandler(delegate);
+    case CanvasTool.crop:
+      return CropToolHandler(delegate);
+    case CanvasTool.fill:
+      return FillToolHandler(delegate);
+    case CanvasTool.colorPicker:
+      return ColorPickerToolHandler(delegate);
+  }
 }

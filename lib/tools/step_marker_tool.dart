@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
-import '../models/annotation.dart';
 import '../utils/constants.dart';
 import 'tool_handler.dart';
 
@@ -26,16 +25,11 @@ class StepMarkerToolHandler extends ToolHandler {
   }
 
   void _addMarker(Offset pos) {
-    final annotation = Annotation(
+    final annotation = buildStyledAnnotation(
       id: _uuid.v4(),
       tool: CanvasTool.stepMarker,
-      color: delegate.activeColor,
-      fontSize: delegate.fontSize,
-      opacity: delegate.opacity,
-      hasShadow: delegate.hasShadow,
       startPoint: pos,
-      stepNumber: delegate.stepCounter,
-    );
+    ).copyWith(stepNumber: delegate.stepCounter);
     delegate.onAnnotationAdded(annotation);
     delegate.onStepCounterIncremented(delegate.stepCounter + 1);
     delegate.onSelectedAnnotationIdChanged(annotation.id);

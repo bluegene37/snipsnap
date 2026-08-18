@@ -451,4 +451,162 @@ void main() {
       expect(delegate.promptedTextPos, const Offset(150, 150));
     });
   });
+
+  group('handlerFor', () {
+    test('returns a handler for every CanvasTool', () {
+      final delegate = MockToolDelegate();
+      for (final tool in CanvasTool.values) {
+        expect(
+          () => handlerFor(tool, delegate),
+          returnsNormally,
+          reason: 'no handler for $tool',
+        );
+      }
+    });
+
+    test('maps each tool to its matching handler type', () {
+      final d = MockToolDelegate();
+      expect(handlerFor(CanvasTool.arrow, d), isA<ArrowToolHandler>());
+      expect(handlerFor(CanvasTool.line, d), isA<LineToolHandler>());
+      expect(handlerFor(CanvasTool.shape, d), isA<ShapeToolHandler>());
+      expect(handlerFor(CanvasTool.pen, d), isA<PenToolHandler>());
+      expect(handlerFor(CanvasTool.highlight, d), isA<HighlighterToolHandler>());
+      expect(handlerFor(CanvasTool.blur, d), isA<BlurToolHandler>());
+      expect(handlerFor(CanvasTool.ruler, d), isA<RulerToolHandler>());
+      expect(handlerFor(CanvasTool.stepMarker, d), isA<StepMarkerToolHandler>());
+      expect(handlerFor(CanvasTool.text, d), isA<TextToolHandler>());
+      expect(handlerFor(CanvasTool.fill, d), isA<FillToolHandler>());
+      expect(handlerFor(CanvasTool.colorPicker, d), isA<ColorPickerToolHandler>());
+      expect(handlerFor(CanvasTool.crop, d), isA<CropToolHandler>());
+      expect(handlerFor(CanvasTool.select, d), isA<SelectToolHandler>());
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Parity with the inline implementation the handlers replaced. Both of these
+  // caught a real divergence while wiring Task 9 up, and both would be silent
+  // in normal use until someone drew the specific shape.
+  // ---------------------------------------------------------------------------
+
+  group('parity with the canvas implementation', () {
+    test('a drag that is degenerate in one axis still commits', () {
+      // The inline gate discarded only when *both* axes were under 3px, so a
+      // dead-flat rectangle or a horizontal redaction bar was kept. Per-tool
+      // `width >= n && height >= n` gates swallowed exactly those.
+      for (final build in <ToolHandler Function(ToolDelegate)>[
+        (d) => ShapeToolHandler(d),
+        (d) => BlurToolHandler(d),
+        (d) => LineToolHandler(d),
+        (d) => ArrowToolHandler(d),
+        (d) => RulerToolHandler(d),
+      ]) {
+        final delegate = MockToolDelegate();
+        final handler = build(delegate);
+        handler.onPanStart(_dragStart(const Offset(10, 40)), const Offset(10, 40));
+        handler.onPanUpdate(_dragUpdate(const Offset(210, 40)), const Offset(210, 40));
+        handler.onPanEnd(_dragEnd());
+        expect(
+          delegate.addedAnnotations.length,
+          1,
+          reason: '${handler.runtimeType} dropped a 200x0 drag',
+        );
+      }
+    });
+
+    test('a drag degenerate in both axes is discarded', () {
+      for (final build in <ToolHandler Function(ToolDelegate)>[
+        (d) => ShapeToolHandler(d),
+        (d) => BlurToolHandler(d),
+        (d) => LineToolHandler(d),
+        (d) => ArrowToolHandler(d),
+        (d) => RulerToolHandler(d),
+      ]) {
+        final delegate = MockToolDelegate();
+        final handler = build(delegate);
+        handler.onPanStart(_dragStart(const Offset(10, 40)), const Offset(10, 40));
+        handler.onPanUpdate(_dragUpdate(const Offset(12, 41)), const Offset(12, 41));
+        handler.onPanEnd(_dragEnd());
+        expect(
+          delegate.addedAnnotations,
+          isEmpty,
+          reason: '${handler.runtimeType} kept a 2x1 stray click-drag',
+        );
+      }
+    });
+
+    test('every drawing handler stamps the full tool-property set', () {
+      // The parent adopts a newly selected annotation's style back into the
+      // tool defaults, so any property a handler forgets is a toolbar control
+      // that silently resets itself after every stroke.
+      MockToolDelegate styled() => MockToolDelegate()
+        ..activeColor = Colors.orange
+        ..textBackgroundColor = Colors.black
+        ..fillColor = Colors.teal
+        ..strokeWidth = 7.0
+        ..opacity = 0.6
+        ..fontSize = 31.0
+        ..isFilled = true
+        ..borderRadius = 11.0
+        ..shapeKind = ShapeKind.hexagon
+        ..lineStyle = LineStyle.dashed
+        ..blurType = BlurType.pixelate
+        ..blurStrength = 27.0
+        ..hasShadow = true
+        ..isDoubleArrow = true;
+
+      void check(Annotation a, String label) {
+        expect(a.color, Colors.orange, reason: '$label color');
+        expect(a.backgroundColor, Colors.black, reason: '$label backgroundColor');
+        expect(a.fillColor, Colors.teal, reason: '$label fillColor');
+        expect(a.strokeWidth, 7.0, reason: '$label strokeWidth');
+        expect(a.opacity, 0.6, reason: '$label opacity');
+        expect(a.fontSize, 31.0, reason: '$label fontSize');
+        expect(a.fill, isTrue, reason: '$label fill');
+        expect(a.borderRadius, 11.0, reason: '$label borderRadius');
+        expect(a.shapeKind, ShapeKind.hexagon, reason: '$label shapeKind');
+        expect(a.lineStyle, LineStyle.dashed, reason: '$label lineStyle');
+        expect(a.blurType, BlurType.pixelate, reason: '$label blurType');
+        expect(a.blurStrength, 27.0, reason: '$label blurStrength');
+        expect(a.hasShadow, isTrue, reason: '$label hasShadow');
+        expect(a.isDoubleArrow, isTrue, reason: '$label isDoubleArrow');
+      }
+
+      for (final build in <ToolHandler Function(ToolDelegate)>[
+        (d) => ShapeToolHandler(d),
+        (d) => BlurToolHandler(d),
+        (d) => LineToolHandler(d),
+        (d) => ArrowToolHandler(d),
+        (d) => RulerToolHandler(d),
+        (d) => PenToolHandler(d),
+        (d) => HighlighterToolHandler(d),
+      ]) {
+        final delegate = styled();
+        final handler = build(delegate);
+        handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
+        handler.onPanUpdate(_dragUpdate(const Offset(120, 90)), const Offset(120, 90));
+        handler.onPanEnd(_dragEnd());
+        expect(delegate.addedAnnotations.length, 1, reason: '${handler.runtimeType}');
+        check(delegate.addedAnnotations.single, '${handler.runtimeType}');
+      }
+
+      // The step marker is placed on tap rather than dragged.
+      final stepDelegate = styled();
+      StepMarkerToolHandler(stepDelegate)
+          .onTapUp(_tapUp(const Offset(60, 60)), const Offset(60, 60));
+      check(stepDelegate.addedAnnotations.single, 'StepMarkerToolHandler');
+    });
+  });
+
+  group('CropToolHandler small-crop fallback', () {
+    test('discards a too-small crop instead of inventing an 800x600 rect', () {
+      final delegate = MockToolDelegate();
+      final handler = CropToolHandler(delegate);
+
+      handler.onPanStart(_dragStart(const Offset(20, 30)), const Offset(20, 30));
+      handler.onPanUpdate(_dragUpdate(const Offset(25, 35)), const Offset(25, 35));
+      handler.onPanEnd(_dragEnd());
+
+      expect(delegate.activeCropRect, isNull);
+    });
+  });
 }
