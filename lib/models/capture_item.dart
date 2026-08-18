@@ -19,6 +19,10 @@ class CaptureItem {
     this.annotations = const [],
   });
 
+  /// True when both dimensions were recorded. Captures created before
+  /// dimensions were persisted report false and must be decoded to recover.
+  bool get hasDimensions => width > 0 && height > 0;
+
   CaptureItem copyWith({
     String? id,
     String? filePath,

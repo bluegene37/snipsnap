@@ -566,7 +566,7 @@ class _MainScreenState extends State<MainScreen> {
     final path = await _captureService.captureInteractive();
     setState(() => _isCapturing = false);
     if (path != null) {
-      _addCaptureFromPath(path);
+      await _addCaptureFromPath(path);
     }
   }
 
@@ -575,7 +575,7 @@ class _MainScreenState extends State<MainScreen> {
     final path = await _captureService.captureFullScreen();
     setState(() => _isCapturing = false);
     if (path != null) {
-      _addCaptureFromPath(path);
+      await _addCaptureFromPath(path);
     }
   }
 
@@ -594,7 +594,7 @@ class _MainScreenState extends State<MainScreen> {
     final path = await _captureService.captureTimer(3);
     setState(() => _isCapturing = false);
     if (path != null) {
-      _addCaptureFromPath(path);
+      await _addCaptureFromPath(path);
     }
   }
 
@@ -607,7 +607,7 @@ class _MainScreenState extends State<MainScreen> {
       if (result != null && result.path != null) {
         final path = await _captureService.importImage(result.path!);
         if (path != null) {
-          _addCaptureFromPath(path);
+          await _addCaptureFromPath(path);
         }
       }
     } catch (e) {
@@ -616,13 +616,29 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  void _addCaptureFromPath(String path) {
+  Future<void> _addCaptureFromPath(String path) async {
     _syncCurrentCaptureAnnotations();
+
+    int width = 0;
+    int height = 0;
+    try {
+      final decoded = img.decodeImage(await File(path).readAsBytes());
+      if (decoded != null) {
+        width = decoded.width;
+        height = decoded.height;
+      }
+    } catch (e) {
+      debugPrint('SnipSnap dimension read error: $e');
+    }
+
+    final now = DateTime.now();
     final newItem = CaptureItem(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: '${now.millisecondsSinceEpoch}_${_captures.length}',
       filePath: path,
-      title: 'Snap ${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}:${DateTime.now().second.toString().padLeft(2, '0')}',
-      createdAt: DateTime.now(),
+      title: 'Snap ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}',
+      createdAt: now,
+      width: width,
+      height: height,
     );
 
     setState(() {

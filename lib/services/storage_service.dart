@@ -163,11 +163,24 @@ class StorageService {
           if (f is File && (f.path.endsWith('.png') || f.path.endsWith('.jpg') || f.path.endsWith('.jpeg'))) {
             if (!existingPaths.contains(f.path)) {
               final stat = await f.stat();
+              int w = 0;
+              int h = 0;
+              try {
+                final decoded = img.decodeImage(await f.readAsBytes());
+                if (decoded != null) {
+                  w = decoded.width;
+                  h = decoded.height;
+                }
+              } catch (e) {
+                debugPrint('SnipSnap dimension read error: $e');
+              }
               final newItem = CaptureItem(
-                id: stat.modified.millisecondsSinceEpoch.toString(),
+                id: '${stat.modified.millisecondsSinceEpoch}_${p.basename(f.path)}',
                 filePath: f.path,
                 title: 'Snap ${stat.modified.hour.toString().padLeft(2, '0')}:${stat.modified.minute.toString().padLeft(2, '0')}:${stat.modified.second.toString().padLeft(2, '0')}',
                 createdAt: stat.modified,
+                width: w,
+                height: h,
               );
               items.add(newItem);
               await DatabaseService.saveCaptureToDb(newItem);
