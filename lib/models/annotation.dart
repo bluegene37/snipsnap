@@ -236,7 +236,7 @@ class Annotation {
           ? Color(map['backgroundColor'] as int)
           : backgroundColor,
       fillColor: map.containsKey('fillColor') ? Color(map['fillColor'] as int) : fillColor,
-      rect: parsedRect,
+      rect: map.containsKey('rect') ? parsedRect : rect,
     );
   }
 

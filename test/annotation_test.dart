@@ -392,5 +392,16 @@ void main() {
       expect(cleared.rect, isNull);
       expect(cleared.startPoint, const Offset(1, 2));
     });
+
+    test('withPropsJson preserves an existing rect when the map has no rect key', () {
+      final ann = Annotation(
+        id: 'x',
+        tool: CanvasTool.shape,
+        color: const Color(0xFF000000),
+        rect: const Rect.fromLTRB(10, 20, 30, 40),
+      );
+      final restored = ann.withPropsJson(const {'borderRadius': 3.0});
+      expect(restored.rect, const Rect.fromLTRB(10, 20, 30, 40));
+    });
   });
 }
