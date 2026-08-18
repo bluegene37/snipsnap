@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import '../models/annotation.dart';
 import '../services/clipboard_service.dart';
 import '../services/render_service.dart';
+import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 import '../utils/image_operations.dart';
 import 'components/annotation_renderer.dart';
@@ -357,6 +358,48 @@ class _EditorCanvasState extends State<EditorCanvas> {
     );
   }
 
+  /// Native pixel dimensions of the loaded screenshot, or [Size.zero] before it
+  /// has decoded.
+  Size get _imageSize {
+    final image = _baseImage;
+    if (image == null) return Size.zero;
+    return Size(image.width.toDouble(), image.height.toDouble());
+  }
+
+  /// The image <-> canvas mapping for the canvas as it was laid out on the
+  /// previous frame. Correct for gestures (which run after layout); the paint
+  /// path uses [_projectionFor] with the live constraints instead, because the
+  /// render box still reports the stale size while layout is in progress.
+  CanvasProjection get _projection => _projectionFor(_canvasSize);
+
+  CanvasProjection _projectionFor(Size canvasSize) =>
+      CanvasProjection(imageSize: _imageSize, canvasSize: canvasSize);
+
+  /// `widget.annotations` are stored in image pixels; painting and hit-testing
+  /// work in canvas coordinates. Memoised because it runs every build.
+  List<Annotation> get _canvasAnnotations => _canvasAnnotationsFor(_projection);
+
+  List<Annotation> _canvasAnnotationsFor(CanvasProjection p) {
+    if (_canvasAnnotationsCache != null &&
+        _cachedProjection == p &&
+        identical(_cachedSource, widget.annotations)) {
+      return _canvasAnnotationsCache!;
+    }
+    // An invalid projection (no image yet, or a zero-sized canvas) cannot place
+    // anything, so the list passes through untouched rather than being mangled.
+    final mapped = p.isValid
+        ? widget.annotations.map((a) => a.mappedToCanvasSpace(p)).toList()
+        : widget.annotations;
+    _canvasAnnotationsCache = mapped;
+    _cachedProjection = p;
+    _cachedSource = widget.annotations;
+    return mapped;
+  }
+
+  List<Annotation>? _canvasAnnotationsCache;
+  CanvasProjection? _cachedProjection;
+  List<Annotation>? _cachedSource;
+
   void _ensureCropRectInitialized() {
     if (widget.activeTool != CanvasTool.crop || _activeCropRect != null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -420,9 +463,12 @@ class _EditorCanvasState extends State<EditorCanvas> {
   // Selection helpers
   // ---------------------------------------------------------------------------
 
+  /// The selected annotation **in canvas space** — every caller (handle
+  /// hit-testing, nudging, rotation, the selection chrome) works in canvas
+  /// coordinates, and `_replaceAnnotation` converts back on the way out.
   Annotation? get _selectedAnnotation {
     if (_selectedAnnotationId == null) return null;
-    for (final a in widget.annotations) {
+    for (final a in _canvasAnnotations) {
       if (a.id == _selectedAnnotationId) return a;
     }
     return null;
@@ -432,14 +478,15 @@ class _EditorCanvasState extends State<EditorCanvas> {
   /// inside a hollow shape reaches whatever sits under it; only if nothing is
   /// hit precisely does a bounding-box pass make large hollow shapes grabbable.
   Annotation? _hitTestAnnotation(Offset pos) {
-    for (int i = widget.annotations.length - 1; i >= 0; i--) {
-      if (AnnotationRenderer.hitTest(widget.annotations[i], pos)) {
-        return widget.annotations[i];
+    final canvasAnnotations = _canvasAnnotations;
+    for (int i = canvasAnnotations.length - 1; i >= 0; i--) {
+      if (AnnotationRenderer.hitTest(canvasAnnotations[i], pos)) {
+        return canvasAnnotations[i];
       }
     }
-    for (int i = widget.annotations.length - 1; i >= 0; i--) {
-      if (AnnotationRenderer.hitTestBounds(widget.annotations[i], pos)) {
-        return widget.annotations[i];
+    for (int i = canvasAnnotations.length - 1; i >= 0; i--) {
+      if (AnnotationRenderer.hitTestBounds(canvasAnnotations[i], pos)) {
+        return canvasAnnotations[i];
       }
     }
     return null;
@@ -471,15 +518,27 @@ class _EditorCanvasState extends State<EditorCanvas> {
     return _AnnHandle.none;
   }
 
+  /// Writes [updated] — a **canvas-space** annotation — back to the parent,
+  /// which stores image pixels.
   void _replaceAnnotation(Annotation updated, {required bool live}) {
     final callback =
         live ? (widget.onAnnotationsLiveUpdated ?? widget.onAnnotationsUpdated) : widget.onAnnotationsUpdated;
     if (callback == null) return;
     final index = widget.annotations.indexWhere((a) => a.id == updated.id);
     if (index == -1) return;
+    final p = _projection;
     final list = List<Annotation>.from(widget.annotations);
-    list[index] = updated;
+    list[index] = p.isValid ? updated.mappedToImageSpace(p) : updated;
     callback(list);
+  }
+
+  /// Hands a newly drawn **canvas-space** annotation to the parent in image
+  /// pixels.
+  void _emitAnnotation(Annotation canvasSpaceAnnotation) {
+    final p = _projection;
+    widget.onAnnotationAdded(
+      p.isValid ? canvasSpaceAnnotation.mappedToImageSpace(p) : canvasSpaceAnnotation,
+    );
   }
 
   /// Records the pre-gesture state so the whole gesture collapses into a single
@@ -509,7 +568,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
     if (ann == null) return;
     const offset = Offset(16, 16);
     final clone = ann.translated(offset).copyWith(id: _uuid.v4());
-    widget.onAnnotationAdded(clone);
+    _emitAnnotation(clone);
     setState(() => _selectedAnnotationId = clone.id);
     widget.onSelectAnnotation?.call(clone);
   }
@@ -1124,7 +1183,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
       if (bounds.width < 3 && bounds.height < 3) return;
     }
 
-    widget.onAnnotationAdded(drawn);
+    _emitAnnotation(drawn);
     setState(() => _selectedAnnotationId = drawn.id);
     widget.onSelectAnnotation?.call(drawn);
   }
@@ -1202,7 +1261,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
       case CanvasTool.stepMarker:
         final annotation = _buildAnnotationForTool(CanvasTool.stepMarker, pos)
             .copyWith(stepNumber: widget.stepCounter, endPoint: null);
-        widget.onAnnotationAdded(annotation);
+        _emitAnnotation(annotation);
         widget.onStepCounterIncremented(widget.stepCounter + 1);
         setState(() => _selectedAnnotationId = annotation.id);
         widget.onSelectAnnotation?.call(annotation);
@@ -1262,7 +1321,9 @@ class _EditorCanvasState extends State<EditorCanvas> {
     }
 
     if (editingId != null) {
-      final existing = widget.annotations.where((a) => a.id == editingId).firstOrNull;
+      // Canvas space: `_replaceAnnotation` maps back to image pixels on the way
+      // out, so handing it an image-space annotation would scale it twice.
+      final existing = _canvasAnnotations.where((a) => a.id == editingId).firstOrNull;
       if (existing != null) {
         _pushHistoryCheckpoint();
         _replaceAnnotation(existing.copyWith(text: text), live: true);
@@ -1270,7 +1331,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
     } else {
       final annotation = _buildAnnotationForTool(CanvasTool.text, pos)
           .copyWith(text: text, endPoint: null);
-      widget.onAnnotationAdded(annotation);
+      _emitAnnotation(annotation);
       setState(() => _selectedAnnotationId = annotation.id);
       widget.onSelectAnnotation?.call(annotation);
     }
@@ -1862,26 +1923,39 @@ class _EditorCanvasState extends State<EditorCanvas> {
                           ),
 
                           // Annotations + live preview + selection chrome.
+                          //
+                          // LayoutBuilder is load-bearing: nothing in this
+                          // subtree depends on MediaQuery, so a bare window
+                          // resize never rebuilds this widget. Without it the
+                          // painter would keep the canvas-space annotations
+                          // derived from the *old* viewport while painting at
+                          // the new size — precisely the drift this change
+                          // exists to remove. It also gives the true canvas
+                          // size, which `_canvasSize` cannot during layout.
                           Positioned.fill(
-                            child: MouseRegion(
-                              cursor: _cursor,
-                              onHover: (e) => _updateCursor(e.localPosition),
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onPanStart: _onPanStart,
-                                onPanUpdate: _onPanUpdate,
-                                onPanEnd: _onPanEnd,
-                                onTapUp: _onTapUp,
-                                child: CustomPaint(
-                                  painter: _AnnotationPainter(
-                                    annotations: widget.annotations,
-                                    currentAnnotation: _currentAnnotation,
-                                    selectedAnnotationId: _selectedAnnotationId,
-                                    editingAnnotationId: _editingAnnotationId,
-                                    baseImage: _baseImage,
-                                    showHud: _currentAnnotation != null ||
-                                        _isResizingAnnotation ||
-                                        _isDraggingAnnotation,
+                            child: LayoutBuilder(
+                              builder: (context, constraints) => MouseRegion(
+                                cursor: _cursor,
+                                onHover: (e) => _updateCursor(e.localPosition),
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onPanStart: _onPanStart,
+                                  onPanUpdate: _onPanUpdate,
+                                  onPanEnd: _onPanEnd,
+                                  onTapUp: _onTapUp,
+                                  child: CustomPaint(
+                                    painter: _AnnotationPainter(
+                                      annotations: _canvasAnnotationsFor(
+                                        _projectionFor(constraints.biggest),
+                                      ),
+                                      currentAnnotation: _currentAnnotation,
+                                      selectedAnnotationId: _selectedAnnotationId,
+                                      editingAnnotationId: _editingAnnotationId,
+                                      baseImage: _baseImage,
+                                      showHud: _currentAnnotation != null ||
+                                          _isResizingAnnotation ||
+                                          _isDraggingAnnotation,
+                                    ),
                                   ),
                                 ),
                               ),
