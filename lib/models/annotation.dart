@@ -180,6 +180,37 @@ class Annotation {
     );
   }
 
+  /// Applies scale-dependent scalars supplied in **canvas** units to this
+  /// **image-space** annotation.
+  ///
+  /// Stroke width, font size, corner radius and blur sigma are the four
+  /// dimensions [mappedToImageSpace] scales, so a value read straight off a
+  /// toolbar slider — which is in canvas units, because that is what the user
+  /// sees — cannot be written to a stored annotation unconverted. Doing so
+  /// makes a slider drag move the rendered value the wrong way on any
+  /// downscaled capture.
+  ///
+  /// A null [p] means the projection is degenerate and no canvas unit can be
+  /// converted. The stored values are then left untouched: refusing the edit is
+  /// recoverable, writing canvas numbers into image-space storage is not.
+  Annotation withCanvasSpaceScalars(
+    CanvasProjection? p, {
+    double? strokeWidth,
+    double? fontSize,
+    double? borderRadius,
+    double? blurStrength,
+  }) {
+    if (p == null || !p.isValid) return this;
+    double? toImage(double? canvasValue) =>
+        canvasValue == null ? null : p.toImageLength(canvasValue);
+    return copyWith(
+      strokeWidth: toImage(strokeWidth),
+      fontSize: toImage(fontSize),
+      borderRadius: toImage(borderRadius),
+      blurStrength: toImage(blurStrength),
+    );
+  }
+
   /// Extra properties that do not have dedicated database columns. Kept as a
   /// single JSON blob so new tool properties never silently stop persisting.
   Map<String, dynamic> toPropsJson() {

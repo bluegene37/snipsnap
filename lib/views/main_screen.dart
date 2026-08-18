@@ -159,22 +159,31 @@ class _MainScreenState extends State<MainScreen> {
       // leaves both references pointing at the same (already updated) object,
       // so the change would never repaint.
       _annotations = List<Annotation>.of(_annotations);
-      _annotations[idx] = _annotations[idx].copyWith(
-        color: activeColor,
-        strokeWidth: strokeWidth,
-        opacity: opacity,
-        fontSize: fontSize,
-        fill: isFilled,
-        backgroundColor: textBackgroundColor,
-        fillColor: fillColor,
-        borderRadius: borderRadius,
-        shapeKind: shapeKind,
-        lineStyle: lineStyle,
-        blurType: blurType,
-        blurStrength: blurStrength,
-        hasShadow: hasShadow,
-        isDoubleArrow: isDoubleArrow,
-      );
+      // Two groups, deliberately separated. Colour, opacity, fill and the enum
+      // properties mean the same thing in either coordinate space and are
+      // written straight through. Stroke width, font size, corner radius and
+      // blur sigma are lengths: the sliders produce canvas units but
+      // `_annotations` holds image pixels, so they go through the projection.
+      _annotations[idx] = _annotations[idx]
+          .copyWith(
+            color: activeColor,
+            opacity: opacity,
+            fill: isFilled,
+            backgroundColor: textBackgroundColor,
+            fillColor: fillColor,
+            shapeKind: shapeKind,
+            lineStyle: lineStyle,
+            blurType: blurType,
+            hasShadow: hasShadow,
+            isDoubleArrow: isDoubleArrow,
+          )
+          .withCanvasSpaceScalars(
+            _activeProjection,
+            strokeWidth: strokeWidth,
+            fontSize: fontSize,
+            borderRadius: borderRadius,
+            blurStrength: blurStrength,
+          );
     });
 
     if (!syncOnly && _selectedAnnotationId != null) {
@@ -740,11 +749,27 @@ class _MainScreenState extends State<MainScreen> {
     DatabaseService.setSetting('active_capture_id', newItem.id);
   }
 
-  /// Size of the editor canvas the annotations were laid out against.
+  /// Size of the editor canvas the annotations were laid out against, or
+  /// [Size.zero] before it has been laid out. Mirrors `EditorCanvas._canvasSize`
+  /// — both read the same render box through the same key, and both report the
+  /// degenerate case rather than substituting a made-up default.
   Size get _canvasSize {
     final renderObj = _repaintKey.currentContext?.findRenderObject();
     if (renderObj is RenderBox && renderObj.hasSize) return renderObj.size;
     return Size.zero;
+  }
+
+  /// The image <-> canvas mapping for the active capture as it is laid out
+  /// right now, or null when nothing can be mapped (no capture, unknown source
+  /// dimensions, or a canvas that has not been laid out yet).
+  CanvasProjection? get _activeProjection {
+    final capture = _activeCapture;
+    if (capture == null || !capture.hasDimensions) return null;
+    final projection = CanvasProjection(
+      imageSize: Size(capture.width.toDouble(), capture.height.toDouble()),
+      canvasSize: _canvasSize,
+    );
+    return projection.isValid ? projection : null;
   }
 
   /// Renders the active capture with its annotations burned in, at the source
@@ -753,12 +778,20 @@ class _MainScreenState extends State<MainScreen> {
     final capture = _activeCapture;
     if (capture == null) return null;
 
-    final bytes = await RenderService.renderFlattenedPng(
-      imagePath: capture.filePath,
-      annotations: _annotations,
-      canvasSize: _canvasSize,
-    );
-    if (bytes != null) return bytes;
+    try {
+      final bytes = await RenderService.renderFlattenedPng(
+        imagePath: capture.filePath,
+        annotations: _annotations,
+        canvasSize: _canvasSize,
+      );
+      if (bytes != null) return bytes;
+    } on StateError catch (e) {
+      // The canvas has no size, so the annotations cannot be placed. Say so
+      // instead of handing back a file that quietly lost its markup.
+      debugPrint('SnipSnap export error: $e');
+      _showToast('Could not export: the editor is not ready. Try again.');
+      return null;
+    }
 
     // Fall back to the untouched source file rather than failing the export.
     if (File(capture.filePath).existsSync()) {
@@ -812,20 +845,34 @@ class _MainScreenState extends State<MainScreen> {
               ? AppColors.framingGradients[options.gradientIndex!]
               : null;
 
-          final exportBytes = (options.framingPadding > 0 ||
-                  options.cornerRadius > 0 ||
-                  options.shadowBlur > 0 ||
-                  gradient != null)
-              ? await RenderService.renderFlattenedPng(
-                  imagePath: _activeCapture!.filePath,
-                  annotations: _annotations,
-                  canvasSize: _canvasSize,
-                  framingPadding: options.framingPadding,
-                  cornerRadius: options.cornerRadius,
-                  shadowBlur: options.shadowBlur,
-                  framingGradient: gradient,
-                ) ?? bytes
-              : bytes;
+          final wantsFraming = options.framingPadding > 0 ||
+              options.cornerRadius > 0 ||
+              options.shadowBlur > 0 ||
+              gradient != null;
+
+          Uint8List exportBytes = bytes;
+          if (wantsFraming) {
+            // Re-renders from scratch because framing changes the output
+            // dimensions. The canvas can have gone away since the dialog
+            // opened, so this call carries the same loud-failure contract as
+            // the one in _renderAnnotatedBytes.
+            try {
+              exportBytes = await RenderService.renderFlattenedPng(
+                    imagePath: _activeCapture!.filePath,
+                    annotations: _annotations,
+                    canvasSize: _canvasSize,
+                    framingPadding: options.framingPadding,
+                    cornerRadius: options.cornerRadius,
+                    shadowBlur: options.shadowBlur,
+                    framingGradient: gradient,
+                  ) ??
+                  bytes;
+            } on StateError catch (e) {
+              debugPrint('SnipSnap export error: $e');
+              _showToast('Could not export: the editor is not ready. Try again.');
+              return;
+            }
+          }
 
           final savedPath = await StorageService.exportImageDialogWithFormat(
             bytes: exportBytes,
@@ -908,7 +955,13 @@ class _MainScreenState extends State<MainScreen> {
         imageSize: Size(decoded.width.toDouble(), decoded.height.toDouble()),
         canvasSize: canvasSize,
       );
-      if (imageRect.isEmpty) return;
+      if (imageRect.isEmpty) {
+        // Same reasoning as the export path: without a laid-out canvas the crop
+        // rectangle cannot be placed on the image at all, and silently doing
+        // nothing reads to the user as a broken button.
+        _showToast('Could not crop: the editor is not ready. Try again.');
+        return;
+      }
 
       // Canvas coordinates -> native image pixels.
       final scaleX = decoded.width / imageRect.width;
@@ -940,6 +993,14 @@ class _MainScreenState extends State<MainScreen> {
         _annotations = [];
         _selectedAnnotationId = null;
         _activeTool = CanvasTool.select;
+        // The file on disk is a different size now. The recorded dimensions
+        // feed every projection built from this capture — the toolbar's
+        // canvas -> image conversion and the legacy annotation migration — so
+        // leaving them stale silently rescales everything drawn after a crop.
+        _activeCapture = _activeCapture!.copyWith(
+          width: result.width,
+          height: result.height,
+        );
       });
       _syncCurrentCaptureAnnotations();
 

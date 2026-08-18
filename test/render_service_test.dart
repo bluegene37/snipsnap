@@ -45,8 +45,8 @@ void main() {
           fill: true,
           fillColor: Colors.red,
           borderRadius: 0,
-          startPoint: const Offset(50, 150),
-          endPoint: const Offset(350, 250),
+          startPoint: const Offset(200, 600),
+          endPoint: const Offset(1400, 1000),
         ),
       ],
       canvasSize: const Size(400, 400),
@@ -59,11 +59,14 @@ void main() {
     expect(decoded.height, 1000);
   });
 
-  test('annotations are composited into the exported pixels at the right place',
-      () async {
+  test('annotations are burned in at their stored image pixels', () async {
+    // 800x800 image in a 400x400 canvas: the image fills the canvas, so one
+    // canvas unit is two image pixels. The annotation below is stored in image
+    // pixels — which is what the editor persists — so it must land at exactly
+    // (100,100)-(300,300) of the output. Reading it as canvas coordinates
+    // instead doubles it to (200,200)-(600,600), and both assertions flip.
     final path = await _writeWhitePng(tempDir, 800, 800);
 
-    // Square image in a square canvas => the image fills the canvas 1:1 at 2x.
     final bytes = await RenderService.renderFlattenedPng(
       imagePath: path,
       annotations: [
@@ -84,16 +87,52 @@ void main() {
 
     final decoded = img.decodePng(bytes!)!;
 
-    // Canvas (200,200) is the centre of the shape -> image pixel (400,400).
-    final inside = decoded.getPixel(400, 400);
+    // Inside the stored rect; outside the misread one.
+    final inside = decoded.getPixel(150, 150);
     expect(inside.r, greaterThan(200), reason: 'annotation should be painted here');
     expect(inside.g, lessThan(80));
 
-    // Canvas (350,350) is outside the shape -> still white.
-    final outside = decoded.getPixel(700, 700);
-    expect(outside.r, greaterThan(240));
+    // Outside the stored rect; well inside the misread one.
+    final outside = decoded.getPixel(500, 500);
+    expect(outside.r, greaterThan(240),
+        reason: 'annotation must not be scaled up by the canvas factor');
     expect(outside.g, greaterThan(240));
     expect(outside.b, greaterThan(240));
+  });
+
+  test('stroke width is burned in at its stored image-pixel weight', () async {
+    // Same 2x projection. A 40 image-pixel stroke must stay 40 image pixels in
+    // the export; treating the stored value as canvas units would draw it at
+    // 80, which the outer probes catch.
+    final path = await _writeWhitePng(tempDir, 800, 800);
+
+    final bytes = await RenderService.renderFlattenedPng(
+      imagePath: path,
+      annotations: [
+        Annotation(
+          id: 'a',
+          tool: CanvasTool.line,
+          color: const Color(0xFFFF0000),
+          strokeWidth: 40,
+          startPoint: const Offset(100, 400),
+          endPoint: const Offset(700, 400),
+        ),
+      ],
+      canvasSize: const Size(400, 400),
+    );
+
+    final decoded = img.decodePng(bytes!)!;
+
+    for (final dy in [-15, 0, 15]) {
+      final p = decoded.getPixel(400, 400 + dy);
+      expect(p.r, greaterThan(200), reason: 'stroke should cover dy=$dy');
+      expect(p.g, lessThan(80), reason: 'stroke should cover dy=$dy');
+    }
+    for (final dy in [-30, 30]) {
+      final p = decoded.getPixel(400, 400 + dy);
+      expect(p.g, greaterThan(240),
+          reason: 'a 40px stroke must not reach dy=$dy; it was scaled up');
+    }
   });
 
   test('export with no annotations returns the original bytes untouched', () async {
@@ -147,6 +186,41 @@ void main() {
     // Same column, outside the region -> untouched black.
     final untouched = decoded.getPixel(160, 380);
     expect(untouched.r, 0);
+  });
+
+  test('throws rather than silently dropping annotations on a zero canvas',
+      () async {
+    final path = await _writeWhitePng(tempDir, 200, 100);
+    final annotations = [
+      Annotation(
+        id: 'a',
+        tool: CanvasTool.shape,
+        color: const Color(0xFFFF0000),
+        strokeWidth: 4.0,
+        startPoint: const Offset(10, 10),
+        endPoint: const Offset(90, 60),
+      ),
+    ];
+
+    expect(
+      () => RenderService.renderFlattenedPng(
+        imagePath: path,
+        annotations: annotations,
+        canvasSize: Size.zero,
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('still returns original bytes when there is nothing to composite',
+      () async {
+    final path = await _writeWhitePng(tempDir, 200, 100);
+    final bytes = await RenderService.renderFlattenedPng(
+      imagePath: path,
+      annotations: const [],
+      canvasSize: Size.zero,
+    );
+    expect(bytes, isNotNull);
   });
 
   test('returns null for a missing source file instead of throwing', () async {

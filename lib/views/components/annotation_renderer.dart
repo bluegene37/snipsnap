@@ -266,14 +266,26 @@ class AnnotationRenderer {
   /// Draws every annotation in order. [baseImage] and [imageRect] are only
   /// needed for blur/pixelate regions, which sample the underlying pixels; the
   /// live canvas passes null and layers a real BackdropFilter instead.
+  ///
+  /// [pixelScale] is how many native image pixels one canvas unit covers. It
+  /// affects no geometry — only the ruler's reported measurement, which has to
+  /// be in the image's own pixels rather than in display pixels that change
+  /// with the window size.
   static void paintAll(
     Canvas canvas,
     List<Annotation> annotations, {
     ui.Image? baseImage,
     Rect? imageRect,
+    double pixelScale = 1.0,
   }) {
     for (final ann in annotations) {
-      paint(canvas, ann, baseImage: baseImage, imageRect: imageRect);
+      paint(
+        canvas,
+        ann,
+        baseImage: baseImage,
+        imageRect: imageRect,
+        pixelScale: pixelScale,
+      );
     }
   }
 
@@ -282,6 +294,7 @@ class AnnotationRenderer {
     Annotation ann, {
     ui.Image? baseImage,
     Rect? imageRect,
+    double pixelScale = 1.0,
   }) {
     final bounds = boundingRect(ann);
     final rotated = ann.rotation != 0.0 && bounds != Rect.zero;
@@ -311,7 +324,7 @@ class AnnotationRenderer {
         _drawShape(canvas, ann);
         break;
       case CanvasTool.ruler:
-        _drawRuler(canvas, ann);
+        _drawRuler(canvas, ann, pixelScale);
         break;
       case CanvasTool.blur:
         _drawBlur(canvas, ann, baseImage: baseImage, imageRect: imageRect);
@@ -714,9 +727,22 @@ class AnnotationRenderer {
 
   // --- Ruler ----------------------------------------------------------------
 
+  /// Text shown in the ruler's badge.
+  ///
+  /// The annotation's geometry is in canvas units, but what the user is
+  /// measuring is the screenshot, so the reported number is scaled into the
+  /// image's native pixels. [pixelScale] is image pixels per canvas unit; 1.0
+  /// means the annotation is already in image pixels.
+  static String rulerLabel(Annotation ann, double pixelScale) {
+    final start = ann.startPoint;
+    final end = ann.endPoint;
+    if (start == null || end == null) return '';
+    return '${((end - start).distance * pixelScale).round()} px';
+  }
+
   /// Measurement tool: a capped baseline with tick marks and a pixel-distance
   /// badge, matching Shottr's ruler.
-  static void _drawRuler(Canvas canvas, Annotation ann) {
+  static void _drawRuler(Canvas canvas, Annotation ann, double pixelScale) {
     final start = ann.startPoint;
     final end = ann.endPoint;
     if (start == null || end == null) return;
@@ -750,7 +776,7 @@ class AnnotationRenderer {
     _drawBadge(
       canvas,
       center: Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2) - normal * (capHalf + 12),
-      text: '${length.round()} px',
+      text: rulerLabel(ann, pixelScale),
       background: _applyOpacity(ann.color, ann.opacity),
     );
   }

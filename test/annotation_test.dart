@@ -404,4 +404,53 @@ void main() {
       expect(restored.rect, const Rect.fromLTRB(10, 20, 30, 40));
     });
   });
+
+  group('ruler measurement', () {
+    test('the badge reports image pixels, not display pixels', () {
+      // A 3840x2160 capture shown in a 960x540 canvas is downscaled 4x, so a
+      // ruler the user drags across 100 canvas pixels is measuring 400 pixels
+      // of the actual screenshot. Reporting 100 would make the tool useless on
+      // every Retina capture.
+      final p = CanvasProjection(
+        imageSize: const Size(3840, 2160),
+        canvasSize: const Size(960, 540),
+      );
+      expect(p.scale, closeTo(4.0, 1e-9));
+
+      final ruler = Annotation(
+        id: 'r',
+        tool: CanvasTool.ruler,
+        color: const Color(0xFF000000),
+        startPoint: const Offset(20, 30),
+        endPoint: const Offset(120, 30),
+      );
+
+      expect(AnnotationRenderer.rulerLabel(ruler, p.scale), '400 px');
+      // The unscaled reading is what the badge used to show.
+      expect(AnnotationRenderer.rulerLabel(ruler, 1.0), '100 px');
+    });
+
+    test('an already image-space ruler is reported unscaled', () {
+      // The exporter replays canvas-space geometry, but a caller painting
+      // stored coordinates directly passes 1.0 and must get the raw length.
+      final ruler = Annotation(
+        id: 'r',
+        tool: CanvasTool.ruler,
+        color: const Color(0xFF000000),
+        startPoint: const Offset(0, 0),
+        endPoint: const Offset(300, 400),
+      );
+      expect(AnnotationRenderer.rulerLabel(ruler, 1.0), '500 px');
+    });
+
+    test('a ruler with no endpoint has no label', () {
+      final ruler = Annotation(
+        id: 'r',
+        tool: CanvasTool.ruler,
+        color: const Color(0xFF000000),
+        startPoint: const Offset(0, 0),
+      );
+      expect(AnnotationRenderer.rulerLabel(ruler, 4.0), '');
+    });
+  });
 }

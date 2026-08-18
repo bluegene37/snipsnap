@@ -342,10 +342,16 @@ class _EditorCanvasState extends State<EditorCanvas> {
     _transformationController.value = matrix;
   }
 
+  /// Size of the editor canvas, or [Size.zero] before it has been laid out.
+  ///
+  /// Zero rather than a plausible-looking default on purpose: this feeds the
+  /// projection, and inventing a size silently maps every annotation against a
+  /// viewport that never existed. Callers detect the degenerate case through
+  /// `CanvasProjection.isValid` and decline to convert.
   Size get _canvasSize {
     final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
     if (renderObj is RenderBox && renderObj.hasSize) return renderObj.size;
-    return const Size(800, 600);
+    return Size.zero;
   }
 
   /// Region the screenshot actually occupies inside the canvas viewport.
@@ -1934,31 +1940,35 @@ class _EditorCanvasState extends State<EditorCanvas> {
                           // size, which `_canvasSize` cannot during layout.
                           Positioned.fill(
                             child: LayoutBuilder(
-                              builder: (context, constraints) => MouseRegion(
-                                cursor: _cursor,
-                                onHover: (e) => _updateCursor(e.localPosition),
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onPanStart: _onPanStart,
-                                  onPanUpdate: _onPanUpdate,
-                                  onPanEnd: _onPanEnd,
-                                  onTapUp: _onTapUp,
-                                  child: CustomPaint(
-                                    painter: _AnnotationPainter(
-                                      annotations: _canvasAnnotationsFor(
-                                        _projectionFor(constraints.biggest),
+                              builder: (context, constraints) {
+                                final projection =
+                                    _projectionFor(constraints.biggest);
+                                return MouseRegion(
+                                  cursor: _cursor,
+                                  onHover: (e) => _updateCursor(e.localPosition),
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onPanStart: _onPanStart,
+                                    onPanUpdate: _onPanUpdate,
+                                    onPanEnd: _onPanEnd,
+                                    onTapUp: _onTapUp,
+                                    child: CustomPaint(
+                                      painter: _AnnotationPainter(
+                                        annotations:
+                                            _canvasAnnotationsFor(projection),
+                                        pixelScale: projection.scale,
+                                        currentAnnotation: _currentAnnotation,
+                                        selectedAnnotationId: _selectedAnnotationId,
+                                        editingAnnotationId: _editingAnnotationId,
+                                        baseImage: _baseImage,
+                                        showHud: _currentAnnotation != null ||
+                                            _isResizingAnnotation ||
+                                            _isDraggingAnnotation,
                                       ),
-                                      currentAnnotation: _currentAnnotation,
-                                      selectedAnnotationId: _selectedAnnotationId,
-                                      editingAnnotationId: _editingAnnotationId,
-                                      baseImage: _baseImage,
-                                      showHud: _currentAnnotation != null ||
-                                          _isResizingAnnotation ||
-                                          _isDraggingAnnotation,
                                     ),
                                   ),
-                                ),
-                              ),
+                                );
+                              },
                             ),
                           ),
 
@@ -2665,8 +2675,14 @@ class _AnnotationPainter extends CustomPainter {
   final ui.Image? baseImage;
   final bool showHud;
 
+  /// Image pixels per canvas unit, for the ruler's measurement readout. The
+  /// painter cannot derive it — the State owns the projection — so it is passed
+  /// in from `build`.
+  final double pixelScale;
+
   _AnnotationPainter({
     required this.annotations,
+    required this.pixelScale,
     this.currentAnnotation,
     this.selectedAnnotationId,
     this.editingAnnotationId,
@@ -2695,6 +2711,7 @@ class _AnnotationPainter extends CustomPainter {
       [...visibleAnnotations, ?currentAnnotation],
       baseImage: image,
       imageRect: imageRect,
+      pixelScale: pixelScale,
     );
 
     if (selectedAnnotationId != null && selectedAnnotationId != editingAnnotationId) {
@@ -2715,6 +2732,7 @@ class _AnnotationPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _AnnotationPainter oldDelegate) {
     return !listEquals(oldDelegate.annotations, annotations) ||
+        oldDelegate.pixelScale != pixelScale ||
         oldDelegate.currentAnnotation != currentAnnotation ||
         oldDelegate.selectedAnnotationId != selectedAnnotationId ||
         oldDelegate.editingAnnotationId != editingAnnotationId ||
