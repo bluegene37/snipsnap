@@ -1,4 +1,4 @@
-# SnipSnap: Text Extraction (OCR) + Production Hardening
+# SnipSnap: Text Extraction, Production Hardening, and the Skeleton Theme
 
 **Date:** 2026-08-18
 **Status:** Draft for review
