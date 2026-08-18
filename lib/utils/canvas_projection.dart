@@ -93,7 +93,8 @@ CoordSpace coordSpaceByName(String? name) {
   return CoordSpace.viewport;
 }
 
-/// Converts pre-v4 annotations from viewport coordinates into image pixels.
+/// Converts pre-v4 annotations from viewport coordinates into image pixels,
+/// and reports whether the conversion actually ran.
 ///
 /// The viewport that produced these numbers was never recorded, so the current
 /// canvas is used as the best available estimate. This is exact when the window
@@ -101,15 +102,41 @@ CoordSpace coordSpaceByName(String? name) {
 /// accuracy the rows already had, with the drift frozen instead of recurring on
 /// every later resize.
 ///
-/// Returns the input unchanged when the projection is invalid, so a conversion
-/// can never scramble coordinates using a degenerate transform.
-List<Annotation> convertLegacyAnnotations({
+/// `converted` is false, and `annotations` is the input returned untouched,
+/// when the projection is degenerate. Callers MUST branch on `converted`
+/// before clearing any "needs conversion" flag or persisting the result: a
+/// `false` here means nothing was actually converted, so the caller must
+/// leave the pending-conversion state as-is and let a later attempt (with a
+/// laid-out canvas) retry, rather than permanently mislabeling still-viewport
+/// data as image pixels.
+({List<Annotation> annotations, bool converted}) convertLegacyAnnotationsChecked({
   required List<Annotation> annotations,
   required Size imageSize,
   required Size canvasSize,
 }) {
   final projection =
       CanvasProjection(imageSize: imageSize, canvasSize: canvasSize);
-  if (!projection.isValid) return annotations;
-  return annotations.map((a) => a.mappedToImageSpace(projection)).toList();
+  if (!projection.isValid) {
+    return (annotations: annotations, converted: false);
+  }
+  return (
+    annotations: annotations.map((a) => a.mappedToImageSpace(projection)).toList(),
+    converted: true,
+  );
+}
+
+/// Convenience wrapper over [convertLegacyAnnotationsChecked] for callers
+/// that don't need to know whether the conversion actually ran (i.e. that
+/// have no "needs conversion" flag to guard). Most callers should prefer the
+/// checked version — see its doc comment for why.
+List<Annotation> convertLegacyAnnotations({
+  required List<Annotation> annotations,
+  required Size imageSize,
+  required Size canvasSize,
+}) {
+  return convertLegacyAnnotationsChecked(
+    annotations: annotations,
+    imageSize: imageSize,
+    canvasSize: canvasSize,
+  ).annotations;
 }

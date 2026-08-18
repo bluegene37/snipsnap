@@ -199,7 +199,15 @@ class _MainScreenState extends State<MainScreen> {
     // Flush any annotation edit still waiting on the debounce timer.
     _persistDebounce?.cancel();
     final pending = _activeCapture;
-    if (pending != null) StorageService.saveCaptureItem(pending);
+    // Same reasoning as the guard in _syncCurrentCaptureAnnotations: a
+    // capture still waiting on legacy-coordinate conversion must not be
+    // saved directly, since every save unconditionally stamps
+    // coordSpace = imagePixels — closing the app on an unconverted legacy
+    // capture before its post-frame conversion callback runs would otherwise
+    // permanently mislabel its still-viewport annotations.
+    if (pending != null && !pending.annotationsNeedConversion) {
+      StorageService.saveCaptureItem(pending);
+    }
     super.dispose();
   }
 
@@ -243,6 +251,16 @@ class _MainScreenState extends State<MainScreen> {
   /// without it every pointer move would run a SQLite transaction.
   void _syncCurrentCaptureAnnotations({bool debounce = false}) {
     if (_activeCapture == null) return;
+
+    // A legacy capture's annotations are still in viewport coordinates until
+    // _convertActiveCaptureAnnotations runs and clears this flag. Every save
+    // unconditionally stamps coordSpace = imagePixels on every row (see
+    // DatabaseService._convertAnnotationToCompanion), so persisting here
+    // before that conversion has actually happened would permanently
+    // mislabel still-viewport data as image pixels. Nothing has touched
+    // these annotations yet in that state, so skipping the write loses
+    // nothing — the pending conversion will persist them once it runs.
+    if (_activeCapture!.annotationsNeedConversion) return;
 
     final updatedItem = _activeCapture!.copyWith(annotations: List.from(_annotations));
     _activeCapture = updatedItem;
@@ -296,8 +314,10 @@ class _MainScreenState extends State<MainScreen> {
 
   /// One-time migration of a pre-v4 capture's annotations into image pixels.
   Future<void> _convertActiveCaptureAnnotations() async {
-    var capture = _activeCapture;
-    if (capture == null || !capture.annotationsNeedConversion) return;
+    final original = _activeCapture;
+    if (original == null || !original.annotationsNeedConversion) return;
+
+    var capture = original;
 
     // Captures written before Task 1 have no recorded dimensions, which is the
     // common case for existing installs. Decode once to recover them.
@@ -310,21 +330,37 @@ class _MainScreenState extends State<MainScreen> {
         debugPrint('SnipSnap legacy dimension read error: $e');
         return;
       }
-      if (!mounted) return;
+      // The decode above is the only await in this method. If the user
+      // switched to a different capture while it was in flight, _activeCapture
+      // now points elsewhere: abort without writing anything, so we neither
+      // map the newly-selected capture's annotations against this capture's
+      // dimensions nor clobber the user's new selection by overwriting
+      // _activeCapture with this stale one. The newly active capture (if it
+      // also needs conversion) schedules its own run.
+      if (!mounted || _activeCapture?.id != original.id) return;
     }
 
     final imageSize = Size(capture.width.toDouble(), capture.height.toDouble());
-    final converted = convertLegacyAnnotations(
+    final result = convertLegacyAnnotationsChecked(
       annotations: _annotations,
       imageSize: imageSize,
       canvasSize: _canvasSize,
     );
 
+    // A degenerate canvas means the projection was invalid and nothing was
+    // actually converted (convertLegacyAnnotationsChecked returned the input
+    // untouched). Leave annotationsNeedConversion set so a later load, once
+    // the canvas has a real size, retries instead of permanently mislabeling
+    // still-viewport data as image pixels.
+    if (!result.converted) return;
+
     final resolved = capture;
     setState(() {
-      _annotations = converted;
-      _activeCapture =
-          resolved.copyWith(annotationsNeedConversion: false, annotations: converted);
+      _annotations = result.annotations;
+      _activeCapture = resolved.copyWith(
+        annotationsNeedConversion: false,
+        annotations: result.annotations,
+      );
     });
     // Rewrites the rows with coordSpace = imagePixels so this never runs again.
     _syncCurrentCaptureAnnotations();
