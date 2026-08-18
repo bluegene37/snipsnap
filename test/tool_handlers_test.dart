@@ -188,11 +188,22 @@ void main() {
       final handler = LineToolHandler(delegate);
 
       handler.onPanStart(_dragStart(const Offset(0, 0)), const Offset(0, 0));
-      // Drag at ~10 degrees (almost horizontal) -> should snap to 0 degrees (horizontal)
-      handler.onPanUpdate(_dragUpdate(const Offset(100, 15)), const Offset(100, 15));
+      // 2.9 degrees — below the 7.5 degree boundary, so it snaps to horizontal.
+      handler.onPanUpdate(_dragUpdate(const Offset(100, 5)), const Offset(100, 5));
       final end = delegate.currentAnnotation!.endPoint!;
       expect(end.dy, closeTo(0.0, 1e-4));
       expect(end.dx, greaterThan(95));
+    });
+
+    test('shift-snaps a 10-degree drag up to the 15-degree increment', () {
+      final delegate = MockToolDelegate()..isShiftDown = true;
+      final handler = LineToolHandler(delegate);
+
+      handler.onPanStart(_dragStart(const Offset(0, 0)), const Offset(0, 0));
+      handler.onPanUpdate(_dragUpdate(const Offset(100, 18)), const Offset(100, 18));
+      final end = delegate.currentAnnotation!.endPoint!;
+      // 10.2 degrees rounds to 15, so dy = |end| * sin(15deg) > 0.
+      expect(end.dy, greaterThan(20));
     });
   });
 
