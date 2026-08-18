@@ -49,4 +49,87 @@ void main() {
     expect(result.plainText, isEmpty);
     expect(result.isEmpty, isTrue);
   });
+
+  test('tolerates a line with missing rect coordinates', () {
+    final result = OcrResult.fromChannelMap(const {
+      'width': 100,
+      'height': 100,
+      'lines': [
+        {'text': 'no coords', 'confidence': 0.9, 'words': []},
+      ],
+    });
+    expect(result.lines, hasLength(1));
+    expect(result.lines.single.text, 'no coords');
+    expect(result.lines.single.boundsPx, const Rect.fromLTWH(0, 0, 0, 0));
+  });
+
+  test('tolerates non-Map entries in lines array', () {
+    final result = OcrResult.fromChannelMap({
+      'width': 100,
+      'height': 100,
+      'lines': [
+        {'text': 'valid', 'x': 10.0, 'y': 20.0, 'w': 30.0, 'h': 15.0, 'confidence': 0.95, 'words': []},
+        'invalid string entry',
+        null,
+        {
+          'text': 'another valid',
+          'x': 50.0,
+          'y': 70.0,
+          'w': 40.0,
+          'h': 15.0,
+          'confidence': 0.92,
+          'words': [],
+        },
+      ],
+    });
+    expect(result.lines, hasLength(2));
+    expect(result.lines.first.text, 'valid');
+    expect(result.lines.last.text, 'another valid');
+  });
+
+  test('tolerates wrong-typed lines value', () {
+    final result = OcrResult.fromChannelMap(const {
+      'width': 100,
+      'height': 100,
+      'lines': 'should be a list',
+    });
+    expect(result.lines, isEmpty);
+    expect(result.imageSize, const Size(100, 100));
+  });
+
+  test('tolerates non-Map entries in words array', () {
+    final result = OcrResult.fromChannelMap(const {
+      'width': 100,
+      'height': 100,
+      'lines': [
+        {
+          'text': 'mixed words',
+          'x': 10.0,
+          'y': 20.0,
+          'w': 100.0,
+          'h': 15.0,
+          'confidence': 0.9,
+          'words': [
+            {'text': 'valid', 'x': 10.0, 'y': 20.0, 'w': 30.0, 'h': 15.0, 'confidence': 0.95},
+            'invalid',
+            null,
+            {'text': 'also valid', 'x': 45.0, 'y': 20.0, 'w': 55.0, 'h': 15.0, 'confidence': 0.93},
+          ],
+        },
+      ],
+    });
+    expect(result.lines, hasLength(1));
+    expect(result.lines.single.words, hasLength(2));
+    expect(result.lines.single.words.first.text, 'valid');
+    expect(result.lines.single.words.last.text, 'also valid');
+  });
+
+  test('tolerates wrong-typed width and height', () {
+    final result = OcrResult.fromChannelMap(const {
+      'width': 'not a number',
+      'height': 'also not a number',
+      'lines': [],
+    });
+    expect(result.imageSize, const Size(0, 0));
+  });
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
-/// One recognised word, positioned in **native image pixels**.
+/// One recognised word, positioned in **native image pixels** (top-left origin).
 @immutable
 class OcrWord {
   final String text;
@@ -15,7 +15,7 @@ class OcrWord {
   });
 }
 
-/// One recognised line, positioned in native image pixels.
+/// One recognised line, positioned in native image pixels (top-left origin).
 @immutable
 class OcrLine {
   final String text;
@@ -46,38 +46,44 @@ class OcrResult {
   String get plainText => lines.map((l) => l.text).join('\n');
 
   static Rect _rect(Map<Object?, Object?> m) => Rect.fromLTWH(
-        (m['x'] as num).toDouble(),
-        (m['y'] as num).toDouble(),
-        (m['w'] as num).toDouble(),
-        (m['h'] as num).toDouble(),
+        (m['x'] as num?)?.toDouble() ?? 0.0,
+        (m['y'] as num?)?.toDouble() ?? 0.0,
+        (m['w'] as num?)?.toDouble() ?? 0.0,
+        (m['h'] as num?)?.toDouble() ?? 0.0,
       );
 
   /// Builds a result from the `snipsnap/ocr` channel payload. Natives emit
   /// top-left-origin pixel coordinates, so no flipping happens here.
   factory OcrResult.fromChannelMap(Map<Object?, Object?> map) {
-    final rawLines = (map['lines'] as List?) ?? const [];
+    final rawLines = map['lines'] is List ? map['lines'] as List : const [];
+    final width = map['width'] is num ? (map['width'] as num).toDouble() : 0.0;
+    final height = map['height'] is num ? (map['height'] as num).toDouble() : 0.0;
+
     return OcrResult(
-      imageSize: Size(
-        (map['width'] as num?)?.toDouble() ?? 0,
-        (map['height'] as num?)?.toDouble() ?? 0,
-      ),
-      lines: rawLines.map((raw) {
-        final l = raw as Map<Object?, Object?>;
-        final rawWords = (l['words'] as List?) ?? const [];
-        return OcrLine(
-          text: l['text'] as String? ?? '',
-          boundsPx: _rect(l),
-          confidence: (l['confidence'] as num?)?.toDouble() ?? 0.0,
-          words: rawWords.map((rw) {
-            final w = rw as Map<Object?, Object?>;
-            return OcrWord(
-              text: w['text'] as String? ?? '',
-              boundsPx: _rect(w),
-              confidence: (w['confidence'] as num?)?.toDouble() ?? 0.0,
+      imageSize: Size(width, height),
+      lines: rawLines
+          .whereType<Map<Object?, Object?>>()
+          .map((raw) {
+            final l = raw;
+            final rawWords = l['words'] is List ? l['words'] as List : const [];
+            return OcrLine(
+              text: l['text'] as String? ?? '',
+              boundsPx: _rect(l),
+              confidence: (l['confidence'] as num?)?.toDouble() ?? 0.0,
+              words: rawWords
+                  .whereType<Map<Object?, Object?>>()
+                  .map((rw) {
+                    final w = rw;
+                    return OcrWord(
+                      text: w['text'] as String? ?? '',
+                      boundsPx: _rect(w),
+                      confidence: (w['confidence'] as num?)?.toDouble() ?? 0.0,
+                    );
+                  })
+                  .toList(),
             );
-          }).toList(),
-        );
-      }).toList(),
+          })
+          .toList(),
     );
   }
 }
