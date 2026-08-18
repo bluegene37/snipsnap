@@ -5,6 +5,7 @@ import '../database/app_database.dart';
 import '../models/annotation.dart';
 import '../models/app_shortcut.dart';
 import '../models/capture_item.dart';
+import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 
 class DatabaseService {
@@ -17,7 +18,7 @@ class DatabaseService {
 
     for (final row in rows) {
       final annRows = await db.getAnnotationsForCapture(row.id);
-      final annotations = annRows.map((a) => _convertAnnotationFromDb(a)).toList();
+      final parsed = _annotationsFor(annRows);
 
       items.add(CaptureItem(
         id: row.id,
@@ -26,10 +27,23 @@ class DatabaseService {
         createdAt: row.createdAt,
         width: row.width,
         height: row.height,
-        annotations: annotations,
+        annotations: parsed.annotations,
+        annotationsNeedConversion: parsed.needsConversion,
       ));
     }
     return items;
+  }
+
+  /// Annotations for one capture, paired with whether any of them still hold
+  /// pre-v4 viewport coordinates and need converting.
+  static ({List<Annotation> annotations, bool needsConversion}) _annotationsFor(
+    List<DbAnnotation> rows,
+  ) {
+    final converted = rows.map(convertAnnotationFromDb).toList();
+    return (
+      annotations: converted.map((r) => r.annotation).toList(),
+      needsConversion: converted.any((r) => r.space == CoordSpace.viewport),
+    );
   }
 
   /// Save single capture item (and its annotations) to Drift SQLite DB
@@ -120,7 +134,11 @@ class DatabaseService {
   };
 
   // Annotation conversion helpers
-  static Annotation _convertAnnotationFromDb(DbAnnotation a) {
+  /// An annotation as stored, together with the coordinate space its numbers
+  /// are in. Callers must convert [CoordSpace.viewport] rows before use.
+  static ({Annotation annotation, CoordSpace space}) convertAnnotationFromDb(
+    DbAnnotation a,
+  ) {
     final legacyShape = _legacyShapeTools[a.tool];
     final tool = legacyShape != null
         ? CanvasTool.shape
@@ -192,7 +210,7 @@ class DatabaseService {
       annotation = annotation.copyWith(shapeKind: legacyShape);
     }
 
-    return annotation;
+    return (annotation: annotation, space: coordSpaceByName(a.coordSpace));
   }
 
   static AnnotationsCompanion _convertAnnotationToCompanion(
@@ -221,6 +239,7 @@ class DatabaseService {
       endY: Value(a.endPoint?.dy),
       opacity: Value(a.opacity),
       zIndex: Value(zIndex),
+      coordSpace: Value(CoordSpace.imagePixels.name),
     );
   }
 }

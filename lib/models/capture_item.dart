@@ -9,6 +9,10 @@ class CaptureItem {
   final int height;
   final List<Annotation> annotations;
 
+  /// True when this capture's annotations were loaded from pre-v4 rows and
+  /// still hold viewport coordinates. Cleared once converted.
+  final bool annotationsNeedConversion;
+
   CaptureItem({
     required this.id,
     required this.filePath,
@@ -17,6 +21,7 @@ class CaptureItem {
     this.width = 0,
     this.height = 0,
     this.annotations = const [],
+    this.annotationsNeedConversion = false,
   });
 
   /// True when both dimensions were recorded. Captures created before
@@ -31,6 +36,7 @@ class CaptureItem {
     int? width,
     int? height,
     List<Annotation>? annotations,
+    bool? annotationsNeedConversion,
   }) {
     return CaptureItem(
       id: id ?? this.id,
@@ -40,6 +46,7 @@ class CaptureItem {
       width: width ?? this.width,
       height: height ?? this.height,
       annotations: annotations ?? this.annotations,
+      annotationsNeedConversion: annotationsNeedConversion ?? this.annotationsNeedConversion,
     );
   }
 

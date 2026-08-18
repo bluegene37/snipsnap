@@ -47,6 +47,10 @@ class Annotations extends Table {
   /// Preserves layer order (back to front) independently of insert time.
   IntColumn get zIndex => integer().withDefault(const Constant(0))();
 
+  /// Which coordinate system [startX]/[startY]/[endX]/[endY]/[pointsJson] and
+  /// the scalar dimensions are expressed in. Pre-v4 rows are 'viewport'.
+  TextColumn get coordSpace => text().withDefault(const Constant('viewport'))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -77,7 +81,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
@@ -93,6 +97,9 @@ class AppDatabase extends _$AppDatabase {
         if (from < 3) {
           await m.addColumn(annotations, annotations.propsJson);
           await m.addColumn(annotations, annotations.zIndex);
+        }
+        if (from < 4) {
+          await m.addColumn(annotations, annotations.coordSpace);
         }
       },
     );

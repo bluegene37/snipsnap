@@ -75,3 +75,19 @@ class CanvasProjection {
   @override
   int get hashCode => Object.hash(imageSize, canvasSize);
 }
+
+/// Which coordinate system a persisted annotation's numbers are in.
+///
+/// Rows written before schema v4 are [viewport] — canvas coordinates whose
+/// originating viewport was never recorded. They are converted once on load
+/// and rewritten as [imagePixels].
+enum CoordSpace { viewport, imagePixels }
+
+/// Parses a persisted [CoordSpace] name. Unknown and missing values fall back
+/// to [CoordSpace.viewport] so pre-v4 rows are handled correctly by default.
+CoordSpace coordSpaceByName(String? name) {
+  for (final s in CoordSpace.values) {
+    if (s.name == name) return s;
+  }
+  return CoordSpace.viewport;
+}
