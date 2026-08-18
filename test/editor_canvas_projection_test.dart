@@ -186,6 +186,26 @@ void main() {
       );
     });
 
+    test('_onPanEnd clears the in-flight preview after the hand-off', () {
+      // Ghost-preview regression. Handlers null `_currentAnnotation` themselves,
+      // but only the handler for the tool active *at mouse-up* runs, and the
+      // canvas's own single-letter tool shortcuts fire mid-drag. Land on text,
+      // fill, colorPicker, stepMarker or select and that handler's `onPanEnd`
+      // is an empty body, so the half-drawn shape paints forever — unlistable,
+      // unselectable, undeletable. The canvas has to clear it itself.
+      final body = _bodyOf(source, 'void _onPanEnd(');
+      final handOff = body.indexOf('_toolHandler.onPanEnd(');
+      expect(handOff, isNot(-1), reason: '_onPanEnd must delegate to the handler');
+      final cleared = body.indexOf('_currentAnnotation = null', handOff);
+      expect(
+        cleared,
+        isNot(-1),
+        reason: 'the canvas must clear _currentAnnotation after delegating, '
+            'instead of trusting whichever handler happens to answer at '
+            'mouse-up to have a non-empty onPanEnd',
+      );
+    });
+
     test('delegate writes route through the converting helpers', () {
       expect(
         _bodyOf(source, 'void onAnnotationAdded('),

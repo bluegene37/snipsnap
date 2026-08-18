@@ -42,10 +42,10 @@ class CropToolHandler extends ToolHandler {
       if (rect != null && rect.width >= 15 && rect.height >= 15) {
         delegate.onCurrentAnnotationChanged(null);
       } else {
-        // Too small to be a deliberate crop — discard it and leave the
-        // existing rect alone rather than inventing an 800x600 default, which
-        // would jump the user's crop box to an arbitrary rectangle that has
-        // nothing to do with the image on screen.
+        // Too small to be a deliberate crop — drop the rect entirely so the
+        // caller can fall back to its own default, rather than inventing an
+        // 800x600 one here. That number was unrelated to the image on screen
+        // and would jump the user's crop box to an arbitrary rectangle.
         delegate.onActiveCropRectChanged(null);
         delegate.onCurrentAnnotationChanged(null);
       }

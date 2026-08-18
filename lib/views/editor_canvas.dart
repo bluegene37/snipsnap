@@ -1335,10 +1335,28 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       return;
     }
 
-    // The handler decides whether the drag was big enough to keep, commits it
-    // through `onAnnotationAdded`, and clears `_currentAnnotation` on its way
-    // out. Only `_drawStart` is the canvas's to reset.
+    // The handler decides whether the drag was big enough to keep and commits
+    // it through `onAnnotationAdded`.
     _toolHandler.onPanEnd(details);
+
+    // Then the canvas clears the in-flight preview itself, unconditionally.
+    //
+    // Handlers do null it on their way out, but only the handler for the tool
+    // that is active *at mouse-up* runs — and the canvas owns single-letter
+    // tool shortcuts on its own FocusNode (`_handleKeyEvent`), which fire
+    // mid-drag. Change tool between pan start and pan end and `_toolHandler`
+    // rebuilds for the new tool, whose `onPanEnd` is an empty body for text,
+    // fill, colorPicker, stepMarker and select. The half-drawn shape would then
+    // keep painting forever: not in the annotation list, so it cannot be
+    // selected or deleted, and only the next drag replaces it.
+    //
+    // Clearing here rather than invalidating the cached handler on a tool
+    // change is deliberate — it holds no matter which handler answers,
+    // including future ones with an empty `onPanEnd`, instead of spreading the
+    // invariant across `didUpdateWidget`. It is safe because every handler
+    // reads `delegate.currentAnnotation` before returning, so the commit above
+    // has already happened.
+    setState(() => _currentAnnotation = null);
     _drawStart = null;
   }
 
