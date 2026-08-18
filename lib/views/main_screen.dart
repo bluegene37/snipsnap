@@ -16,6 +16,7 @@ import '../services/database_service.dart';
 import '../services/render_service.dart';
 import '../services/shortcut_service.dart';
 import '../services/storage_service.dart';
+import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 import '../utils/image_operations.dart';
 import 'components/header_bar.dart';
@@ -283,7 +284,50 @@ class _MainScreenState extends State<MainScreen> {
           _stepCounter = _findMaxStepNumber(_annotations) + 1;
         }
       });
+
+      if (_activeCapture != null && _activeCapture!.annotationsNeedConversion) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _convertActiveCaptureAnnotations();
+        });
+      }
     }
+  }
+
+  /// One-time migration of a pre-v4 capture's annotations into image pixels.
+  Future<void> _convertActiveCaptureAnnotations() async {
+    var capture = _activeCapture;
+    if (capture == null || !capture.annotationsNeedConversion) return;
+
+    // Captures written before Task 1 have no recorded dimensions, which is the
+    // common case for existing installs. Decode once to recover them.
+    if (!capture.hasDimensions) {
+      try {
+        final decoded = img.decodeImage(await File(capture.filePath).readAsBytes());
+        if (decoded == null) return;
+        capture = capture.copyWith(width: decoded.width, height: decoded.height);
+      } catch (e) {
+        debugPrint('SnipSnap legacy dimension read error: $e');
+        return;
+      }
+      if (!mounted) return;
+    }
+
+    final imageSize = Size(capture.width.toDouble(), capture.height.toDouble());
+    final converted = convertLegacyAnnotations(
+      annotations: _annotations,
+      imageSize: imageSize,
+      canvasSize: _canvasSize,
+    );
+
+    final resolved = capture;
+    setState(() {
+      _annotations = converted;
+      _activeCapture =
+          resolved.copyWith(annotationsNeedConversion: false, annotations: converted);
+    });
+    // Rewrites the rows with coordSpace = imagePixels so this never runs again.
+    _syncCurrentCaptureAnnotations();
   }
 
   Future<void> _loadShortcuts() async {
@@ -1210,6 +1254,12 @@ class _MainScreenState extends State<MainScreen> {
                       _stepCounter = _findMaxStepNumber(item.annotations) + 1;
                     });
                     DatabaseService.setSetting('active_capture_id', item.id);
+                    if (item.annotationsNeedConversion) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (!mounted) return;
+                        _convertActiveCaptureAnnotations();
+                      });
+                    }
                   },
                   onDeleteItem: (item) async {
                     if (_activeCapture?.id == item.id) {

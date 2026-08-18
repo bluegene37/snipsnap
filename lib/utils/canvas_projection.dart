@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
+import '../models/annotation.dart';
 import '../services/render_service.dart';
 
 /// Converts between canvas (viewport) coordinates and native image pixels.
@@ -90,4 +91,25 @@ CoordSpace coordSpaceByName(String? name) {
     if (s.name == name) return s;
   }
   return CoordSpace.viewport;
+}
+
+/// Converts pre-v4 annotations from viewport coordinates into image pixels.
+///
+/// The viewport that produced these numbers was never recorded, so the current
+/// canvas is used as the best available estimate. This is exact when the window
+/// is the size it was at draw time and approximate otherwise — the same
+/// accuracy the rows already had, with the drift frozen instead of recurring on
+/// every later resize.
+///
+/// Returns the input unchanged when the projection is invalid, so a conversion
+/// can never scramble coordinates using a degenerate transform.
+List<Annotation> convertLegacyAnnotations({
+  required List<Annotation> annotations,
+  required Size imageSize,
+  required Size canvasSize,
+}) {
+  final projection =
+      CanvasProjection(imageSize: imageSize, canvasSize: canvasSize);
+  if (!projection.isValid) return annotations;
+  return annotations.map((a) => a.mappedToImageSpace(projection)).toList();
 }
