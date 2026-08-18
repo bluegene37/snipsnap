@@ -5,14 +5,16 @@
 
 ## Summary
 
-Add a text-extraction (OCR) tool to SnipSnap using the OCR engines built into
-macOS and Windows, and fix the correctness and platform defects that block a
-production release.
+Three pieces of work: add a text-extraction (OCR) tool built on the OCR engines
+already in macOS and Windows; fix the correctness and platform defects that
+block a production release; and add a monochrome "skeleton" theme as a third
+mode alongside dark and light.
 
-The two halves are sequenced deliberately: OCR needs to map a canvas drag
-rectangle to native image pixels, and that mapping is currently broken. Building
-OCR on today's coordinate system would inherit the bug, so the coordinate rework
-lands first.
+The order is not arbitrary. OCR needs to map a canvas drag rectangle to native
+image pixels, and that mapping is currently broken — so the coordinate rework
+lands first. The theme needs a token layer that does not exist yet, and that
+refactor touches nearly every view file — so it lands last, after the
+behavioral work is stable.
 
 ## Goals
 
@@ -22,6 +24,8 @@ lands first.
 - Fix the defects that make the app unsafe to ship: coordinate drift, silent
   annotation loss on export, broken Linux clipboard, unbounded temp files and
   undo memory.
+- Replace 212 hardcoded theme branches with a token layer, and ship a
+  monochrome skeleton mode on top of it.
 - Leave a seam for Linux OCR without designing for it now.
 
 ## Non-Goals
@@ -31,6 +35,8 @@ lands first.
 - Handwriting recognition, PDF export, translation, cloud engines.
 - Rewriting `EditorCanvas` wholesale. Targeted extraction only, where it serves
   this work.
+- Restyling annotations. Skeleton changes app chrome only; markup stays in full
+  color.
 
 ---
 
@@ -226,6 +232,86 @@ ScreenCaptureKit, or dropping the sandbox — and is out of scope here.
 
 ---
 
+# Part 3 — Skeleton Theme
+
+## 3.1 The blocker: there is no theming layer
+
+`AppColors` is a set of static constants and widgets branch on an `isDarkMode`
+boolean — **212 occurrences across 10 files**. `ThemeData` is declared at
+`main_screen.dart:884` but almost nothing reads `Theme.of(context)`.
+
+That is a two-valued switch. A third mode cannot be added by extending it; 212
+three-way ternaries is not maintainable. The boolean must become a token object
+first.
+
+```dart
+enum SnipThemeMode { dark, light, skeleton }
+
+class SnipTheme {
+  final Color canvas, surface, surfaceRaised, ink, inkMuted, inkFaint;
+  final Color border, borderStrong, activeFill, onActive;
+  final double borderWidth, activeBorderWidth, radius;
+  final bool usesFills;
+  final TextTheme text;
+}
+```
+
+Provided via `InheritedWidget` and read as `SnipTheme.of(context)`. Every
+`isDarkMode ? a : b` becomes a token reference. This is mechanical but broad —
+it is the single largest diff in the plan, and it is a prerequisite for the
+theme, not optional groundwork.
+
+## 3.2 State without color
+
+Skeleton removes both color and fill, which are the two things the app
+currently uses to show state — and this app carries a lot of it: active tool,
+8 shape kinds, filled-vs-hollow, dashed-vs-solid, a dozen sliders. Inversion
+does that work instead.
+
+| State | Treatment |
+|---|---|
+| Inactive | 1px hairline border, muted label, no fill |
+| Hover | Border darkens to `borderStrong`; no fill, no movement |
+| **Active / selected** | **Solid black fill, icon and label knocked out in white** |
+| Disabled | Dashed hairline, label at 40% |
+| Focused | 1px offset outer ring |
+
+The inversion is the whole system, applied uniformly:
+
+- **Tool buttons** — outline at rest, solid black plate when selected.
+- **Toggles** — hairline pill, solid black knob; the knob's position and fill
+  both carry the state.
+- **Sliders** — hairline track, solid black thumb; filled portion of the track
+  is a 2px black rule against a 1px gray one.
+- **Canvas** — dashed hairline boundary so the image reads as a mounted plate.
+- **Panels** — separated by hairlines only. No elevation, no shadow, no fills.
+
+**One deliberate exception:** color swatches and the active-color indicator
+render in real color. They are data, not chrome — a monochrome color picker is
+a broken color picker.
+
+## 3.3 What stays in color
+
+Annotations are unaffected. Red arrows and yellow highlighter are the product;
+only the chrome around the canvas goes monochrome. `AppColors.palette` and
+`framingGradients` are untouched by this work.
+
+## 3.4 Typography
+
+Skeleton lives or dies on type, since there is no color doing hierarchy. One
+family, four sizes, two weights (400/500). Weight and spacing carry hierarchy
+rather than color or size jumps. `google_fonts` stays, restricted to a single
+family so the app stops mixing defaults.
+
+## 3.5 Persistence
+
+The stored `theme_mode` setting is currently `'dark' | 'light'`. It becomes a
+three-value enum; unrecognized values fall back to `dark` so existing installs
+are unaffected. The header's theme control becomes a three-way cycle rather
+than a toggle.
+
+---
+
 # Sequencing
 
 **Phase 1 — Coordinate correctness.** Normalization, schema v4 migration, ruler
@@ -238,6 +324,12 @@ fix, `Size.zero` fix. Prerequisite for everything else.
 WinRT, then the tool and result panel.
 
 **Phase 4 — Platform and resource fixes.** Section 2.4 remainder.
+
+**Phase 5 — Theming.** Token layer replacing 212 boolean branches, then the
+skeleton mode and the three-way theme setting. Sequenced last deliberately: it
+touches nearly every view file, so running it after the functional work avoids
+rebasing behavioral changes across a large cosmetic diff. The OCR result panel
+(Phase 3) is built against tokens from the start so it needs no rework.
 
 Each phase is independently shippable and leaves the app in a working state.
 
@@ -255,6 +347,12 @@ Each phase is independently shippable and leaves the app in a working state.
   failing loudly.
 - **Native paths** — one manual smoke test per platform; not automatable in CI
   without both hosts.
+- **Theme tokens** — a test asserting every `SnipThemeMode` resolves a complete
+  token set, so a mode can never ship with a null color. `header_bar_test.dart`
+  already renders across widths; extend it across all three modes.
+- **Contrast** — assert the ink-on-surface and knocked-out-on-active pairs meet
+  WCAG AA. Skeleton has no color to fall back on, so contrast is the only thing
+  keeping it legible.
 
 # Risks
 
@@ -264,3 +362,5 @@ Each phase is independently shippable and leaves the app in a working state.
 | Windows WinRT from a Win32 Flutter runner | `Windows.Media.Ocr` is supported in desktop apps; validate early in Phase 3 |
 | Wiring `lib/tools/` in regresses gesture behavior | The two implementations have drifted; diff them explicitly rather than assuming equivalence |
 | No Windows machine available for testing | Windows OCR and capture fixes need a real host or VM; flag before Phase 3 starts |
+| Skeleton hurts state legibility — no color or fill to signal active | Inversion (§3.2) is the state system, applied uniformly, with AA contrast tests. This was raised as a concern and the direction was chosen deliberately; if it reads poorly in practice the fix is a heavier active treatment, not adding color back |
+| The 212-branch token refactor is a large mechanical diff | Sequenced last, landed as its own phase, mode-completeness tests as the net |
