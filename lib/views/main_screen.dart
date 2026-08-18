@@ -600,12 +600,12 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _handleImportImage() async {
     try {
-      final result = await FilePicker.pickFiles(
+      final result = await FilePicker.pickFile(
         type: FileType.image,
         dialogTitle: 'Select Image File',
       );
-      if (result != null && result.files.single.path != null) {
-        final path = await _captureService.importImage(result.files.single.path!);
+      if (result != null && result.path != null) {
+        final path = await _captureService.importImage(result.path!);
         if (path != null) {
           _addCaptureFromPath(path);
         }

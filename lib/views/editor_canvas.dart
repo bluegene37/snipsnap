@@ -411,7 +411,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
 
     final delta = end - start;
     if (delta.distance == 0) return end;
-    const stepRad = math.pi / 12; // 15°
+    final stepRad = tool == CanvasTool.ruler ? (math.pi / 4) : (math.pi / 12); // 45° for ruler, 15° for arrow/line
     final snapped = (math.atan2(delta.dy, delta.dx) / stepRad).round() * stepRad;
     return start + Offset(math.cos(snapped), math.sin(snapped)) * delta.distance;
   }
@@ -1015,6 +1015,15 @@ class _EditorCanvasState extends State<EditorCanvas> {
     if (_currentAnnotation == null || _drawStart == null) return;
 
     if (_freehandTools.contains(widget.activeTool)) {
+      if (widget.activeTool == CanvasTool.highlight && _isShiftDown) {
+        final start = _drawStart!;
+        final dx = (pos.dx - start.dx).abs();
+        final dy = (pos.dy - start.dy).abs();
+        final constrainedPos = dx >= dy ? Offset(pos.dx, start.dy) : Offset(start.dx, pos.dy);
+        _currentPoints = [start, constrainedPos];
+        setState(() => _currentAnnotation = _currentAnnotation!.copyWith(points: _currentPoints));
+        return;
+      }
       // Skip sub-pixel samples
       if (_currentPoints.isEmpty || (pos - _currentPoints.last).distance >= 1.5) {
         _currentPoints = [..._currentPoints, pos];
@@ -1792,11 +1801,10 @@ class _EditorCanvasState extends State<EditorCanvas> {
       child: ClipRect(
         child: Stack(
           children: [
+            // Solid dark/light workspace background (Snagit-style)
             Positioned.fill(
-              child: RepaintBoundary(
-                child: CustomPaint(
-                  painter: _SteadyCheckerboardPainter(isDarkMode: widget.isDarkMode),
-                ),
+              child: Container(
+                color: widget.isDarkMode ? AppColors.canvasBg : AppColors.canvasBgLight,
               ),
             ),
             SizedBox.expand(
@@ -1837,6 +1845,15 @@ class _EditorCanvasState extends State<EditorCanvas> {
                         alignment: Alignment.center,
                         clipBehavior: Clip.none,
                         children: [
+                          // Checkerboard directly under the image (revealed under transparent PNG pixels)
+                          Positioned.fill(
+                            child: ClipRect(
+                              child: CustomPaint(
+                                painter: _SteadyCheckerboardPainter(isDarkMode: widget.isDarkMode),
+                              ),
+                            ),
+                          ),
+
                           Image.file(
                             File(widget.imagePath!),
                             key: ValueKey('${widget.imagePath!}_${widget.imageRevision}'),
@@ -1905,6 +1922,7 @@ class _EditorCanvasState extends State<EditorCanvas> {
                                         ? Size(_baseImage!.width.toDouble(),
                                             _baseImage!.height.toDouble())
                                         : null,
+                                    isDarkMode: widget.isDarkMode,
                                   ),
                                 ),
                               ),
@@ -1983,6 +2001,12 @@ class _EditorCanvasState extends State<EditorCanvas> {
     final barLeft =
         (cropRect.center.dx - 110).clamp(12.0, math.max(12.0, size.width - 220)).toDouble();
 
+    final imageRect = _imageRect;
+    final isExpanded = cropRect.left < imageRect.left - 1 ||
+        cropRect.top < imageRect.top - 1 ||
+        cropRect.right > imageRect.right + 1 ||
+        cropRect.bottom > imageRect.bottom + 1;
+
     return Positioned(
       left: barLeft,
       top: barTop,
@@ -2007,8 +2031,10 @@ class _EditorCanvasState extends State<EditorCanvas> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
                 icon: const Icon(Icons.check_rounded, size: 16),
-                label: const Text('Apply Crop',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                label: Text(
+                  isExpanded ? 'Apply Expansion' : 'Apply Crop',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
                 onPressed: _applyCrop,
               ),
               const SizedBox(width: 8),
@@ -2221,8 +2247,10 @@ class _SteadyCheckerboardPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     const squareSize = 14.0;
-    final paint1 = Paint()..color = isDarkMode ? const Color(0xFF1B1917) : const Color(0xFFE8E2D9);
-    final paint2 = Paint()..color = isDarkMode ? const Color(0xFF262320) : const Color(0xFFF5EFE6);
+    final paint1 =
+        Paint()..color = isDarkMode ? const Color(0xFF2E2E34) : const Color(0xFFE2E2E8);
+    final paint2 =
+        Paint()..color = isDarkMode ? const Color(0xFF1E1E22) : const Color(0xFFF4F4F8);
 
     int row = 0;
     for (double y = 0; y < size.height; y += squareSize) {
@@ -2248,24 +2276,26 @@ class _CropOverlayPainter extends CustomPainter {
   final Rect cropRect;
   final Rect imageRect;
   final Size? nativeImageSize;
+  final bool isDarkMode;
 
   _CropOverlayPainter({
     required this.cropRect,
     required this.imageRect,
     this.nativeImageSize,
+    this.isDarkMode = true,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     // 1. Dark dimming mask on outside of cropRect
-    final fullRect = (Offset.zero & size).expandToInclude(cropRect).inflate(100.0);
+    final fullRect = (Offset.zero & size).expandToInclude(cropRect).inflate(200.0);
     final path = Path()
       ..addRect(fullRect)
       ..addRect(cropRect)
       ..fillType = PathFillType.evenOdd;
-    canvas.drawPath(path, Paint()..color = Colors.black.withValues(alpha: 0.55));
+    canvas.drawPath(path, Paint()..color = Colors.black.withValues(alpha: 0.65));
 
-    // 2. If cropRect extends outside imageRect, highlight the transparent canvas expansion area
+    // 2. If cropRect extends outside imageRect, render transparent checkerboard grid like Snagit!
     if (cropRect.left < imageRect.left ||
         cropRect.top < imageRect.top ||
         cropRect.right > imageRect.right ||
@@ -2274,16 +2304,17 @@ class _CropOverlayPainter extends CustomPainter {
         ..addRect(cropRect)
         ..addRect(imageRect.intersect(cropRect));
       expandedPath.fillType = PathFillType.evenOdd;
-      canvas.drawPath(
-        expandedPath,
-        Paint()..color = AppColors.accent.withValues(alpha: 0.15),
-      );
+
+      canvas.save();
+      canvas.clipPath(expandedPath);
+      _drawCheckerboardGrid(canvas, cropRect, isDarkMode);
+      canvas.restore();
     }
 
     // 3. Draw original image boundary if cropRect is adjusted
     if (cropRect != imageRect && imageRect.width > 0 && imageRect.height > 0) {
       final origBorderPaint = Paint()
-        ..color = Colors.white.withValues(alpha: 0.5)
+        ..color = Colors.white.withValues(alpha: 0.7)
         ..strokeWidth = 1.0
         ..style = PaintingStyle.stroke;
       canvas.drawRect(imageRect, origBorderPaint);
@@ -2294,7 +2325,7 @@ class _CropOverlayPainter extends CustomPainter {
       cropRect,
       Paint()
         ..color = AppColors.accent
-        ..strokeWidth = 2.0
+        ..strokeWidth = 1.8
         ..style = PaintingStyle.stroke,
     );
 
@@ -2313,7 +2344,7 @@ class _CropOverlayPainter extends CustomPainter {
     const handleSize = 9.0;
     void drawSquareHandle(Offset center) {
       final rect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
-      canvas.drawRect(rect.shift(const Offset(0, 1)), Paint()..color = Colors.black38);
+      canvas.drawRect(rect.shift(const Offset(0, 1)), Paint()..color = Colors.black45);
       canvas.drawRect(rect, Paint()..color = Colors.white);
       canvas.drawRect(
         rect,
@@ -2354,7 +2385,7 @@ class _CropOverlayPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
     )..layout();
 
-    final badgeCenter = Offset(cropRect.center.dx, cropRect.top - 16);
+    final badgeCenter = Offset(cropRect.center.dx, math.max(16, cropRect.top - 16));
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(
@@ -2366,9 +2397,38 @@ class _CropOverlayPainter extends CustomPainter {
     tp.paint(canvas, badgeCenter - Offset(tp.width / 2, tp.height / 2));
   }
 
+  static void _drawCheckerboardGrid(Canvas canvas, Rect rect, bool isDarkMode) {
+    const squareSize = 14.0;
+    final p1 = Paint()
+      ..color = isDarkMode ? const Color(0xFF2E2E34) : const Color(0xFFE2E2E8);
+    final p2 = Paint()
+      ..color = isDarkMode ? const Color(0xFF1E1E22) : const Color(0xFFF4F4F8);
+
+    final startX = (rect.left / squareSize).floor() * squareSize;
+    final startY = (rect.top / squareSize).floor() * squareSize;
+
+    for (double y = startY; y < rect.bottom; y += squareSize) {
+      for (double x = startX; x < rect.right; x += squareSize) {
+        final r = Rect.fromLTWH(
+          math.max(x, rect.left),
+          math.max(y, rect.top),
+          math.min(squareSize, rect.right - math.max(x, rect.left)),
+          math.min(squareSize, rect.bottom - math.max(y, rect.top)),
+        );
+        if (r.width > 0 && r.height > 0) {
+          final colIdx = (x / squareSize).round();
+          final rowIdx = (y / squareSize).round();
+          canvas.drawRect(r, (colIdx + rowIdx) % 2 == 0 ? p1 : p2);
+        }
+      }
+    }
+  }
+
   @override
   bool shouldRepaint(covariant _CropOverlayPainter oldDelegate) =>
-      oldDelegate.cropRect != cropRect || oldDelegate.imageRect != imageRect;
+      oldDelegate.cropRect != cropRect ||
+      oldDelegate.imageRect != imageRect ||
+      oldDelegate.isDarkMode != isDarkMode;
 }
 
 class _FloatingSelectionPainter extends CustomPainter {

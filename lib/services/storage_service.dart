@@ -66,16 +66,15 @@ class StorageService {
 
     // 1. Try native save file dialog with target filename
     try {
-      final result = await FilePicker.saveFile(
+      final savedUri = await FilePicker.saveFile(
         dialogTitle: 'Save Screenshot As',
         fileName: targetFileName,
         type: FileType.any,
+        bytes: Uint8List.fromList(bytesToSave),
       );
 
-      if (result != null && result.isNotEmpty) {
-        final finalPath = result.toLowerCase().endsWith('.$ext') ? result : '$result.$ext';
-        final file = File(finalPath);
-        await file.writeAsBytes(bytesToSave);
+      if (savedUri != null) {
+        final finalPath = savedUri.toFilePath();
         return finalPath;
       }
     } catch (e) {

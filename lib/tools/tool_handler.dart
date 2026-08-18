@@ -22,7 +22,19 @@ abstract class ToolDelegate {
   double get fontSize;
   bool get isFilled;
   Color? get textBackgroundColor;
+  Color? get fillColor;
   int get stepCounter;
+  double get blurStrength;
+  double get borderRadius;
+  ShapeKind get shapeKind;
+  LineStyle get lineStyle;
+  BlurType get blurType;
+  bool get isDoubleArrow;
+  bool get hasShadow;
+  double get fillTolerance;
+  bool get isGlobalFill;
+  bool get isShiftDown;
+  bool get isAltDown;
 
   void updateAnnotation(String id, Annotation updatedAnnotation);
   void pushAnnotationsState(List<Annotation> newAnnotations);

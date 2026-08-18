@@ -19,9 +19,10 @@ class FillToolHandler extends ToolHandler {
     if (hit != null) {
       final updated = hit.copyWith(
         fill: true,
-        color: delegate.activeColor,
+        fillColor: delegate.activeColor,
       );
       delegate.updateAnnotation(hit.id, updated);
+      delegate.onSelectedAnnotationIdChanged(hit.id);
     } else {
       delegate.onPerformCanvasFill(pos);
     }

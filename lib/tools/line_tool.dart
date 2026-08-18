@@ -5,32 +5,26 @@ import '../models/annotation.dart';
 import '../utils/constants.dart';
 import 'tool_handler.dart';
 
-class ShapeToolHandler extends ToolHandler {
-  final CanvasTool toolType;
-  final Uuid _uuid = const Uuid();
+class LineToolHandler extends ToolHandler {
+  final _uuid = const Uuid();
   Offset? _drawStart;
 
-  ShapeToolHandler(super.delegate, [this.toolType = CanvasTool.shape]);
+  LineToolHandler(super.delegate);
 
   @override
   void onPanStart(DragStartDetails details, Offset pos) {
     _drawStart = pos;
     final annotation = Annotation(
       id: _uuid.v4(),
-      tool: toolType,
+      tool: CanvasTool.line,
       color: delegate.activeColor,
       strokeWidth: delegate.strokeWidth,
       opacity: delegate.opacity,
-      fill: delegate.isFilled,
-      fillColor: delegate.fillColor,
-      borderRadius: delegate.borderRadius,
-      shapeKind: delegate.shapeKind,
       lineStyle: delegate.lineStyle,
       hasShadow: delegate.hasShadow,
       startPoint: pos,
       endPoint: pos,
     );
-    
     delegate.onCurrentAnnotationChanged(annotation);
   }
 
@@ -41,18 +35,22 @@ class ShapeToolHandler extends ToolHandler {
       var start = _drawStart!;
       var end = pos;
 
-      // Shift key locks 1:1 aspect ratio (square, perfect circle, equilateral polygon)
+      // Shift-snap to 15-degree angle increments
       if (delegate.isShiftDown) {
-        final dx = end.dx - start.dx;
-        final dy = end.dy - start.dy;
-        final size = math.max(dx.abs(), dy.abs());
-        end = Offset(
-          start.dx + size * (dx >= 0 ? 1 : -1),
-          start.dy + size * (dy >= 0 ? 1 : -1),
-        );
+        final d = end - start;
+        final length = d.distance;
+        if (length > 0) {
+          final rawAngle = math.atan2(d.dy, d.dx);
+          const step = math.pi / 12; // 15 degrees
+          final snappedAngle = (rawAngle / step).round() * step;
+          end = Offset(
+            start.dx + length * math.cos(snappedAngle),
+            start.dy + length * math.sin(snappedAngle),
+          );
+        }
       }
 
-      // Alt/Option key creates shape centered at start point
+      // Alt/Option draws symmetric line from center
       if (delegate.isAltDown) {
         final half = end - _drawStart!;
         start = _drawStart! - half;
@@ -70,8 +68,7 @@ class ShapeToolHandler extends ToolHandler {
   void onPanEnd(DragEndDetails details) {
     final current = delegate.currentAnnotation;
     if (current != null && current.startPoint != null && current.endPoint != null) {
-      final rect = Rect.fromPoints(current.startPoint!, current.endPoint!);
-      if (rect.width >= 2 && rect.height >= 2) {
+      if ((current.endPoint! - current.startPoint!).distance > 2) {
         delegate.onAnnotationAdded(current);
         delegate.onSelectedAnnotationIdChanged(current.id);
       }

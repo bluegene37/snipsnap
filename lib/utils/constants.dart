@@ -77,7 +77,7 @@ class AppColors {
   static const Color darkSurface = Color(0xFF1E1B2E);
   static const Color darkSurfaceVariant = Color(0xFF2D2942);
   static const Color sidebarBg = Color(0xFF161424);
-  static const Color canvasBg = Color(0xFF0F0D17);
+  static const Color canvasBg = Color(0xFF101014);
 
   // Light Ivory-Violet Theme Colors
   static const Color lightBg = Color(0xFFFBFBFE);
@@ -88,13 +88,16 @@ class AppColors {
 
   // Electric Violet & Complementary Annotation Palette
   static const List<Color> palette = [
-    Color(0xFF8B5CF6), // Electric Violet (Shottr Purple)
-    Color(0xFF7C3AED), // Royal Deep Purple
-    Color(0xFFEC4899), // Neon Pink
     Color(0xFFEF4444), // Crimson Red
+    Color(0xFFF97316), // Vibrant Orange
     Color(0xFFF59E0B), // Warm Amber
     Color(0xFF10B981), // Emerald Green
+    Color(0xFF06B6D4), // Cyan
     Color(0xFF0EA5E9), // Sky Blue
+    Color(0xFF6366F1), // Royal Indigo
+    Color(0xFF8B5CF6), // Electric Violet (Shottr Purple)
+    Color(0xFFEC4899), // Neon Pink
+    Color(0xFF64748B), // Slate Gray
     Color(0xFFFFFFFF), // Pure White
     Color(0xFF000000), // Pure Black
   ];

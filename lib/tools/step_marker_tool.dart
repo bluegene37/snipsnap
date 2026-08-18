@@ -30,13 +30,14 @@ class StepMarkerToolHandler extends ToolHandler {
       id: _uuid.v4(),
       tool: CanvasTool.stepMarker,
       color: delegate.activeColor,
+      fontSize: delegate.fontSize,
       opacity: delegate.opacity,
+      hasShadow: delegate.hasShadow,
       startPoint: pos,
       stepNumber: delegate.stepCounter,
     );
     delegate.onAnnotationAdded(annotation);
     delegate.onStepCounterIncremented(delegate.stepCounter + 1);
-    delegate.onToolSelected(CanvasTool.select);
     delegate.onSelectedAnnotationIdChanged(annotation.id);
   }
 }

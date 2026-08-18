@@ -290,46 +290,10 @@ class StylePicker extends StatelessWidget {
             // Quick Styles Grid for Fill Tool
             if (activeTool == CanvasTool.fill) ...[
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 10,
+                runSpacing: 10,
                 children: [
-                  _PaintBucketStyleCard(
-                    color: const Color(0xFFEF4444), // Crimson Red
-                    isSelected: selectedColor.toARGB32() == 0xFFEF4444 && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFFEF4444));
-                      onOpacityChanged(1.0);
-                    },
-                    isDarkMode: isDarkMode,
-                  ),
-                  _PaintBucketStyleCard(
-                    color: const Color(0xFF8B5CF6), // Purple
-                    isSelected: selectedColor.toARGB32() == 0xFF8B5CF6 && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFF8B5CF6));
-                      onOpacityChanged(1.0);
-                    },
-                    isDarkMode: isDarkMode,
-                  ),
-                  _PaintBucketStyleCard(
-                    color: const Color(0xFF06B6D4), // Teal
-                    isSelected: selectedColor.toARGB32() == 0xFF06B6D4 && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFF06B6D4));
-                      onOpacityChanged(1.0);
-                    },
-                    isDarkMode: isDarkMode,
-                  ),
-                  _PaintBucketStyleCard(
-                    color: const Color(0xFFF59E0B), // Orange/Amber
-                    isSelected: selectedColor.toARGB32() == 0xFFF59E0B && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFFF59E0B));
-                      onOpacityChanged(1.0);
-                    },
-                    isDarkMode: isDarkMode,
-                  ),
-                  _PaintBucketStyleCard(
+                  _CircleColorSwatch(
                     color: Colors.transparent, // Transparent Fill
                     isTransparent: true,
                     isSelected: opacity <= 0.05 || selectedColor.a == 0,
@@ -338,8 +302,79 @@ class StylePicker extends StatelessWidget {
                       onOpacityChanged(0.0);
                     },
                     isDarkMode: isDarkMode,
+                    size: 32,
                   ),
-                  _PaintBucketStyleCard(
+                  _CircleColorSwatch(
+                    color: const Color(0xFFEF4444), // Crimson Red
+                    isSelected: selectedColor.toARGB32() == 0xFFEF4444 && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFFEF4444));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                    size: 32,
+                  ),
+                  _CircleColorSwatch(
+                    color: const Color(0xFFF97316), // Orange
+                    isSelected: selectedColor.toARGB32() == 0xFFF97316 && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFFF97316));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                    size: 32,
+                  ),
+                  _CircleColorSwatch(
+                    color: const Color(0xFFF59E0B), // Amber
+                    isSelected: selectedColor.toARGB32() == 0xFFF59E0B && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFFF59E0B));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                    size: 32,
+                  ),
+                  _CircleColorSwatch(
+                    color: const Color(0xFF10B981), // Emerald Green
+                    isSelected: selectedColor.toARGB32() == 0xFF10B981 && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFF10B981));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                    size: 32,
+                  ),
+                  _CircleColorSwatch(
+                    color: const Color(0xFF06B6D4), // Cyan
+                    isSelected: selectedColor.toARGB32() == 0xFF06B6D4 && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFF06B6D4));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                    size: 32,
+                  ),
+                  _CircleColorSwatch(
+                    color: const Color(0xFF8B5CF6), // Purple
+                    isSelected: selectedColor.toARGB32() == 0xFF8B5CF6 && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFF8B5CF6));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                    size: 32,
+                  ),
+                  _CircleColorSwatch(
+                    color: const Color(0xFFEC4899), // Pink
+                    isSelected: selectedColor.toARGB32() == 0xFFEC4899 && opacity > 0.05,
+                    onTap: () {
+                      onColorChanged(const Color(0xFFEC4899));
+                      onOpacityChanged(1.0);
+                    },
+                    isDarkMode: isDarkMode,
+                    size: 32,
+                  ),
+                  _CircleColorSwatch(
                     color: const Color(0xFFFFFFFF), // Pure White
                     isSelected: selectedColor.toARGB32() == 0xFFFFFFFF && opacity > 0.05,
                     onTap: () {
@@ -347,8 +382,9 @@ class StylePicker extends StatelessWidget {
                       onOpacityChanged(1.0);
                     },
                     isDarkMode: isDarkMode,
+                    size: 32,
                   ),
-                  _PaintBucketStyleCard(
+                  _CircleColorSwatch(
                     color: const Color(0xFF64748B), // Slate Gray
                     isSelected: selectedColor.toARGB32() == 0xFF64748B && opacity > 0.05,
                     onTap: () {
@@ -356,8 +392,9 @@ class StylePicker extends StatelessWidget {
                       onOpacityChanged(1.0);
                     },
                     isDarkMode: isDarkMode,
+                    size: 32,
                   ),
-                  _PaintBucketStyleCard(
+                  _CircleColorSwatch(
                     color: const Color(0xFF000000), // Pure Black
                     isSelected: selectedColor.toARGB32() == 0xFF000000 && opacity > 0.05,
                     onTap: () {
@@ -365,6 +402,7 @@ class StylePicker extends StatelessWidget {
                       onOpacityChanged(1.0);
                     },
                     isDarkMode: isDarkMode,
+                    size: 32,
                   ),
                 ],
               ),
@@ -774,7 +812,9 @@ class StylePicker extends StatelessWidget {
             Text(
               activeTool == CanvasTool.text
                   ? 'TEXT COLOR'
-                  : (activeTool == CanvasTool.highlight ? 'HIGHLIGHTER TINT' : 'SELECTION COLOR'),
+                  : (activeTool == CanvasTool.highlight
+                      ? 'HIGHLIGHTER TINT'
+                      : (activeTool == CanvasTool.fill ? 'FILL COLOR' : 'SELECTION COLOR')),
               style: TextStyle(
                 color: subTextColor,
                 fontSize: 11,
@@ -787,6 +827,18 @@ class StylePicker extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: [
+                if (activeTool == CanvasTool.fill)
+                  _CircleColorSwatch(
+                    color: Colors.transparent,
+                    isTransparent: true,
+                    isSelected: opacity <= 0.05 || selectedColor.a == 0,
+                    onTap: () {
+                      onColorChanged(Colors.transparent);
+                      onOpacityChanged(0.0);
+                    },
+                    isDarkMode: isDarkMode,
+                    size: 30,
+                  ),
                 ...(activeTool == CanvasTool.highlight
                         ? const [
                             Color(0xFFFDE047),
@@ -798,27 +850,19 @@ class StylePicker extends StatelessWidget {
                           ]
                         : AppColors.palette)
                     .map((color) {
-                  final isSelected = selectedColor.toARGB32() == color.toARGB32();
-                  return GestureDetector(
-                    onTap: () => onColorChanged(color),
-                    child: Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isSelected ? (isDarkMode ? Colors.white : Colors.black87) : Colors.transparent,
-                          width: 2.5,
-                        ),
-                        boxShadow: isSelected
-                            ? [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 8)]
-                            : [],
-                      ),
-                      child: isSelected
-                          ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
-                          : null,
-                    ),
+                  final isSelected = selectedColor.toARGB32() == color.toARGB32() &&
+                      (activeTool != CanvasTool.fill || opacity > 0.05);
+                  return _CircleColorSwatch(
+                    color: color,
+                    isSelected: isSelected,
+                    onTap: () {
+                      onColorChanged(color);
+                      if (activeTool == CanvasTool.fill && opacity <= 0.05) {
+                        onOpacityChanged(1.0);
+                      }
+                    },
+                    isDarkMode: isDarkMode,
+                    size: 30,
                   );
                 }),
                 // Custom Color Button
@@ -1695,85 +1739,85 @@ class _RadiusPresetChip extends StatelessWidget {
   }
 }
 
-class _PaintBucketStyleCard extends StatelessWidget {
+class _CircleColorSwatch extends StatelessWidget {
   final Color color;
   final bool isTransparent;
   final bool isSelected;
   final VoidCallback onTap;
   final bool isDarkMode;
+  final double size;
 
-  const _PaintBucketStyleCard({
+  const _CircleColorSwatch({
     required this.color,
     this.isTransparent = false,
     required this.isSelected,
     required this.onTap,
     required this.isDarkMode,
+    this.size = 30.0,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cardBg = isDarkMode ? const Color(0xFF221F33) : const Color(0xFFEFEBF7);
-    final borderColor =
-        isSelected ? const Color(0xFF38BDF8) : (isDarkMode ? Colors.white12 : Colors.black12);
+    final hexString = isTransparent
+        ? 'Transparent / Erase Fill'
+        : '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
+
+    final isLightColor = color == Colors.white || color.computeLuminance() > 0.65;
 
     return Tooltip(
-      message: isTransparent
-          ? 'Transparent / Erase Fill'
-          : '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
+      message: hexString,
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 48,
-          height: 48,
+          width: size,
+          height: size,
           decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: borderColor, width: isSelected ? 2 : 1),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFF38BDF8).withValues(alpha: 0.4),
-                      blurRadius: 6,
-                    )
-                  ]
-                : null,
+            color: isTransparent ? Colors.transparent : color,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: isSelected
+                  ? (isDarkMode ? Colors.white : Colors.black87)
+                  : (isTransparent
+                      ? (isDarkMode ? Colors.white30 : Colors.black26)
+                      : (isLightColor
+                          ? (isDarkMode ? Colors.white24 : Colors.black26)
+                          : (color == Colors.black
+                              ? (isDarkMode ? Colors.white24 : Colors.transparent)
+                              : Colors.transparent))),
+              width: isSelected ? 2.5 : 1.0,
+            ),
+            boxShadow: isSelected && !isTransparent
+                ? [BoxShadow(color: color.withValues(alpha: 0.55), blurRadius: 6)]
+                : [],
           ),
           child: Stack(
             alignment: Alignment.center,
             children: [
-              if (isTransparent)
+              if (isTransparent) ...[
                 const Positioned.fill(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.all(Radius.circular(7)),
+                  child: ClipOval(
                     child: _MiniCheckerboard(),
                   ),
                 ),
-              // Paint bucket icon pouring liquid
-              Transform.rotate(
-                angle: -0.4,
-                child: Icon(
-                  Icons.format_color_fill_rounded,
-                  size: 26,
-                  color: isTransparent
-                      ? (isDarkMode ? Colors.white70 : Colors.black87)
-                      : (color == Colors.transparent
-                          ? (isDarkMode ? Colors.white70 : Colors.black87)
-                          : color),
-                ),
-              ),
-              if (isSelected)
-                Positioned(
-                  top: 2,
-                  right: 2,
-                  child: Container(
-                    padding: const EdgeInsets.all(1.5),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF38BDF8),
+                if (isSelected)
+                  Container(
+                    width: size,
+                    height: size,
+                    decoration: BoxDecoration(
                       shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.accent, width: 2.5),
                     ),
-                    child: const Icon(Icons.star_rounded, size: 10, color: Colors.white),
-                  ),
+                    child: const Icon(Icons.check_rounded, size: 16, color: AppColors.accent),
+                  )
+                else
+                  const Icon(Icons.block_rounded, size: 14, color: Colors.redAccent),
+              ] else if (isSelected) ...[
+                Icon(
+                  Icons.check_rounded,
+                  size: 16,
+                  color: isLightColor ? Colors.black87 : Colors.white,
                 ),
+              ],
             ],
           ),
         ),

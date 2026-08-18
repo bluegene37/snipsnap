@@ -9,7 +9,7 @@ class PenToolHandler extends ToolHandler {
   final Uuid _uuid = const Uuid();
   List<Offset> _currentPoints = [];
 
-  PenToolHandler(super.delegate, this.toolType);
+  PenToolHandler(super.delegate, [this.toolType = CanvasTool.pen]);
 
   @override
   void onPanStart(DragStartDetails details, Offset pos) {
@@ -20,6 +20,7 @@ class PenToolHandler extends ToolHandler {
       color: delegate.activeColor,
       strokeWidth: delegate.strokeWidth,
       opacity: delegate.opacity,
+      hasShadow: delegate.hasShadow,
       points: _currentPoints,
     );
     delegate.onCurrentAnnotationChanged(annotation);
@@ -27,25 +28,27 @@ class PenToolHandler extends ToolHandler {
 
   @override
   void onPanUpdate(DragUpdateDetails details, Offset pos) {
-    if (delegate.currentAnnotation != null) {
-      _currentPoints.add(pos);
-      final updated = delegate.currentAnnotation!.copyWith(points: _currentPoints);
-      delegate.onCurrentAnnotationChanged(updated);
+    final current = delegate.currentAnnotation;
+    if (current != null) {
+      if (_currentPoints.isEmpty || (pos - _currentPoints.last).distance >= 1.5) {
+        _currentPoints = [..._currentPoints, pos];
+        final updated = current.copyWith(points: _currentPoints);
+        delegate.onCurrentAnnotationChanged(updated);
+      }
     }
   }
 
   @override
   void onPanEnd(DragEndDetails details) {
-    if (delegate.currentAnnotation != null) {
-      delegate.onAnnotationAdded(delegate.currentAnnotation!);
-      delegate.onCurrentAnnotationChanged(null);
-      _currentPoints = [];
-      delegate.onToolSelected(CanvasTool.select);
+    final current = delegate.currentAnnotation;
+    if (current != null && current.points.length >= 2) {
+      delegate.onAnnotationAdded(current);
+      delegate.onSelectedAnnotationIdChanged(current.id);
     }
+    delegate.onCurrentAnnotationChanged(null);
+    _currentPoints = [];
   }
 
   @override
-  void onTapUp(TapUpDetails details, Offset pos) {
-    delegate.onToolSelected(CanvasTool.select);
-  }
+  void onTapUp(TapUpDetails details, Offset pos) {}
 }
