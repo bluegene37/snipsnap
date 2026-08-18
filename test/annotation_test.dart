@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/models/annotation.dart';
 import 'package:snipsnap/services/render_service.dart';
+import 'package:snipsnap/utils/canvas_projection.dart';
 import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/views/components/annotation_renderer.dart';
 
@@ -320,6 +321,76 @@ void main() {
         ),
         Rect.zero,
       );
+    });
+  });
+
+  group('coordinate space mapping', () {
+    final projection = CanvasProjection(
+      imageSize: const Size(2000, 1000),
+      canvasSize: const Size(1000, 1000),
+    );
+
+    test('round-trips geometry and scalar dimensions', () {
+      final original = Annotation(
+        id: 'x',
+        tool: CanvasTool.arrow,
+        color: const Color(0xFFFF0000),
+        strokeWidth: 4.0,
+        fontSize: 18.0,
+        borderRadius: 8.0,
+        blurStrength: 14.0,
+        startPoint: const Offset(100, 300),
+        endPoint: const Offset(400, 600),
+        controlPoint: const Offset(250, 400),
+        points: const [Offset(10, 260), Offset(20, 270)],
+        rect: const Rect.fromLTRB(100, 300, 400, 600),
+      );
+
+      final round = original
+          .mappedToImageSpace(projection)
+          .mappedToCanvasSpace(projection);
+
+      expect(round.startPoint!.dx, closeTo(100, 1e-6));
+      expect(round.startPoint!.dy, closeTo(300, 1e-6));
+      expect(round.endPoint!.dy, closeTo(600, 1e-6));
+      expect(round.controlPoint!.dx, closeTo(250, 1e-6));
+      expect(round.points.first.dx, closeTo(10, 1e-6));
+      expect(round.rect!.right, closeTo(400, 1e-6));
+      expect(round.strokeWidth, closeTo(4.0, 1e-6));
+      expect(round.fontSize, closeTo(18.0, 1e-6));
+      expect(round.borderRadius, closeTo(8.0, 1e-6));
+      expect(round.blurStrength, closeTo(14.0, 1e-6));
+    });
+
+    test('scales stroke width into image pixels', () {
+      final ann = Annotation(
+        id: 'x',
+        tool: CanvasTool.line,
+        color: const Color(0xFF000000),
+        strokeWidth: 3.0,
+        startPoint: const Offset(0, 250),
+        endPoint: const Offset(500, 250),
+      );
+      // 2000px image fitted into 1000px canvas -> scale 2.0
+      final inImage = ann.mappedToImageSpace(projection);
+      expect(inImage.strokeWidth, closeTo(6.0, 1e-6));
+      expect(inImage.startPoint!.dx, closeTo(0, 1e-6));
+      expect(inImage.endPoint!.dx, closeTo(1000, 1e-6));
+    });
+
+    test('copyWith can explicitly clear endPoint and rect', () {
+      final ann = Annotation(
+        id: 'x',
+        tool: CanvasTool.text,
+        color: const Color(0xFF000000),
+        startPoint: const Offset(1, 2),
+        endPoint: const Offset(3, 4),
+        rect: const Rect.fromLTRB(0, 0, 5, 5),
+      );
+      final cleared = ann.copyWith(endPoint: null, rect: null);
+      expect(cleared.endPoint, isNull);
+      expect(cleared.rect, isNull);
+      expect(cleared.startPoint, const Offset(1, 2));
     });
   });
 }

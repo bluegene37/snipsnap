@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 
 /// Sentinel used by [Annotation.copyWith] so nullable fields can be explicitly
@@ -90,14 +91,14 @@ class Annotation {
     Object? fillColor = _unset,
     double? strokeWidth,
     List<Offset>? points,
-    Offset? startPoint,
-    Offset? endPoint,
+    Object? startPoint = _unset,
+    Object? endPoint = _unset,
     Object? controlPoint = _unset,
     String? text,
     double? fontSize,
     int? stepNumber,
     bool? fill,
-    Rect? rect,
+    Object? rect = _unset,
     double? opacity,
     double? rotation,
     double? borderRadius,
@@ -117,8 +118,9 @@ class Annotation {
       fillColor: identical(fillColor, _unset) ? this.fillColor : fillColor as Color?,
       strokeWidth: strokeWidth ?? this.strokeWidth,
       points: points ?? this.points,
-      startPoint: startPoint ?? this.startPoint,
-      endPoint: endPoint ?? this.endPoint,
+      startPoint:
+          identical(startPoint, _unset) ? this.startPoint : startPoint as Offset?,
+      endPoint: identical(endPoint, _unset) ? this.endPoint : endPoint as Offset?,
       controlPoint: identical(controlPoint, _unset)
           ? this.controlPoint
           : controlPoint as Offset?,
@@ -126,7 +128,7 @@ class Annotation {
       fontSize: fontSize ?? this.fontSize,
       stepNumber: stepNumber ?? this.stepNumber,
       fill: fill ?? this.fill,
-      rect: rect ?? this.rect,
+      rect: identical(rect, _unset) ? this.rect : rect as Rect?,
       opacity: opacity ?? this.opacity,
       rotation: rotation ?? this.rotation,
       borderRadius: borderRadius ?? this.borderRadius,
@@ -142,11 +144,39 @@ class Annotation {
   /// Translate every geometric component of the annotation by [delta].
   Annotation translated(Offset delta) {
     return copyWith(
-      startPoint: startPoint != null ? startPoint! + delta : null,
-      endPoint: endPoint != null ? endPoint! + delta : null,
-      controlPoint: controlPoint != null ? controlPoint! + delta : null,
+      startPoint: startPoint == null ? null : startPoint! + delta,
+      endPoint: endPoint == null ? null : endPoint! + delta,
+      controlPoint: controlPoint == null ? null : controlPoint! + delta,
       points: points.map((p) => p + delta).toList(),
       rect: rect?.shift(delta),
+    );
+  }
+
+  /// Converts every geometric and scalar dimension from canvas coordinates
+  /// into native image pixels.
+  Annotation mappedToImageSpace(CanvasProjection p) =>
+      _mapped(p.toImage, p.toImageLength);
+
+  /// Inverse of [mappedToImageSpace].
+  Annotation mappedToCanvasSpace(CanvasProjection p) =>
+      _mapped(p.toCanvas, p.toCanvasLength);
+
+  Annotation _mapped(
+    Offset Function(Offset) mapPoint,
+    double Function(double) mapLength,
+  ) {
+    return copyWith(
+      startPoint: startPoint == null ? null : mapPoint(startPoint!),
+      endPoint: endPoint == null ? null : mapPoint(endPoint!),
+      controlPoint: controlPoint == null ? null : mapPoint(controlPoint!),
+      points: points.map(mapPoint).toList(),
+      rect: rect == null
+          ? null
+          : Rect.fromPoints(mapPoint(rect!.topLeft), mapPoint(rect!.bottomRight)),
+      strokeWidth: mapLength(strokeWidth),
+      fontSize: mapLength(fontSize),
+      borderRadius: mapLength(borderRadius),
+      blurStrength: mapLength(blurStrength),
     );
   }
 
