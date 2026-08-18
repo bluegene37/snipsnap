@@ -277,7 +277,14 @@ class _MainScreenState extends State<MainScreen> {
     }
     _persistDebounce = Timer(const Duration(milliseconds: 400), () {
       final pending = _activeCapture;
-      if (pending != null) StorageService.saveCaptureItem(pending);
+      // Must re-check the flag here, at fire time, not rely on the guard
+      // above at schedule time: the active capture can change during the
+      // 400ms window (e.g. the user switches to a legacy capture that still
+      // needs conversion), and this callback always persists whatever
+      // _activeCapture is when it actually fires.
+      if (pending != null && !pending.annotationsNeedConversion) {
+        StorageService.saveCaptureItem(pending);
+      }
     });
   }
 

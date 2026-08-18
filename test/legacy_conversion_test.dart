@@ -60,46 +60,37 @@ void main() {
     });
 
     test(
-        'a second conversion of already-converted output is not applied when '
-        'the caller gates on the converted/needs-conversion flag, guarding '
-        'against double-scaling', () {
-      // Mirrors the real call site (_convertActiveCaptureAnnotations): only
-      // invoke the checked conversion while a "needs conversion" flag is
-      // set, and only clear that flag once `converted` comes back true. A
-      // second pass must then be skipped entirely rather than re-scaling
-      // already-converted (image-pixel) coordinates.
+        'applying convertLegacyAnnotationsChecked a second time over its own '
+        'output double-scales the coordinates — the function has no way to '
+        'know an annotation is already in image-pixel space, which is '
+        'exactly why every call site must gate on a needs-conversion flag '
+        'and never call this twice', () {
       const imageSize = Size(2000, 2000);
       const canvasSize = Size(1000, 1000);
 
-      var needsConversion = true;
-      var annotations = [ann(const Offset(100, 100))];
+      final first = convertLegacyAnnotationsChecked(
+        annotations: [ann(const Offset(100, 100))],
+        imageSize: imageSize,
+        canvasSize: canvasSize,
+      );
+      expect(first.converted, isTrue);
+      expect(first.annotations.single.startPoint!.dx, closeTo(200, 1e-6));
+      expect(first.annotations.single.strokeWidth, closeTo(4.0, 1e-6));
 
-      if (needsConversion) {
-        final result = convertLegacyAnnotationsChecked(
-          annotations: annotations,
-          imageSize: imageSize,
-          canvasSize: canvasSize,
-        );
-        if (result.converted) {
-          annotations = result.annotations;
-          needsConversion = false;
-        }
-      }
-      expect(annotations.single.startPoint!.dx, closeTo(200, 1e-6));
-
-      // Second pass over the same annotations: the flag is now false, so a
-      // correctly-gated caller never calls convertLegacyAnnotationsChecked
-      // again, and the coordinates must be exactly what the first pass
-      // produced — not scaled a second time.
-      if (needsConversion) {
-        final result = convertLegacyAnnotationsChecked(
-          annotations: annotations,
-          imageSize: imageSize,
-          canvasSize: canvasSize,
-        );
-        annotations = result.annotations;
-      }
-      expect(annotations.single.startPoint!.dx, closeTo(200, 1e-6));
+      // Feed the already-converted output back in under the same projection,
+      // as an ungated caller would. This must NOT be a no-op: it re-applies
+      // the 2x scale on top of the first pass, landing at 4x the original —
+      // proof that the pure function offers no built-in idempotency, so the
+      // caller-side gate (check the flag before calling, clear it only once)
+      // is load-bearing, not defensive boilerplate.
+      final second = convertLegacyAnnotationsChecked(
+        annotations: first.annotations,
+        imageSize: imageSize,
+        canvasSize: canvasSize,
+      );
+      expect(second.converted, isTrue);
+      expect(second.annotations.single.startPoint!.dx, closeTo(400, 1e-6));
+      expect(second.annotations.single.strokeWidth, closeTo(8.0, 1e-6));
     });
   });
 }
