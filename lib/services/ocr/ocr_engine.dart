@@ -45,19 +45,24 @@ class OcrResult {
 
   String get plainText => lines.map((l) => l.text).join('\n');
 
+  static double _num(Object? v, double fallback) =>
+      v is num ? v.toDouble() : fallback;
+
+  static String _str(Object? v) => v is String ? v : '';
+
   static Rect _rect(Map<Object?, Object?> m) => Rect.fromLTWH(
-        (m['x'] as num?)?.toDouble() ?? 0.0,
-        (m['y'] as num?)?.toDouble() ?? 0.0,
-        (m['w'] as num?)?.toDouble() ?? 0.0,
-        (m['h'] as num?)?.toDouble() ?? 0.0,
+        _num(m['x'], 0.0),
+        _num(m['y'], 0.0),
+        _num(m['w'], 0.0),
+        _num(m['h'], 0.0),
       );
 
   /// Builds a result from the `snipsnap/ocr` channel payload. Natives emit
   /// top-left-origin pixel coordinates, so no flipping happens here.
   factory OcrResult.fromChannelMap(Map<Object?, Object?> map) {
     final rawLines = map['lines'] is List ? map['lines'] as List : const [];
-    final width = map['width'] is num ? (map['width'] as num).toDouble() : 0.0;
-    final height = map['height'] is num ? (map['height'] as num).toDouble() : 0.0;
+    final width = _num(map['width'], 0.0);
+    final height = _num(map['height'], 0.0);
 
     return OcrResult(
       imageSize: Size(width, height),
@@ -67,17 +72,17 @@ class OcrResult {
             final l = raw;
             final rawWords = l['words'] is List ? l['words'] as List : const [];
             return OcrLine(
-              text: l['text'] as String? ?? '',
+              text: _str(l['text']),
               boundsPx: _rect(l),
-              confidence: (l['confidence'] as num?)?.toDouble() ?? 0.0,
+              confidence: _num(l['confidence'], 0.0),
               words: rawWords
                   .whereType<Map<Object?, Object?>>()
                   .map((rw) {
                     final w = rw;
                     return OcrWord(
-                      text: w['text'] as String? ?? '',
+                      text: _str(w['text']),
                       boundsPx: _rect(w),
-                      confidence: (w['confidence'] as num?)?.toDouble() ?? 0.0,
+                      confidence: _num(w['confidence'], 0.0),
                     );
                   })
                   .toList(),

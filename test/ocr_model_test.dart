@@ -132,4 +132,80 @@ void main() {
     });
     expect(result.imageSize, const Size(0, 0));
   });
+
+  test('tolerates non-numeric coordinate values', () {
+    final result = OcrResult.fromChannelMap(const {
+      'width': 100,
+      'height': 100,
+      'lines': [
+        {
+          'text': 'bad coords',
+          'x': '12',
+          'y': 'abc',
+          'w': true,
+          'h': 15.0,
+          'confidence': 0.9,
+          'words': [],
+        },
+      ],
+    });
+    expect(result.lines, hasLength(1));
+    expect(result.lines.single.text, 'bad coords');
+    expect(result.lines.single.boundsPx, const Rect.fromLTWH(0, 0, 0, 15));
+  });
+
+  test('tolerates non-String text field', () {
+    final result = OcrResult.fromChannelMap(const {
+      'width': 100,
+      'height': 100,
+      'lines': [
+        {
+          'text': 5,
+          'x': 10.0,
+          'y': 20.0,
+          'w': 30.0,
+          'h': 15.0,
+          'confidence': 0.9,
+          'words': [
+            {'text': 123, 'x': 10.0, 'y': 20.0, 'w': 20.0, 'h': 15.0, 'confidence': 0.95},
+          ],
+        },
+      ],
+    });
+    expect(result.lines, hasLength(1));
+    expect(result.lines.single.text, '');
+    expect(result.lines.single.words, hasLength(1));
+    expect(result.lines.single.words.first.text, '');
+  });
+
+  test('tolerates non-numeric confidence field', () {
+    final result = OcrResult.fromChannelMap(const {
+      'width': 100,
+      'height': 100,
+      'lines': [
+        {
+          'text': 'bad confidence',
+          'x': 10.0,
+          'y': 20.0,
+          'w': 30.0,
+          'h': 15.0,
+          'confidence': 'high',
+          'words': [
+            {
+              'text': 'word',
+              'x': 10.0,
+              'y': 20.0,
+              'w': 20.0,
+              'h': 15.0,
+              'confidence': true,
+            },
+          ],
+        },
+      ],
+    });
+    expect(result.lines, hasLength(1));
+    expect(result.lines.single.confidence, 0.0);
+    expect(result.lines.single.words, hasLength(1));
+    expect(result.lines.single.words.first.confidence, 0.0);
+  });
 }
