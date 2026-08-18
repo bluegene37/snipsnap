@@ -188,6 +188,79 @@ void main() {
     expect(untouched.r, 0);
   });
 
+  test('a letterboxed projection cancels its vertical offset', () async {
+    // 800x400 image in a 400x260 canvas: contain fits the width, so the image
+    // occupies a 400x200 band centred at y=30. scale is 2.0. The stored
+    // annotation must still land at image (100,100)-(300,300); dropping the
+    // `translate(-imageRect.top)` term shifts everything down by scale*30 =
+    // 60 image pixels, which the two probes below straddle.
+    final path = await _writeWhitePng(tempDir, 800, 400);
+
+    final bytes = await RenderService.renderFlattenedPng(
+      imagePath: path,
+      annotations: [
+        Annotation(
+          id: 'a',
+          tool: CanvasTool.shape,
+          color: const Color(0xFFFF0000),
+          fill: true,
+          fillColor: const Color(0xFFFF0000),
+          borderRadius: 0,
+          strokeWidth: 1,
+          startPoint: const Offset(100, 100),
+          endPoint: const Offset(300, 300),
+        ),
+      ],
+      canvasSize: const Size(400, 260),
+    );
+
+    final decoded = img.decodePng(bytes!)!;
+
+    // Inside the stored rect, above the 60px-shifted one.
+    final top = decoded.getPixel(200, 120);
+    expect(top.r, greaterThan(200), reason: 'shape must start at image y=100');
+    expect(top.g, lessThan(80));
+
+    // Below the stored rect, inside the shifted one.
+    final below = decoded.getPixel(200, 340);
+    expect(below.g, greaterThan(240),
+        reason: 'the letterbox offset must cancel, not shift the shape down');
+  });
+
+  test('a letterboxed projection cancels its horizontal offset', () async {
+    // Transposed: a 400x800 image in the same 400x260 canvas fits the height
+    // instead, occupying a 130x260 band centred at x=135. Dropping the
+    // `translate(-imageRect.left)` term shifts everything right by
+    // scale*135 = 415 image pixels — clean off the 400px-wide image.
+    final path = await _writeWhitePng(tempDir, 400, 800);
+
+    final bytes = await RenderService.renderFlattenedPng(
+      imagePath: path,
+      annotations: [
+        Annotation(
+          id: 'a',
+          tool: CanvasTool.shape,
+          color: const Color(0xFFFF0000),
+          fill: true,
+          fillColor: const Color(0xFFFF0000),
+          borderRadius: 0,
+          strokeWidth: 1,
+          startPoint: const Offset(100, 100),
+          endPoint: const Offset(300, 300),
+        ),
+      ],
+      canvasSize: const Size(400, 260),
+    );
+
+    final decoded = img.decodePng(bytes!)!;
+
+    final inside = decoded.getPixel(200, 200);
+    expect(inside.r, greaterThan(200),
+        reason: 'the letterbox offset must cancel, not push the shape off the '
+            'right-hand edge');
+    expect(inside.g, lessThan(80));
+  });
+
   test('throws rather than silently dropping annotations on a zero canvas',
       () async {
     final path = await _writeWhitePng(tempDir, 200, 100);

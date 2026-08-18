@@ -36,6 +36,13 @@ class EditorCanvas extends StatefulWidget {
   final ValueChanged<Color>? onSampleColor;
   final ValueChanged<Offset>? onPerformCanvasFill;
 
+  /// Fired with the file path and native pixel size every time a bitmap
+  /// finishes decoding. The parent stores annotations in image pixels, so it
+  /// needs the same size this canvas projects through — reading it from here
+  /// rather than from a persisted field is what stops the two disagreeing
+  /// after any operation that rewrites the file.
+  final void Function(String imagePath, Size imageSize)? onImageSizeResolved;
+
   /// Awaited before the flood fill overwrites the source file so the caller can
   /// snapshot the original bitmap for undo.
   final Future<void> Function()? onBeforeCanvasFill;
@@ -79,6 +86,7 @@ class EditorCanvas extends StatefulWidget {
     this.onApplyCrop,
     this.onSampleColor,
     this.onPerformCanvasFill,
+    this.onImageSizeResolved,
     this.onBeforeCanvasFill,
     required this.repaintBoundaryKey,
     this.isDarkMode = false,
@@ -316,6 +324,14 @@ class _EditorCanvasState extends State<EditorCanvas> {
         _baseImage = image;
         _cachedSourceImage = decodedImg;
       });
+      if (image != null) {
+        // After the setState, never during it: the listener drives the
+        // parent's own setState.
+        widget.onImageSizeResolved?.call(
+          path,
+          Size(image.width.toDouble(), image.height.toDouble()),
+        );
+      }
     } catch (_) {}
   }
 

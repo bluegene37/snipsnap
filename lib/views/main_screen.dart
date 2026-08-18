@@ -58,6 +58,10 @@ class _MainScreenState extends State<MainScreen> {
   CaptureItem? _activeCapture;
 
   List<Annotation> _annotations = [];
+
+  /// Size of the bitmap the editor canvas has decoded, and the file it came
+  /// from. The single source of truth for [_activeProjection] — see there.
+  ({String path, Size size})? _decodedImage;
   final List<CanvasSnapshot> _undoStack = [];
   final List<CanvasSnapshot> _redoStack = [];
   static const int _maxUndoSteps = 80;
@@ -760,16 +764,63 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   /// The image <-> canvas mapping for the active capture as it is laid out
-  /// right now, or null when nothing can be mapped (no capture, unknown source
-  /// dimensions, or a canvas that has not been laid out yet).
+  /// right now, or null when nothing can be mapped (nothing decoded yet, the
+  /// decode belongs to a different file, or a canvas that has not been laid
+  /// out yet).
+  ///
+  /// The image size comes from the decoded bitmap the editor is actually
+  /// showing, never from [CaptureItem.width]/[CaptureItem.height]. The
+  /// recorded dimensions are a persisted copy that any operation rewriting the
+  /// file can leave behind — undo after a crop restores the pre-crop bitmap
+  /// without restoring the row — and a projection built from a stale size
+  /// silently rescales every later edit. Reading the decode makes staleness
+  /// impossible instead of merely unlikely, and keeps this in exact agreement
+  /// with `EditorCanvas`, which projects through the same bitmap.
   CanvasProjection? get _activeProjection {
     final capture = _activeCapture;
-    if (capture == null || !capture.hasDimensions) return null;
+    final decoded = _decodedImage;
+    // The path check rejects a decode left over from a capture the user has
+    // since switched away from.
+    if (capture == null || decoded == null || decoded.path != capture.filePath) {
+      return null;
+    }
     final projection = CanvasProjection(
-      imageSize: Size(capture.width.toDouble(), capture.height.toDouble()),
+      imageSize: decoded.size,
       canvasSize: _canvasSize,
     );
     return projection.isValid ? projection : null;
+  }
+
+  /// Native pixel size of the bitmap the editor canvas currently has decoded,
+  /// tagged with the file it came from. Reported by [EditorCanvas] every time
+  /// it (re)loads, which covers capture switches and every `_imageRevision`
+  /// bump — crop, flatten, undo, redo and flood fill alike.
+  void _handleImageSizeResolved(String imagePath, Size imageSize) {
+    if (imageSize.isEmpty) return;
+    if (_decodedImage?.path == imagePath && _decodedImage?.size == imageSize) {
+      return;
+    }
+
+    final capture = _activeCapture;
+    // The file on disk is the authority, so a recorded size that disagrees
+    // with it is repaired here rather than left to rot. This is what makes an
+    // undo that restores a pre-crop bitmap also restore the recorded row.
+    final isActive = capture != null && capture.filePath == imagePath;
+    final needsRepair = isActive &&
+        (capture.width != imageSize.width.round() ||
+            capture.height != imageSize.height.round());
+
+    setState(() {
+      _decodedImage = (path: imagePath, size: imageSize);
+      if (needsRepair) {
+        _activeCapture = capture.copyWith(
+          width: imageSize.width.round(),
+          height: imageSize.height.round(),
+        );
+      }
+    });
+
+    if (needsRepair) _syncCurrentCaptureAnnotations();
   }
 
   /// Renders the active capture with its annotations burned in, at the source
@@ -1196,6 +1247,7 @@ class _MainScreenState extends State<MainScreen> {
                             // overwrites the file, otherwise undo would restore
                             // the already-filled image.
                             onBeforeCanvasFill: () => _pushUndoState(captureImage: true),
+                            onImageSizeResolved: _handleImageSizeResolved,
                             onPerformCanvasFill: (pos) {
                               setState(() {
                                 _imageRevision++;

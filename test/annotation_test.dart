@@ -98,7 +98,15 @@ void main() {
     test('opacity and blur strength are clamped to valid ranges', () {
       expect(_rect().copyWith(opacity: 4.0).opacity, 1.0);
       expect(_rect().copyWith(opacity: -1.0).opacity, 0.0);
-      expect(_rect().copyWith(blurStrength: 900).blurStrength, 60.0);
+      // The ceiling rejects an absurd sigma; it is deliberately far above any
+      // value the slider can produce once scaled into image pixels, because a
+      // display-space bound here silently ate the top of the slider's travel.
+      expect(_rect().copyWith(blurStrength: 900).blurStrength, 900.0);
+      expect(
+        _rect().copyWith(blurStrength: 99999).blurStrength,
+        Annotation.maxBlurStrength,
+      );
+      expect(_rect().copyWith(blurStrength: 0.0).blurStrength, 1.0);
     });
   });
 

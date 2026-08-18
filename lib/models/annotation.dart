@@ -8,6 +8,21 @@ import '../utils/constants.dart';
 const Object _unset = Object();
 
 class Annotation {
+  /// Upper bound on [blurStrength], in whatever space the annotation is in.
+  ///
+  /// The bound exists to reject an absurd or corrupt sigma, not to cap what
+  /// the user can pick: the blur slider tops out at 50 *canvas* pixels, and
+  /// the stored value is that number multiplied by the projection scale. The
+  /// worst realistic scale is roughly 25x — a 1200x20000 full-page capture
+  /// letterboxed into a 1200x800 canvas occupies a 48x800 rectangle — which
+  /// puts the largest legitimate stored sigma near 1250. 2000 clears that with
+  /// headroom while still being wider than the short edge of any capture, so a
+  /// value that reaches it is meaningless by construction rather than merely
+  /// large. The old 60 was a display-space number, and once annotations moved
+  /// into image pixels it silently ate the top half of the slider's travel on
+  /// every Retina capture.
+  static const double maxBlurStrength = 2000.0;
+
   final String id;
   final CanvasTool tool;
 
@@ -79,7 +94,7 @@ class Annotation {
     this.isDoubleArrow = false,
     this.hasShadow = false,
   })  : opacity = opacity.clamp(0.0, 1.0),
-        blurStrength = blurStrength.clamp(1.0, 60.0),
+        blurStrength = blurStrength.clamp(1.0, maxBlurStrength),
         assert(strokeWidth > 0, 'strokeWidth must be > 0'),
         assert(fontSize > 0, 'fontSize must be > 0');
 

@@ -14,7 +14,13 @@ import 'package:snipsnap/utils/constants.dart';
 String _bodyOf(String source, String signature) {
   final start = source.indexOf(signature);
   expect(start, isNot(-1), reason: 'could not find `$signature` in the source');
-  final bodyStart = source.indexOf(') {\n', start);
+  // A getter has no parameter list, so its signature already ends at the
+  // opening brace. A method's does not — and when its parameters span several
+  // lines the naive `\n  }` search would stop at the `\n  }) {` that closes
+  // them — so skip past the `) {` that really opens the body.
+  final bodyStart = signature.contains('(')
+      ? source.indexOf(') {\n', start)
+      : start + signature.length;
   expect(bodyStart, isNot(-1), reason: 'could not find the body of `$signature`');
   final end = source.indexOf('\n  }', bodyStart);
   expect(end, isNot(-1), reason: 'could not find the end of `$signature`');
@@ -88,6 +94,30 @@ void main() {
       expect(updated.endPoint, stored.endPoint);
     });
 
+    test('a blur near the slider maximum survives the round trip intact', () {
+      // The blur slider tops out at 50 canvas pixels. At this capture's 2.52x
+      // scale that stores 126, which the old 1..60 clamp truncated to 60 — so
+      // everything the user picked above ~24 rendered back identically while
+      // the readout kept showing their number. Half the slider's travel was
+      // dead on the app's most common capture type.
+      final stored = arrow().withCanvasSpaceScalars(projection, blurStrength: 50);
+      expect(stored.blurStrength, closeTo(126.0, 1e-9));
+
+      // ...and it must survive the trip back out to the toolbar and the
+      // exporter, which is what makes the round trip a true identity.
+      expect(
+        stored.mappedToCanvasSpace(projection).blurStrength,
+        closeTo(50.0, 1e-9),
+      );
+    });
+
+    test('the blur ceiling still rejects an absurd sigma', () {
+      final absurd = arrow().copyWith(blurStrength: 99999.0);
+      expect(absurd.blurStrength, Annotation.maxBlurStrength);
+      final tiny = arrow().copyWith(blurStrength: 0.01);
+      expect(tiny.blurStrength, 1.0);
+    });
+
     test('a degenerate projection declines the write instead of corrupting it',
         () {
       final stored = arrow();
@@ -158,5 +188,57 @@ void main() {
         );
       });
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Where the projection's image size comes from.
+  //
+  // `CaptureItem.width`/`height` are a persisted copy of the file's dimensions.
+  // Any operation that rewrites the bitmap can leave them behind — undo after a
+  // crop restores the pre-crop pixels without restoring the row — and a
+  // projection built from a stale size rescales every later edit, which is the
+  // exact bug these tests exist to prevent. The size must therefore come from
+  // the decoded bitmap the canvas is showing.
+  // ---------------------------------------------------------------------------
+
+  group('MainScreen projects through the decoded bitmap', () {
+    late String source;
+
+    setUpAll(() {
+      source = File('lib/views/main_screen.dart').readAsStringSync();
+    });
+
+    test('_activeProjection does not read the recorded row dimensions', () {
+      final body = _bodyOf(source, 'CanvasProjection? get _activeProjection {');
+      expect(
+        body,
+        contains('_decodedImage'),
+        reason: 'the projection must be built from the decoded bitmap',
+      );
+      expect(
+        body,
+        isNot(contains('capture.width')),
+        reason: 'CaptureItem.width is a persisted copy that undo can leave '
+            'stale; a projection built from it rescales every later edit',
+      );
+      expect(body, isNot(contains('capture.height')));
+      expect(body, isNot(contains('hasDimensions')));
+    });
+
+    test('a decode from another capture cannot be used', () {
+      final body = _bodyOf(source, 'CanvasProjection? get _activeProjection {');
+      expect(
+        body,
+        contains('decoded.path != capture.filePath'),
+        reason: 'a decode left over from a capture the user switched away '
+            'from would project at the wrong scale',
+      );
+    });
+
+    test('the decoded size is wired from the editor canvas', () {
+      expect(source, contains('onImageSizeResolved: _handleImageSizeResolved'));
+      final canvas = File('lib/views/editor_canvas.dart').readAsStringSync();
+      expect(canvas, contains('widget.onImageSizeResolved?.call('));
+    });
   });
 }
