@@ -990,11 +990,31 @@ class _MainScreenState extends State<MainScreen> {
     if (needsRepair) _syncCurrentCaptureAnnotations();
   }
 
+  /// True when the active capture's annotations are still pre-v4 viewport
+  /// numbers, i.e. its post-frame conversion has not run (or could not run,
+  /// because the canvas was not laid out yet).
+  ///
+  /// Everything that burns markup into the bitmap — export, flatten, crop —
+  /// treats `_annotations` as image pixels and would place every mark at the
+  /// wrong coordinates and weight. Flatten and crop rewrite the capture file,
+  /// so that mistake is not recoverable. Refuse loudly, matching the
+  /// "the editor is not ready" contract the export and crop paths already use
+  /// for a degenerate canvas.
+  bool _blockedByPendingConversion(String action) {
+    if (!(_activeCapture?.annotationsNeedConversion ?? false)) return false;
+    _showToast('Cannot $action yet: this capture is still being upgraded. '
+        'Try again in a moment.');
+    return true;
+  }
+
   /// Renders the active capture with its annotations burned in, at the source
   /// image's native resolution and with no editor chrome.
   Future<Uint8List?> _renderAnnotatedBytes() async {
     final capture = _activeCapture;
     if (capture == null) return null;
+    // Covers copy-to-clipboard and Save As, and is the second line of defence
+    // for flatten and crop, which check before touching the undo stack.
+    if (_blockedByPendingConversion('export')) return null;
 
     try {
       final bytes = await RenderService.renderFlattenedPng(
@@ -1128,6 +1148,9 @@ class _MainScreenState extends State<MainScreen> {
       _showToast('No annotations to flatten!');
       return;
     }
+    // Before the undo push, not after: flatten rewrites the capture file, and
+    // an aborted flatten should leave no orphan undo entry behind.
+    if (_blockedByPendingConversion('flatten')) return;
 
     await _pushUndoState(captureImage: true);
 
@@ -1151,6 +1174,12 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _handleApplyCrop(Rect cropRect) async {
     if (_activeCapture == null || !File(_activeCapture!.filePath).existsSync()) return;
+    // Crop bakes the markup in before cutting, and rewrites the file. Checked
+    // here rather than relying on _renderAnnotatedBytes returning null, because
+    // this path falls back to the un-annotated original on a null render — so
+    // without this the crop would silently proceed and drop the markup
+    // entirely instead of refusing.
+    if (_blockedByPendingConversion('crop')) return;
 
     try {
       final canvasSize = _canvasSize;
@@ -1425,6 +1454,14 @@ class _MainScreenState extends State<MainScreen> {
                             onImageBytesChanged: () {
                               setState(_bumpImageRevision);
                             },
+                            // The canvas drops writes it cannot map into image
+                            // pixels. Silently losing a stroke is its own bug,
+                            // so say it out loud; the canvas throttles this so
+                            // a drag cannot flood the toast.
+                            onEditUnplaceable: () => _showToast(
+                              'Could not apply that edit: the image has not '
+                              'loaded. Try reselecting this capture.',
+                            ),
                             repaintBoundaryKey: _repaintKey,
                             isDarkMode: _isDarkMode,
                             zoomScale: _zoomScale,
@@ -1614,7 +1651,9 @@ class _MainScreenState extends State<MainScreen> {
                     }
                   },
                   onDeleteItem: (item) async {
-                    if (_activeCapture?.id == item.id) {
+                    // Read before the setState below reassigns _activeCapture.
+                    final wasActive = _activeCapture?.id == item.id;
+                    if (wasActive) {
                       _syncCurrentCaptureAnnotations();
                     }
                     setState(() {
@@ -1630,6 +1669,25 @@ class _MainScreenState extends State<MainScreen> {
                     });
                     if (_activeCapture != null) {
                       DatabaseService.setSetting('active_capture_id', _activeCapture!.id);
+                    }
+                    // Deleting the active capture *promotes* the next one, which
+                    // is a selection change by any other name — so it owes the
+                    // same conversion onSelectItem schedules. Without this the
+                    // promoted capture spends the session with viewport numbers
+                    // treated as image pixels (markup at the wrong scale), and
+                    // because the save guard correctly refuses to persist it,
+                    // nothing the user draws on it is ever written.
+                    //
+                    // Gated on [wasActive] so deleting a *background* capture
+                    // does not schedule a redundant second conversion for the
+                    // unchanged active one — two in-flight runs could both pass
+                    // the flag check across the decode await and double-scale.
+                    if (wasActive &&
+                        (_activeCapture?.annotationsNeedConversion ?? false)) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (!mounted) return;
+                        _convertActiveCaptureAnnotations();
+                      });
                     }
                     try {
                       final file = File(item.filePath);

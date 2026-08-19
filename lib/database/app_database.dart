@@ -78,7 +78,10 @@ class AppSettings extends Table {
 
 @DriftDatabase(tables: [Captures, Annotations, Shortcuts, AppSettings])
 class AppDatabase extends _$AppDatabase {
-  AppDatabase() : super(_openConnection());
+  /// [executor] exists for tests, which pass `NativeDatabase.memory()` so a
+  /// migration can be exercised without touching the user's real library file.
+  /// Production always omits it and gets the on-disk connection.
+  AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
   int get schemaVersion => 4;

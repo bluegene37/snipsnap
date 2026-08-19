@@ -247,6 +247,63 @@ void main() {
       );
     });
 
+    // -------------------------------------------------------------------------
+    // Degenerate-projection writes.
+    //
+    // These three used to read `p.isValid ? mapped : unmapped`, i.e. on an
+    // invalid projection they wrote RAW CANVAS COORDINATES into image-pixel
+    // storage, where the save layer then stamped them `coordSpace: imagePixels`
+    // — permanently, silently, and with no discriminator left to recover them.
+    //
+    // `_projection` is invalid whenever `_baseImage` is null, and `build()` puts
+    // the live GestureDetector on screen as soon as `_fileExists` is true: for a
+    // few frames before the decode lands, and forever if the decode fails on a
+    // corrupt or unsupported file. Refusing matches every other boundary on this
+    // branch (`Annotation.withCanvasSpaceScalars`, `onExtractText`,
+    // `_insertExtractedText`), which all decline rather than guess.
+    // -------------------------------------------------------------------------
+
+    for (final signature in const [
+      'void _replaceAnnotation(',
+      'void _emitAnnotation(',
+      'void pushAnnotationsState(',
+    ]) {
+      test('$signature refuses a degenerate projection instead of writing '
+          'canvas coordinates', () {
+        final body = _bodyOf(source, signature);
+        expect(
+          body,
+          contains('if (!_canPlaceWrite(p)) return;'),
+          reason: 'an invalid projection cannot place this write; storing it '
+              'anyway passes canvas numbers off as image pixels',
+        );
+        expect(
+          body,
+          isNot(contains('p.isValid ?')),
+          reason: 'the ternary fallback IS the bug — it writes the unmapped '
+              'canvas-space value when the projection is invalid',
+        );
+      });
+    }
+
+    test('a refused write is reported to the parent, and throttled', () {
+      expect(
+        _bodyOf(source, 'bool _canPlaceWrite('),
+        contains('_reportUnplaceableEdit()'),
+        reason: 'a stroke that silently fails to persist is its own bug; the '
+            'refusal has to be audible',
+      );
+      final report = _bodyOf(source, 'void _reportUnplaceableEdit(');
+      expect(report, contains('widget.onEditUnplaceable?.call()'));
+      expect(
+        report,
+        contains('Duration(seconds:'),
+        reason: 'a drag fires _replaceAnnotation on every pointer move, so an '
+            'unthrottled report would replace the toast hundreds of times a '
+            'second',
+      );
+    });
+
     test('delegate writes route through the converting helpers', () {
       expect(
         _bodyOf(source, 'void onAnnotationAdded('),

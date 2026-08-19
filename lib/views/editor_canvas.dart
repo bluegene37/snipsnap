@@ -61,6 +61,15 @@ class EditorCanvas extends StatefulWidget {
   /// Awaited before the flood fill overwrites the source file so the caller can
   /// snapshot the original bitmap for undo.
   final Future<void> Function()? onBeforeCanvasFill;
+
+  /// Fired when a gesture's write had to be dropped because the projection is
+  /// degenerate — the bitmap has not decoded yet, or failed to decode at all.
+  ///
+  /// The canvas refuses such writes rather than storing raw canvas numbers as
+  /// image pixels, and a stroke that silently does not persist is its own bug,
+  /// so the parent surfaces this. Throttled inside the canvas: a single drag
+  /// emits hundreds of live updates and must not become hundreds of toasts.
+  final VoidCallback? onEditUnplaceable;
   final GlobalKey repaintBoundaryKey;
   final bool isDarkMode;
   final double opacity;
@@ -105,6 +114,7 @@ class EditorCanvas extends StatefulWidget {
     this.onImageSizeResolved,
     this.onBeforeCanvasFill,
     this.onImageBytesChanged,
+    this.onEditUnplaceable,
     required this.repaintBoundaryKey,
     this.isDarkMode = false,
     this.opacity = 1.0,
@@ -185,6 +195,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   ui.Image? _baseImage;
   img.Image? _cachedSourceImage;
   int _baseImageToken = 0;
+
+  /// When the parent was last told a write could not be placed. See
+  /// [_reportUnplaceableEdit].
+  DateTime? _lastUnplaceableReport;
 
   // Selection / transform state
   String? _selectedAnnotationId;
@@ -588,6 +602,43 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     return _AnnHandle.none;
   }
 
+  /// Gate for every write that crosses canvas space into the parent's
+  /// image-pixel storage.
+  ///
+  /// An invalid projection cannot map anything. Passing the annotation through
+  /// unmapped would hand the parent raw canvas coordinates, which are then
+  /// persisted and stamped `coordSpace: imagePixels` — wrong numbers, wrong
+  /// scalars, no error, and no discriminator left to recover them. Refusing is
+  /// the same choice every other boundary on this path already makes
+  /// (`Annotation.withCanvasSpaceScalars`, `onExtractText`,
+  /// `_insertExtractedText`).
+  ///
+  /// `_projection` is invalid whenever `_baseImage` is null, and `build()`
+  /// puts the live gesture detector on screen as soon as the file exists. In
+  /// the normal case that window is the handful of frames before the decode
+  /// lands, and a stroke started that early simply does not stick. The state
+  /// that actually matters is a decode that never succeeds (corrupt or
+  /// unsupported file), where the canvas stays interactive forever — which is
+  /// exactly why the refusal has to be audible rather than silent.
+  bool _canPlaceWrite(CanvasProjection p) {
+    if (p.isValid) return true;
+    _reportUnplaceableEdit();
+    return false;
+  }
+
+  /// Tells the parent a write was dropped, at most once every few seconds.
+  /// A drag fires `_replaceAnnotation(live: true)` on every pointer move, so
+  /// an unthrottled report would replace the toast hundreds of times a second.
+  void _reportUnplaceableEdit() {
+    final now = DateTime.now();
+    final last = _lastUnplaceableReport;
+    if (last != null && now.difference(last) < const Duration(seconds: 3)) {
+      return;
+    }
+    _lastUnplaceableReport = now;
+    widget.onEditUnplaceable?.call();
+  }
+
   /// Writes [updated] — a **canvas-space** annotation — back to the parent,
   /// which stores image pixels.
   void _replaceAnnotation(Annotation updated, {required bool live}) {
@@ -597,8 +648,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final index = widget.annotations.indexWhere((a) => a.id == updated.id);
     if (index == -1) return;
     final p = _projection;
+    if (!_canPlaceWrite(p)) return;
     final list = List<Annotation>.from(widget.annotations);
-    list[index] = p.isValid ? updated.mappedToImageSpace(p) : updated;
+    list[index] = updated.mappedToImageSpace(p);
     callback(list);
   }
 
@@ -606,9 +658,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// pixels.
   void _emitAnnotation(Annotation canvasSpaceAnnotation) {
     final p = _projection;
-    widget.onAnnotationAdded(
-      p.isValid ? canvasSpaceAnnotation.mappedToImageSpace(p) : canvasSpaceAnnotation,
-    );
+    if (!_canPlaceWrite(p)) return;
+    widget.onAnnotationAdded(canvasSpaceAnnotation.mappedToImageSpace(p));
   }
 
   /// Records the pre-gesture state so the whole gesture collapses into a single
@@ -1008,8 +1059,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   @override
   void pushAnnotationsState(List<Annotation> newAnnotations) {
     final p = _projection;
+    if (!_canPlaceWrite(p)) return;
     widget.onAnnotationsUpdated?.call(
-      p.isValid ? newAnnotations.map((a) => a.mappedToImageSpace(p)).toList() : newAnnotations,
+      newAnnotations.map((a) => a.mappedToImageSpace(p)).toList(),
     );
   }
 

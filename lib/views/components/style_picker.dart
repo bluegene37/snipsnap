@@ -1028,7 +1028,11 @@ class StylePicker extends StatelessWidget {
                 trackHeight: 3,
               ),
               child: Slider(
-                value: opacity,
+                // Clamped like every other slider here: a stored value can sit
+                // outside the range (an annotation saved by an older build, or
+                // a scalar projected back from image pixels) and Slider asserts
+                // rather than coercing.
+                value: opacity.clamp(0.1, 1.0),
                 min: 0.1,
                 max: 1.0,
                 onChanged: onOpacityChanged,
@@ -1348,7 +1352,11 @@ class StylePicker extends StatelessWidget {
                   trackHeight: 3,
                 ),
                 child: Slider(
-                  value: fontSize,
+                  // Canvas-space font size is `stored / scale`, so shrinking
+                  // the window and selecting a text annotation can land below
+                  // 10 — which is a Slider assertion (red screen in debug),
+                  // not a clamp. Same treatment as stroke width and radius.
+                  value: fontSize.clamp(10.0, 60.0),
                   min: 10.0,
                   max: 60.0,
                   onChanged: onFontSizeChanged,

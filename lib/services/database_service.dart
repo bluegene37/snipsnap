@@ -9,7 +9,15 @@ import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 
 class DatabaseService {
-  static final AppDatabase db = AppDatabase();
+  static AppDatabase _db = AppDatabase();
+
+  static AppDatabase get db => _db;
+
+  /// Swaps in an in-memory database for tests. Assigning here never reads
+  /// [_db], so the lazy on-disk initialiser above is not triggered and no real
+  /// library file is opened.
+  @visibleForTesting
+  static set db(AppDatabase value) => _db = value;
 
   /// Load all captures from Drift SQLite local DB
   static Future<List<CaptureItem>> loadCapturesFromDb() async {
@@ -46,7 +54,36 @@ class DatabaseService {
     );
   }
 
-  /// Save single capture item (and its annotations) to Drift SQLite DB
+  /// Whether [item]'s annotation rows may be rewritten right now.
+  ///
+  /// This is the coordinate-space invariant, enforced at the only place every
+  /// annotation write passes through rather than at each call site.
+  ///
+  /// [_convertAnnotationToCompanion] unconditionally stamps
+  /// `coordSpace = imagePixels` on every row it writes. That stamp is the sole
+  /// discriminator telling a pre-v4 row (still holding viewport coordinates)
+  /// from a converted one. A capture whose [CaptureItem.annotationsNeedConversion]
+  /// is true is still carrying viewport numbers, so writing it would stamp
+  /// `imagePixels` over data that is not in image pixels — destroying the only
+  /// evidence that a conversion is still owed. On the next launch the rows read
+  /// back as already-converted and are never fixed: markup renders, exports and
+  /// flattens at the wrong scale permanently.
+  ///
+  /// Refusing costs nothing. An unconverted capture's rows are already correct
+  /// on disk, and every path that could have modified them is itself gated on
+  /// the same flag, so there is never an unsaved edit to lose. The conversion
+  /// (`_convertActiveCaptureAnnotations` in main_screen) clears the flag before
+  /// it persists, so the rewrite that *does* need to happen is not blocked.
+  static bool canPersistAnnotations(CaptureItem item) =>
+      !item.annotationsNeedConversion;
+
+  /// Save single capture item (and its annotations) to Drift SQLite DB.
+  ///
+  /// Every annotation write in the app funnels through here — the singular
+  /// `saveCaptureItem` path and the plural `saveHistory` /
+  /// [saveAllCapturesToDb] path alike — so this is where the coordinate-space
+  /// guard lives. Placing it here rather than at the call sites means no
+  /// present or future caller can bypass it.
   static Future<void> saveCaptureToDb(CaptureItem item) async {
     await db.insertOrUpdateCapture(CapturesCompanion(
       id: Value(item.id),
@@ -57,6 +94,12 @@ class DatabaseService {
       height: Value(item.height),
     ));
 
+    // The capture row above is coordinate-space-free metadata (path, title,
+    // recovered pixel dimensions) and is always safe to refresh — recovered
+    // dimensions in particular are what a later conversion needs. Only the
+    // annotation rows carry the stamp, so only they are withheld.
+    if (!canPersistAnnotations(item)) return;
+
     // The list order *is* the layer order, so persist the index alongside.
     final companions = [
       for (var i = 0; i < item.annotations.length; i++)
@@ -65,7 +108,14 @@ class DatabaseService {
     await db.saveAnnotationsForCapture(item.id, companions);
   }
 
-  /// Save list of captures to Drift SQLite DB
+  /// Save list of captures to Drift SQLite DB.
+  ///
+  /// This is the path that rewrites the *whole* library, and only the active
+  /// capture is ever converted — so on a real upgrade nearly every item here
+  /// still needs conversion. Each one is filtered individually by
+  /// [saveCaptureToDb]'s guard; nothing extra is needed at this level, but the
+  /// per-item filtering is the load-bearing part of this call, not an
+  /// incidental detail.
   static Future<void> saveAllCapturesToDb(List<CaptureItem> items) async {
     for (final item in items) {
       await saveCaptureToDb(item);
