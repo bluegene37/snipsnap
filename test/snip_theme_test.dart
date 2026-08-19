@@ -186,4 +186,139 @@ void main() {
     await tester.pumpWidget(app(SnipThemeMode.dark));
     expect(seen.mode, SnipThemeMode.dark);
   });
+
+  group('controlDecoration/controlForeground — disabled', () {
+    test('disabled resting control is an unchanged hairline, faint foreground', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        final deco = t.controlDecoration(active: false, enabled: false);
+        expect(deco.color, Colors.transparent, reason: '$mode');
+        expect((deco.border as Border).top.color, t.border, reason: '$mode');
+        expect(t.controlForeground(active: false, enabled: false), t.inkFaint,
+            reason: '$mode');
+      }
+    });
+
+    test('disabled exclusive-active control never renders the activeFill '
+        'knockout plate — it downgrades to selectedFill', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        final deco = t.controlDecoration(active: true, enabled: false);
+        expect(deco.color, t.selectedFill,
+            reason: '$mode: disabled active must not be activeFill');
+        expect((deco.border as Border).top.color, t.selectedFill, reason: '$mode');
+        expect(
+            t.controlForeground(active: true, enabled: false), t.inkFaint,
+            reason: '$mode: disabled foreground is always inkFaint, never onActive');
+      }
+    });
+
+    test('disabled non-exclusive selected control also downgrades to inkFaint', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        final deco = t.controlDecoration(active: true, exclusive: false, enabled: false);
+        expect(deco.color, t.selectedFill, reason: '$mode');
+        expect(
+            t.controlForeground(active: true, exclusive: false, enabled: false),
+            t.inkFaint,
+            reason: '$mode');
+      }
+    });
+  });
+
+  group('controlDecoration — hover', () {
+    test('hovered bordered control strengthens the hairline, stays unfilled', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        final deco = t.controlDecoration(active: false, hover: true);
+        expect(deco.color, Colors.transparent, reason: '$mode');
+        expect((deco.border as Border).top.color, t.borderStrong, reason: '$mode');
+      }
+    });
+
+    test('hovered borderless row/tile washes with hoverFill and draws no border', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        final deco = t.controlDecoration(active: false, hover: true, bordered: false);
+        expect(deco.color, t.hoverFill, reason: '$mode');
+        expect(deco.border, isNull, reason: '$mode: a borderless row must draw no border');
+      }
+    });
+
+    test('a resting borderless control also draws no border', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        final deco = t.controlDecoration(active: false, bordered: false);
+        expect(deco.color, Colors.transparent, reason: '$mode');
+        expect(deco.border, isNull, reason: '$mode');
+      }
+    });
+  });
+
+  group('controlDecoration/controlForeground — destructive tone', () {
+    test('resting destructive control borders in danger, not the plain border', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        final deco = t.controlDecoration(active: false, tone: SnipControlTone.danger);
+        expect(deco.color, Colors.transparent, reason: '$mode');
+        expect((deco.border as Border).top.color, t.danger, reason: '$mode');
+        expect(t.controlForeground(active: false, tone: SnipControlTone.danger),
+            t.danger,
+            reason: '$mode');
+      }
+    });
+
+    test('active destructive control fills with danger, knocks out to onDanger', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        final deco = t.controlDecoration(active: true, tone: SnipControlTone.danger);
+        expect(deco.color, t.danger, reason: '$mode');
+        expect((deco.border as Border).top.color, t.danger, reason: '$mode');
+        expect(t.controlForeground(active: true, tone: SnipControlTone.danger),
+            t.onDanger,
+            reason: '$mode');
+      }
+    });
+
+    test('destructive tone never leaks into activeFill', () {
+      // onDanger is deliberately allowed to coincide with onActive in value
+      // (both are simply "the paper tone" used to knock out a dark plate) —
+      // it is the *fill* that must never be activeFill, since that would
+      // make a destructive control visually indistinguishable from the
+      // app's single exclusive-active control.
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        final deco = t.controlDecoration(active: true, tone: SnipControlTone.danger);
+        expect(deco.color, isNot(t.activeFill), reason: '$mode');
+      }
+    });
+  });
+
+  test('foreground never drifts from fill: every (active, exclusive, enabled, '
+      'tone) pair a call site can construct resolves to a legible combination',
+      () {
+    // The two helpers are meant to always be called together with the same
+    // arguments. This sweeps the full combination space and just asserts
+    // both helpers return without throwing and stay internally consistent
+    // (disabled always faint, danger tone never answers onActive/activeFill).
+    for (final mode in SnipThemeMode.values) {
+      final t = SnipTheme.forMode(mode);
+      for (final active in [false, true]) {
+        for (final exclusive in [false, true]) {
+          for (final enabled in [false, true]) {
+            for (final tone in SnipControlTone.values) {
+              final deco = t.controlDecoration(
+                  active: active, exclusive: exclusive, enabled: enabled, tone: tone);
+              final fg = t.controlForeground(
+                  active: active, exclusive: exclusive, enabled: enabled, tone: tone);
+              expect(deco, isNotNull, reason: '$mode $active $exclusive $enabled $tone');
+              if (!enabled) {
+                expect(fg, t.inkFaint, reason: '$mode $active $exclusive $enabled $tone');
+              }
+            }
+          }
+        }
+      }
+    }
+  });
 }

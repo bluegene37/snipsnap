@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/utils/constants.dart';
+import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/components/style_picker.dart';
 
 /// Pumps the picker with the given scalars and returns every [Slider] it built.
@@ -26,25 +27,31 @@ Future<List<Slider>> _slidersFor(
   required double blurStrength,
 }) async {
   // StylePicker sizes itself (250 x double.infinity) and scrolls internally,
-  // so it goes straight into the body.
-  await tester.pumpWidget(MaterialApp(
-    home: Scaffold(
-      body: StylePicker(
-        selectedColor: Colors.red,
-        onColorChanged: (_) {},
-        strokeWidth: strokeWidth,
-        onStrokeWidthChanged: (_) {},
-        opacity: opacity,
-        onOpacityChanged: (_) {},
-        fontSize: fontSize,
-        onFontSizeChanged: (_) {},
-        isFilled: false,
-        onFillChanged: (_) {},
-        borderRadius: borderRadius,
-        onBorderRadiusChanged: (_) {},
-        blurStrength: blurStrength,
-        onBlurStrengthChanged: (_) {},
-        activeTool: tool,
+  // so it goes straight into the body. It now reads SnipTheme.of(context)
+  // in build(), so it needs a SnipThemeScope ancestor to pump at all — this
+  // is infrastructure, not a behavioural change; the mode itself is
+  // irrelevant to what these tests assert (slider clamping).
+  await tester.pumpWidget(SnipThemeScope(
+    theme: SnipTheme.forMode(SnipThemeMode.dark),
+    child: MaterialApp(
+      home: Scaffold(
+        body: StylePicker(
+          selectedColor: Colors.red,
+          onColorChanged: (_) {},
+          strokeWidth: strokeWidth,
+          onStrokeWidthChanged: (_) {},
+          opacity: opacity,
+          onOpacityChanged: (_) {},
+          fontSize: fontSize,
+          onFontSizeChanged: (_) {},
+          isFilled: false,
+          onFillChanged: (_) {},
+          borderRadius: borderRadius,
+          onBorderRadiusChanged: (_) {},
+          blurStrength: blurStrength,
+          onBlurStrengthChanged: (_) {},
+          activeTool: tool,
+        ),
       ),
     ),
   ));

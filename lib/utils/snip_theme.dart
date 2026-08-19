@@ -53,6 +53,21 @@ enum SnipThemeMode { light, dark }
 ///   scrim's job is to darken whatever is behind it regardless of chrome
 ///   mode, so it is a single `static const`, not a light/dark pair. See its
 ///   own doc comment for why per-mode would actively be wrong here.
+///
+/// [SnipTheme.controlDecoration]/[SnipTheme.controlForeground] cover five
+/// more combinations beyond the plain active/inactive binary — disabled
+/// (including a disabled *selected* control), a hovered control (bordered
+/// or not), and a destructive-toned control — so no call site ever hand-rolls
+/// a `BoxDecoration` ternary for these. See their own doc comments.
+enum SnipControlTone {
+  /// The ordinary monochrome treatment — everything except delete affordances.
+  neutral,
+
+  /// The one sanctioned chromatic exception. Routes through [SnipTheme.danger]
+  /// / [SnipTheme.onDanger] instead of [SnipTheme.activeFill] / [SnipTheme.onActive].
+  danger,
+}
+
 @immutable
 class SnipTheme {
   final SnipThemeMode mode;
@@ -214,59 +229,122 @@ class SnipTheme {
   /// Border for a hovered control.
   Border get hoverBorder => Border.all(color: borderStrong, width: hairline);
 
-  /// The outline/fill for a control in one of this design's three states:
-  /// resting (hairline, no fill), a highlighted-but-not-exclusive selection
-  /// (`exclusive: false` — [selectedFill], e.g. an independently
-  /// toggleable panel that can be open at the same time as some other
-  /// control), or the app's one exclusive active control (`exclusive:
-  /// true`, the default — [activeFill], meant to be knocked out via
-  /// [controlForeground]). [radius] defaults to the [radius] field; pass an
-  /// explicit value to match a control's own corner radius.
+  /// The outline/fill for a control, covering every combination this design
+  /// distinguishes:
   ///
-  /// This exists so the same three-state shape doesn't get hand-duplicated
-  /// — and occasionally gotten subtly wrong (the resting border in
-  /// particular) — at every call site. [controlForeground] is its
-  /// foreground-colour companion; use them together so a control's icon
-  /// and label can never drift out of sync with its own fill.
+  /// * **resting** (`active: false`, `enabled: true`, no hover): hairline
+  ///   [border], no fill.
+  /// * **hovered** (`hover: true`): if [bordered] (the default), the
+  ///   hairline strengthens to [borderStrong] — for a control that already
+  ///   carries a border. If `bordered: false` — a list row or tile with no
+  ///   border to strengthen — the border stays absent and [hoverFill] washes
+  ///   the fill instead.
+  /// * **non-exclusive selected** (`active: true, exclusive: false`, the
+  ///   default is exclusive so pass this explicitly): [selectedFill] with a
+  ///   matching hairline — a highlight, not a knockout, for a control that
+  ///   can be "on" alongside some other control.
+  /// * **exclusive active** (`active: true, exclusive: true`, the default):
+  ///   [activeFill] plate, border matching at [activeBorderWidth] — reserved
+  ///   for a control that is the single active member of its own group
+  ///   (meant to be knocked out via [controlForeground]).
+  /// * **disabled** (`enabled: false`): never renders the loud knockout
+  ///   plate, active or not — an exclusive-active *and disabled* control
+  ///   downgrades to the quieter [selectedFill] highlight shape rather than
+  ///   [activeFill], since a full-strength inverted plate reads as
+  ///   interactive. A disabled resting control is unaffected: still a plain
+  ///   hairline. Hover is ignored entirely once disabled. Pair with
+  ///   [controlForeground]'s own `enabled: false`, which always answers
+  ///   [inkFaint] regardless of the fill drawn here.
+  /// * **destructive** (`tone: SnipControlTone.danger`): the same
+  ///   resting/hovered/active shape, but every colour that would have been
+  ///   [border]/[borderStrong]/[activeFill] is [danger] instead — the one
+  ///   sanctioned chromatic exception.
+  ///
+  /// [radius] defaults to the [radius] field; pass an explicit value to
+  /// match a control's own corner radius.
+  ///
+  /// This exists so the same shape doesn't get hand-duplicated — and
+  /// occasionally gotten subtly wrong (the resting border in particular) —
+  /// at every call site. [controlForeground] is its foreground-colour
+  /// companion; use them together so a control's icon and label can never
+  /// drift out of sync with its own fill.
   BoxDecoration controlDecoration({
     required bool active,
     bool exclusive = true,
+    bool enabled = true,
+    bool hover = false,
+    bool bordered = true,
+    SnipControlTone tone = SnipControlTone.neutral,
     double? radius,
   }) {
     final r = radius ?? this.radius;
-    if (!active) {
-      return BoxDecoration(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(r),
-        border: Border.all(color: border, width: hairline),
-      );
+    final shape = BorderRadius.circular(r);
+    final isDanger = tone == SnipControlTone.danger;
+
+    Color fill;
+    Color? outline;
+    var outlineWidth = hairline;
+
+    if (!enabled) {
+      // Disabled never gets the full-strength knockout plate — an
+      // exclusive-active control downgrades to the selectedFill highlight
+      // shape instead, and hover never applies.
+      if (active) {
+        fill = selectedFill;
+        outline = bordered ? selectedFill : null;
+      } else {
+        fill = Colors.transparent;
+        outline = bordered ? border : null;
+      }
+    } else if (active) {
+      if (exclusive) {
+        fill = isDanger ? danger : activeFill;
+        outline = isDanger ? danger : activeFill;
+        outlineWidth = activeBorderWidth;
+      } else {
+        fill = selectedFill;
+        outline = bordered ? (isDanger ? danger : selectedFill) : null;
+      }
+    } else if (hover) {
+      fill = bordered ? Colors.transparent : hoverFill;
+      outline = bordered ? (isDanger ? danger : borderStrong) : null;
+    } else {
+      fill = Colors.transparent;
+      outline = bordered ? (isDanger ? danger : border) : null;
     }
-    if (exclusive) {
-      return BoxDecoration(
-        color: activeFill,
-        borderRadius: BorderRadius.circular(r),
-        border: Border.all(color: activeFill, width: activeBorderWidth),
-      );
-    }
+
     return BoxDecoration(
-      color: selectedFill,
-      borderRadius: BorderRadius.circular(r),
-      border: Border.all(color: selectedFill, width: hairline),
+      color: fill,
+      borderRadius: shape,
+      border: outline == null ? null : Border.all(color: outline, width: outlineWidth),
     );
   }
 
   /// The foreground (icon/label) colour paired with [controlDecoration] for
-  /// the same `(active, exclusive)` state. A selected-but-not-exclusive
-  /// control is a highlight, not an inversion, so its foreground is
-  /// ordinary [ink] — only the exclusive-active case knocks out to
-  /// [onActive]. [dim] selects the resting state's secondary tone
-  /// ([inkMuted]): pass `true` for a caption/label under an icon, `false`
-  /// (the default) for the icon itself, which stays full [ink] at rest.
+  /// the exact same arguments — pass the two together so a control's
+  /// content can never drift out of sync with its own fill.
+  ///
+  /// * `enabled: false` always answers [inkFaint], regardless of every other
+  ///   argument — disabled state is signalled by foreground alone,
+  ///   [controlDecoration] having already downgraded the fill itself.
+  /// * `tone: SnipControlTone.danger` answers [onDanger] when active,
+  ///   [danger] at rest — never a plain [ink]/[inkMuted], so a destructive
+  ///   control's label reads as destructive even before it's pressed.
+  /// * Otherwise: [onActive] only for exclusive-active — a
+  ///   selected-but-not-exclusive control is a highlight, not an inversion,
+  ///   so its foreground stays ordinary [ink]. [dim] selects the resting
+  ///   state's secondary tone ([inkMuted]): pass `true` for a caption/label
+  ///   under an icon, `false` (the default) for the icon itself, which stays
+  ///   full [ink] at rest.
   Color controlForeground({
     required bool active,
     bool exclusive = true,
     bool dim = false,
+    bool enabled = true,
+    SnipControlTone tone = SnipControlTone.neutral,
   }) {
+    if (!enabled) return inkFaint;
+    if (tone == SnipControlTone.danger) return active ? onDanger : danger;
     if (active) return exclusive ? onActive : ink;
     return dim ? inkMuted : ink;
   }
