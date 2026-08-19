@@ -32,6 +32,17 @@ class OcrService {
   Future<OcrAvailability> availability() async =>
       _availability ??= await engine.availability();
 
+  /// Clears the memoised availability so the next [availability] call
+  /// re-probes the engine.
+  ///
+  /// Availability is normally cached for the service's lifetime on the
+  /// assumption it doesn't change mid-session. That assumption doesn't hold
+  /// while the native OCR channel implementations are rolling out: a caller
+  /// that holds a long-lived [OcrService] and calls [availability] before
+  /// the platform plugin registers would otherwise pin "unavailable"
+  /// forever, even after the channel comes up. This is the recovery path.
+  void resetAvailability() => _availability = null;
+
   void invalidate(String cacheKey) => _cache.remove(cacheKey);
 
   void clearCache() => _cache.clear();
@@ -74,27 +85,41 @@ class OcrService {
       final decoded = img.decodeImage(sourceBytes);
       if (decoded == null) return OcrResult.empty;
 
-      final x = regionPx.left.round().clamp(0, decoded.width - 1);
-      final y = regionPx.top.round().clamp(0, decoded.height - 1);
-      final w = regionPx.width.round().clamp(1, decoded.width - x);
-      final h = regionPx.height.round().clamp(1, decoded.height - y);
+      // Intersect the requested region with the image bounds: clamp the
+      // origin up to 0/left/top, clamp the far edge down to the image's
+      // right/bottom, then derive width/height from the clamped edges. A
+      // region that hangs off an edge (or off the origin entirely) crops to
+      // exactly its true overlap with the image, never to a substitute
+      // region of the same nominal size.
+      final x = regionPx.left.round().clamp(0, decoded.width);
+      final y = regionPx.top.round().clamp(0, decoded.height);
+      final right = regionPx.right.round().clamp(0, decoded.width);
+      final bottom = regionPx.bottom.round().clamp(0, decoded.height);
+      final w = right - x;
+      final h = bottom - y;
+
+      if (w < minRegionSide || h < minRegionSide) return OcrResult.empty;
 
       final cropped = img.copyCrop(decoded, x: x, y: y, width: w, height: h);
       final result = await engine.recognize(
         Uint8List.fromList(img.encodePng(cropped)),
       );
-      return _offset(result, Offset(x.toDouble(), y.toDouble()));
+      final fullImageSize =
+          Size(decoded.width.toDouble(), decoded.height.toDouble());
+      return _offset(result, Offset(x.toDouble(), y.toDouble()), fullImageSize);
     } catch (e) {
       debugPrint('SnipSnap OCR service error: $e');
       return OcrResult.empty;
     }
   }
 
-  /// Shifts a region result back into full-image coordinates.
-  static OcrResult _offset(OcrResult result, Offset delta) {
-    if (delta == Offset.zero) return result;
+  /// Shifts a region result back into full-image coordinates and replaces
+  /// its `imageSize` — which the engine reported as the crop's dimensions —
+  /// with the full decoded image's size, so every field on the returned
+  /// result agrees it describes full-image space.
+  static OcrResult _offset(OcrResult result, Offset delta, Size imageSize) {
     return OcrResult(
-      imageSize: result.imageSize,
+      imageSize: imageSize,
       lines: result.lines
           .map((l) => OcrLine(
                 text: l.text,

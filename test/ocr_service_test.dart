@@ -28,6 +28,13 @@ class FakeOcrEngine implements OcrEngine {
           text: 'sample',
           boundsPx: Rect.fromLTWH(0, 0, 10, 10),
           confidence: 1.0,
+          words: [
+            OcrWord(
+              text: 'sample',
+              boundsPx: Rect.fromLTWH(1, 1, 4, 4),
+              confidence: 0.9,
+            ),
+          ],
         ),
       ],
     );
@@ -127,5 +134,54 @@ void main() {
     final result = await service.recognizeCapture(imagePath: path, cacheKey: 'k');
     expect(result.isEmpty, isTrue);
     expect(engine.recognizeCalls, 0);
+  });
+
+  test('crops to only the true overlap when the region hangs off the left edge', () async {
+    final path = await _writePng(tempDir, 400, 200);
+    await service.recognizeCapture(
+      imagePath: path,
+      cacheKey: 'k',
+      // True overlap with the 400x200 image is x:[0,70), width 70.
+      regionPx: const Rect.fromLTWH(-50, 0, 120, 60),
+    );
+    final decoded = img.decodeImage(engine.lastBytes!)!;
+    expect(decoded.width, 70);
+    expect(decoded.height, 60);
+  });
+
+  test('returns empty for a region with zero overlap with the image', () async {
+    final path = await _writePng(tempDir, 400, 200);
+    final result = await service.recognizeCapture(
+      imagePath: path,
+      cacheKey: 'k',
+      // Entirely to the left of x=0; no overlap with the image at all.
+      regionPx: const Rect.fromLTWH(-200, 0, 50, 60),
+    );
+    expect(result.isEmpty, isTrue);
+    expect(engine.recognizeCalls, 0);
+  });
+
+  test('region result imageSize matches the full image, not the crop', () async {
+    final path = await _writePng(tempDir, 400, 200);
+    final result = await service.recognizeCapture(
+      imagePath: path,
+      cacheKey: 'k',
+      regionPx: const Rect.fromLTWH(100, 50, 120, 60),
+    );
+    expect(result.imageSize, const Size(400, 200));
+  });
+
+  test('offsets word boxes nested in lines back into full-image coordinates', () async {
+    final path = await _writePng(tempDir, 400, 200);
+    final result = await service.recognizeCapture(
+      imagePath: path,
+      cacheKey: 'k',
+      regionPx: const Rect.fromLTWH(100, 50, 120, 60),
+    );
+    // The fake reports a word at (1,1) inside the crop; it must come back at
+    // (101,51) in full-image space.
+    final word = result.lines.single.words.single;
+    expect(word.boundsPx.left, 101);
+    expect(word.boundsPx.top, 51);
   });
 }
