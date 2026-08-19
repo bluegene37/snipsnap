@@ -49,6 +49,15 @@ class EditorCanvas extends StatefulWidget {
   /// after any operation that rewrites the file.
   final void Function(String imagePath, Size imageSize)? onImageSizeResolved;
 
+  /// Fired after this canvas has rewritten the capture file in place.
+  ///
+  /// The floating-selection paths (cut, move, delete) edit the bitmap from
+  /// inside the canvas and leave the path and the pixel dimensions unchanged,
+  /// so `onImageSizeResolved` early-returns and the parent has no other way to
+  /// notice. Anything the parent keys off the bitmap — the OCR cache key above
+  /// all — is stale until this fires.
+  final VoidCallback? onImageBytesChanged;
+
   /// Awaited before the flood fill overwrites the source file so the caller can
   /// snapshot the original bitmap for undo.
   final Future<void> Function()? onBeforeCanvasFill;
@@ -95,6 +104,7 @@ class EditorCanvas extends StatefulWidget {
     this.onExtractText,
     this.onImageSizeResolved,
     this.onBeforeCanvasFill,
+    this.onImageBytesChanged,
     required this.repaintBoundaryKey,
     this.isDarkMode = false,
     this.opacity = 1.0,
@@ -292,6 +302,21 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       }
 
       _ocrRegion = null;
+
+      // Drag flags owned by the canvas rather than by a handler. The
+      // annotation-drag flags self-heal at the next `_onPanStart`; these do
+      // not, and `_onPanEnd` may never reach the branch that clears them
+      // because single-letter tool shortcuts fire mid-drag on this same
+      // FocusNode. Left set, `_isDraggingSelection` makes the *next* drag
+      // rebuild `_floatingSelectionRect` from a stale origin and conjure a
+      // phantom selection box. Cleared here rather than in any one tool's
+      // branch so every present and future tool is covered.
+      _isDraggingCrop = false;
+      _currentCropHandle = _CropHandle.none;
+      _cropOrigin = null;
+      _isDraggingSelection = false;
+      _currentSelectionHandle = _CropHandle.none;
+      _selectionGestureOriginRect = null;
 
       _selectedAnnotationId = null;
       if (widget.activeTool != CanvasTool.crop) {
@@ -1675,6 +1700,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       });
 
       await _loadBaseImage();
+      // The file just changed underneath the parent, at the same path and the
+      // same pixel size, so nothing else tells it. `_deleteFloatingSelection`
+      // reaches the bitmap through this method, so it is covered here too.
+      if (mounted) widget.onImageBytesChanged?.call();
     } catch (e) {
       debugPrint('Error extracting floating selection: $e');
     }
@@ -1698,6 +1727,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final path = widget.imagePath;
     final currentRect = _floatingSelectionRect!;
     final cutImg = _cutSelectionImage!;
+    var wroteBitmap = false;
 
     try {
       img.Image? decoded = _cachedSourceImage;
@@ -1733,6 +1763,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         await FileImage(File(path)).evict();
         PaintingBinding.instance.imageCache.clear();
         PaintingBinding.instance.imageCache.clearLiveImages();
+        wroteBitmap = true;
       }
     } catch (e) {
       debugPrint('Error committing floating selection: $e');
@@ -1748,6 +1779,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         });
         await _loadBaseImage();
       }
+      // Only when the paste actually reached the file — an early bail or a
+      // decode failure leaves the bitmap exactly as the parent already knows
+      // it, and a spurious bump would throw away a valid OCR cache.
+      if (wroteBitmap && mounted) widget.onImageBytesChanged?.call();
     }
   }
 

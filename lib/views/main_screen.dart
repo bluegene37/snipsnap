@@ -535,9 +535,10 @@ class _MainScreenState extends State<MainScreen> {
   ///
   /// * the capture id — a different capture is a different image;
   /// * the file path — the same capture can be repointed at another file;
-  /// * [_imageRevision] — bumped by crop, flatten, flood fill and undo/redo,
-  ///   i.e. every operation that rewrites the file in place while the id and
-  ///   the path both stay the same. It only ever increments and is never reset,
+  /// * [_imageRevision] — bumped by crop, flatten, flood fill, undo/redo and
+  ///   the canvas's own cut/move/delete of a floating selection, i.e. every
+  ///   operation that rewrites the file in place while the id and the path
+  ///   both stay the same. All of them go through [_bumpImageRevision]. It only ever increments and is never reset,
   ///   so a key can never be reused for different pixels — undo does not walk
   ///   it back onto the pre-edit key, it moves forward onto a fresh one and
   ///   simply re-runs.
@@ -583,6 +584,85 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       _isOcrRunning = false;
       _ocrResult = result;
+    });
+  }
+
+  /// The one way the bitmap generation advances.
+  ///
+  /// Every in-place rewrite of the capture file has to come through here, not
+  /// through a bare increment of the counter: it is what makes the OCR cache
+  /// key stop matching, and `_resetOcr` is what stops the open panel from going
+  /// on displaying text read out of the previous bitmap. Splitting the two
+  /// invites a call site that does one and forgets the other.
+  ///
+  /// Callers are already inside `setState`; this deliberately does not wrap
+  /// itself in another one.
+  void _bumpImageRevision() {
+    _imageRevision++;
+    _resetOcr();
+  }
+
+  /// Drops the extracted text onto the canvas as a text annotation.
+  ///
+  /// Two different coordinate obligations meet here and only one of them is
+  /// the rect contract:
+  ///
+  /// * `startPoint` is already in **image pixels**, the space annotations are
+  ///   stored in, because this goes through [_onAnnotationAdded] — the
+  ///   storage-side path, which does not convert. Nothing to do.
+  /// * the scale-dependent **scalars** are not. `ToolProperties.fontSize` and
+  ///   friends are the numbers the toolbar sliders show, which are canvas
+  ///   units by definition. Writing 18.0 straight into an image-space
+  ///   annotation means `mappedToCanvasSpace` divides it by the projection
+  ///   scale at paint time, so on a Retina capture the inserted text renders
+  ///   at 5-9 canvas pixels and persists that way to disk. That is exactly
+  ///   what `Annotation.withCanvasSpaceScalars` exists to prevent, and it is
+  ///   the same helper the property sliders go through.
+  ///
+  /// A degenerate projection cannot convert anything, so the insert is refused
+  /// outright rather than silently storing canvas numbers as image pixels —
+  /// consistent with `withCanvasSpaceScalars`' own contract, which would
+  /// otherwise leave the model defaults in place and look like it worked.
+  void _insertExtractedText(String text) {
+    final projection = _activeProjection;
+    if (projection == null || !projection.isValid) {
+      _showToast('Cannot insert text until the image has finished loading');
+      return;
+    }
+
+    // The Text tool's own defaults, not `_currentToolProperties` — that would
+    // read the OCR tool's placeholder style and drop an accent-coloured
+    // caption at the wrong size.
+    final style = _toolPropertiesMap[CanvasTool.text] ??
+        const ToolProperties(activeColor: Colors.white);
+
+    final annotation = Annotation(
+      id: const Uuid().v4(),
+      tool: CanvasTool.text,
+      color: style.activeColor,
+      backgroundColor: style.textBackgroundColor,
+      fill: style.isFilled,
+      opacity: style.opacity,
+      text: text,
+      startPoint: const Offset(40, 40),
+    ).withCanvasSpaceScalars(
+      projection,
+      strokeWidth: style.strokeWidth,
+      fontSize: style.fontSize,
+      borderRadius: style.borderRadius,
+      blurStrength: style.blurStrength,
+    );
+
+    _onAnnotationAdded(annotation);
+    setState(() {
+      _ocrResult = null;
+      _ocrUnavailableReason = null;
+      // Switching to Select lets the user click the new label and drag it into
+      // place. The canvas owns its own selection state with no inbound prop,
+      // so this deliberately does *not* set `_selectedAnnotationId` — that
+      // would point the sliders and Delete at an annotation the canvas draws
+      // without handles.
+      _activeTool = CanvasTool.select;
     });
   }
 
@@ -716,7 +796,7 @@ class _MainScreenState extends State<MainScreen> {
     }
 
     setState(() {
-      _imageRevision++;
+      _bumpImageRevision();
       _annotations = List.from(snapshot.annotations);
       _selectedAnnotationId = null;
       _stepCounter = _findMaxStepNumber(snapshot.annotations) + 1;
@@ -1060,7 +1140,7 @@ class _MainScreenState extends State<MainScreen> {
     await _replaceActiveImageBytes(bytes);
 
     setState(() {
-      _imageRevision++;
+      _bumpImageRevision();
       _annotations = [];
       _stepCounter = 1;
     });
@@ -1127,7 +1207,7 @@ class _MainScreenState extends State<MainScreen> {
       await _replaceActiveImageBytes(Uint8List.fromList(img.encodePng(result)));
 
       setState(() {
-        _imageRevision++;
+        _bumpImageRevision();
         _annotations = [];
         _selectedAnnotationId = null;
         _activeTool = CanvasTool.select;
@@ -1337,9 +1417,13 @@ class _MainScreenState extends State<MainScreen> {
                             onImageSizeResolved: _handleImageSizeResolved,
                             onExtractText: _handleExtractText,
                             onPerformCanvasFill: (pos) {
-                              setState(() {
-                                _imageRevision++;
-                              });
+                              setState(_bumpImageRevision);
+                            },
+                            // Cut, move and delete rewrite the file in place
+                            // from inside the canvas, at the same path and the
+                            // same size, so nothing else here would notice.
+                            onImageBytesChanged: () {
+                              setState(_bumpImageRevision);
                             },
                             repaintBoundaryKey: _repaintKey,
                             isDarkMode: _isDarkMode,
@@ -1473,35 +1557,7 @@ class _MainScreenState extends State<MainScreen> {
                             _isOcrRunning = false;
                             _ocrUnavailableReason = null;
                           }),
-                          onInsertAsText: (text) {
-                            // The Text tool's own defaults, not
-                            // `_currentToolProperties` — that would read the
-                            // OCR tool's placeholder style and drop a
-                            // 16pt accent-coloured caption.
-                            final style = _toolPropertiesMap[CanvasTool.text] ??
-                                const ToolProperties(activeColor: Colors.white);
-                            // startPoint is in image pixels, the space every
-                            // annotation is stored in — _onAnnotationAdded is
-                            // the storage-side path and does not convert.
-                            final annotation = Annotation(
-                              id: const Uuid().v4(),
-                              tool: CanvasTool.text,
-                              color: style.activeColor,
-                              backgroundColor: style.textBackgroundColor,
-                              fontSize: style.fontSize,
-                              fill: style.isFilled,
-                              opacity: style.opacity,
-                              text: text,
-                              startPoint: const Offset(40, 40),
-                            );
-                            _onAnnotationAdded(annotation);
-                            setState(() {
-                              _ocrResult = null;
-                              _ocrUnavailableReason = null;
-                              _activeTool = CanvasTool.select;
-                              _selectedAnnotationId = annotation.id;
-                            });
-                          },
+                          onInsertAsText: _insertExtractedText,
                         ),
                       ),
 
