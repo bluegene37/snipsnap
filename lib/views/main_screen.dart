@@ -22,6 +22,7 @@ import '../services/storage_service.dart';
 import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 import '../utils/image_operations.dart';
+import '../utils/snip_theme.dart';
 import 'components/header_bar.dart';
 import 'components/ocr_result_panel.dart';
 import 'components/style_picker.dart';
@@ -113,7 +114,12 @@ class _MainScreenState extends State<MainScreen> {
 
   ToolProperties get _currentToolProperties {
     final targetTool = _selectedAnnotation?.tool ?? _activeTool;
-    return _toolPropertiesMap[targetTool] ?? const ToolProperties(activeColor: AppColors.accent);
+    // Defensive fallback: `_toolPropertiesMap` is seeded with every
+    // `CanvasTool` by `ToolProperties.createDefaults()`, so this branch is
+    // never actually reached. The colour is chrome-adjacent rather than
+    // annotation data, so it reads from the theme like everything else here.
+    final t = SnipTheme.forMode(_isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light);
+    return _toolPropertiesMap[targetTool] ?? ToolProperties(activeColor: t.ink);
   }
 
   /// Applies a property change to the active tool's defaults and, when an item
@@ -149,8 +155,9 @@ class _MainScreenState extends State<MainScreen> {
     }
 
     setState(() {
+      final t = SnipTheme.forMode(_isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light);
       final currentProps =
-          _toolPropertiesMap[targetTool] ?? const ToolProperties(activeColor: AppColors.accent);
+          _toolPropertiesMap[targetTool] ?? ToolProperties(activeColor: t.ink);
 
       _toolPropertiesMap[targetTool] = currentProps.copyWith(
         activeColor: activeColor,
@@ -847,14 +854,15 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _handleTimerCapture() async {
     setState(() => _isCapturing = true);
+    final t = SnipTheme.forMode(_isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light);
     _scaffoldMessengerKey.currentState?.showSnackBar(
-      const SnackBar(
+      SnackBar(
         content: Text(
           'Capturing in 3 seconds... Prepare your screen!',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(color: t.onActive, fontWeight: FontWeight.bold),
         ),
-        duration: Duration(seconds: 3),
-        backgroundColor: AppColors.accent,
+        duration: const Duration(seconds: 3),
+        backgroundColor: t.activeFill,
       ),
     );
     final path = await _captureService.captureTimer(3);
@@ -1265,9 +1273,10 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _showToast(String message) {
-    final toastBg = _isDarkMode ? AppColors.darkSurfaceVariant : Colors.white;
-    final textColor = _isDarkMode ? Colors.white : Colors.black87;
-    final borderColor = _isDarkMode ? Colors.white12 : Colors.black12;
+    final t = SnipTheme.forMode(_isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light);
+    final toastBg = t.surfaceRaised;
+    final textColor = t.ink;
+    final borderColor = t.border;
 
     _scaffoldMessengerKey.currentState?.hideCurrentSnackBar();
     _scaffoldMessengerKey.currentState?.showSnackBar(
@@ -1287,37 +1296,36 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    final theme = SnipTheme.forMode(
+      _isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light,
+    );
+
+    return SnipThemeScope(
+      theme: theme,
+      child: MaterialApp(
       scaffoldMessengerKey: _scaffoldMessengerKey,
       title: 'SnipSnap - Screen Capture & Markup',
       debugShowCheckedModeBanner: false,
-      theme: _isDarkMode
-          ? ThemeData(
-              brightness: Brightness.dark,
-              scaffoldBackgroundColor: AppColors.canvasBg,
-              colorScheme: const ColorScheme.dark(
-                primary: AppColors.accent,
-                surface: AppColors.darkSurface,
-              ),
-              textTheme: GoogleFonts.interTextTheme(
-                ThemeData.dark().textTheme,
-              ),
-              useMaterial3: true,
-            )
-          : ThemeData(
-              brightness: Brightness.light,
-              scaffoldBackgroundColor: AppColors.canvasBgLight,
-              colorScheme: const ColorScheme.light(
-                primary: AppColors.accent,
-                surface: AppColors.lightSurface,
-              ),
-              textTheme: GoogleFonts.interTextTheme(
-                ThemeData.light().textTheme,
-              ),
-              useMaterial3: true,
-            ),
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: theme.isDark ? Brightness.dark : Brightness.light,
+        scaffoldBackgroundColor: theme.canvas,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: theme.ink,
+          brightness: theme.isDark ? Brightness.dark : Brightness.light,
+        ).copyWith(
+          surface: theme.surface,
+          onSurface: theme.ink,
+          primary: theme.ink,
+          onPrimary: theme.onActive,
+        ),
+        textTheme: GoogleFonts.interTextTheme(
+          theme.isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme,
+        ).apply(bodyColor: theme.ink, displayColor: theme.ink),
+        dividerColor: theme.border,
+      ),
       home: Scaffold(
-        backgroundColor: _isDarkMode ? AppColors.canvasBg : AppColors.canvasBgLight,
+        backgroundColor: theme.canvas,
         body: CallbackShortcuts(
         bindings: _buildShortcutBindings(),
         child: Focus(
@@ -1551,7 +1559,7 @@ class _MainScreenState extends State<MainScreen> {
                         child: Tooltip(
                           message: 'Show Tool Properties Drawer',
                           child: Material(
-                            color: _isDarkMode ? AppColors.darkSurface : AppColors.lightSurface,
+                            color: theme.surface,
                             elevation: 6,
                             borderRadius: BorderRadius.circular(20),
                             child: InkWell(
@@ -1561,14 +1569,14 @@ class _MainScreenState extends State<MainScreen> {
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: AppColors.accent, width: 1.2),
+                                  border: Border.all(color: theme.ink, width: 1.2),
                                 ),
-                                child: const Row(
+                                child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.tune_rounded, size: 16, color: AppColors.accent),
-                                    SizedBox(width: 6),
-                                    Text('Properties', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.accent)),
+                                    Icon(Icons.tune_rounded, size: 16, color: theme.ink),
+                                    const SizedBox(width: 6),
+                                    Text('Properties', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: theme.ink)),
                                   ],
                                 ),
                               ),
@@ -1599,6 +1607,13 @@ class _MainScreenState extends State<MainScreen> {
                       ),
 
                     // Capturing Overlay Spinner
+                    //
+                    // Deliberately theme-invariant: this scrim dims whatever
+                    // was on screen the instant before a real OS-level
+                    // capture, in both chrome modes, the same way a modal
+                    // barrier would. Tokenising it to `t.ink` would flip its
+                    // polarity in dark mode (a light wash instead of a dim)
+                    // and risk the white spinner/caption vanishing against it.
                     if (_isCapturing)
                       Positioned.fill(
                         child: Container(
@@ -1607,7 +1622,7 @@ class _MainScreenState extends State<MainScreen> {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                CircularProgressIndicator(color: AppColors.accent),
+                                CircularProgressIndicator(color: Colors.white),
                                 SizedBox(height: 16),
                                 Text(
                                   'Waiting for screen capture...',
@@ -1715,6 +1730,6 @@ class _MainScreenState extends State<MainScreen> {
           ),
         ),
       ),
-    ));
+    )));
   }
 }
