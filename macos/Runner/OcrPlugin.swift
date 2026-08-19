@@ -46,18 +46,48 @@ class OcrPlugin: NSObject {
     return VNRecognizeTextRequestRevision2
   }
 
-  /// Languages the recogniser can handle, for the exact level and revision
-  /// `recognize` will use. The class-level query is deprecated as of macOS 12,
-  /// so this asks a configured request instance instead.
-  private func supportedLanguages() -> [String] {
-    let request = VNRecognizeTextRequest()
+  /// The single place a text request is configured. `availability` and
+  /// `recognize` both go through it, so what we advertise can never drift from
+  /// what we actually attempt.
+  private static func configure(_ request: VNRecognizeTextRequest) {
     request.recognitionLevel = .accurate
+    request.usesLanguageCorrection = true
     request.revision = Self.preferredRevision
-    return (try? request.supportedRecognitionLanguages()) ?? []
+    if #available(macOS 13.0, *) {
+      // Revision 3 can pick the language per image. Without this, Vision
+      // silently defaults to `["en_US"]` only.
+      request.automaticallyDetectsLanguage = true
+    }
+  }
+
+  /// The languages `recognize` will actually attempt — *not* everything the
+  /// revision is capable of. The two differ on macOS 12; see below.
+  private func advertisedLanguages() -> [String] {
+    let request = VNRecognizeTextRequest()
+    Self.configure(request)
+
+    if #available(macOS 13.0, *) {
+      // Auto-detection is on, so any supported language is genuinely on offer.
+      // (The class-level query is deprecated as of macOS 12; ask the configured
+      // instance instead.)
+      return (try? request.supportedRecognitionLanguages()) ?? []
+    }
+
+    // macOS 12 / revision 2 has no `automaticallyDetectsLanguage`, so the
+    // request runs against a fixed, priority-ordered list — Vision's default,
+    // `["en_US"]`. We report exactly that list rather than the wider set the
+    // revision could support, because the alternative is worse: widening
+    // `recognitionLanguages` to every supported language would degrade accuracy
+    // on every capture, including the overwhelmingly common English one, to
+    // serve a case nothing can request yet (no caller reads
+    // `OcrAvailability.languages`, and there is no language picker). Narrow and
+    // honest is also the reversible choice — when a picker exists it can pass a
+    // language through and both sides widen together.
+    return request.recognitionLanguages
   }
 
   private func availability() -> [String: Any] {
-    let languages = supportedLanguages()
+    let languages = advertisedLanguages()
     if languages.isEmpty {
       return [
         "available": false,
@@ -135,11 +165,26 @@ class OcrPlugin: NSObject {
         ])
       }
 
-      request.recognitionLevel = .accurate
-      request.usesLanguageCorrection = true
-      request.revision = Self.preferredRevision
+      Self.configure(request)
 
       let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+
+      // Defence in depth against a hang. Every reply above happens either in
+      // the completion handler or in the `catch`; if Vision ever returned
+      // without doing either, nothing would answer the channel and the Dart
+      // Future would never complete — there is no timeout anywhere in the Dart
+      // path, so the OCR panel would spin forever with no recovery. The sink is
+      // already drained on every normal path, which makes this a no-op there.
+      defer {
+        sink.send(
+          FlutterError(
+            code: "recognize_failed",
+            message: "Vision finished without returning a result.",
+            details: nil
+          )
+        )
+      }
+
       do {
         try handler.perform([request])
       } catch {
@@ -180,9 +225,14 @@ class OcrPlugin: NSObject {
 
 /// Delivers a `FlutterResult` exactly once, always on the main thread.
 ///
-/// Vision's completion handler and `perform`'s `throw` can both fire for one
-/// call, and neither runs on the platform thread. Replying twice, or from a
-/// background thread, is undefined behaviour in the Flutter engine.
+/// The once-only guarantee is the point. `VNImageRequestHandler.perform`
+/// invokes the completion handler *synchronously*, so a request that both
+/// reports an error to the handler and makes `perform` throw would otherwise
+/// call `FlutterResult` twice — which is not allowed.
+///
+/// The main-thread hop is merely tidiness, not a correctness requirement:
+/// `FlutterChannels.h` documents the reply callback as invocable from any
+/// thread. It is kept so replies reach Dart from one predictable queue.
 private final class ResultSink {
   private let lock = NSLock()
   private var result: FlutterResult?
