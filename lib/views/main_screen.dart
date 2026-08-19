@@ -33,6 +33,88 @@ import 'dialogs/shortcut_settings_dialog.dart';
 import 'editor_canvas.dart';
 import 'gallery_sidebar.dart';
 
+/// Builds the root [ColorScheme] entirely from [t]'s tokens, filling every
+/// M3 colour role explicitly rather than deriving one from a seed colour.
+///
+/// `ColorScheme.fromSeed` cannot be used here: its `SchemeTonalSpot`
+/// algorithm hardcodes non-zero chroma for `secondary` (16), `tertiary`
+/// (24), and every `*Container`/`outline`/`surfaceContainer*` role
+/// *regardless of the seed colour's own chroma* — so even a perfectly
+/// neutral seed like [SnipTheme.ink] leaks colour into roles this app never
+/// reads directly, but that stock Material widgets do: an `AlertDialog`'s
+/// icon defaults to `colorScheme.secondary`, its background to
+/// `surfaceContainerHigh`, a `PopupMenuButton`'s highlight to `secondary`,
+/// and so on. `copyWith`-ing a handful of roles after `fromSeed` is
+/// whack-a-mole against a ~30-role scheme; constructing every role
+/// explicitly removes the entire class of leak instead.
+///
+/// Only [SnipTheme.danger]/[SnipTheme.onDanger] are allowed to carry
+/// chroma here — the one sanctioned exception, same as everywhere else in
+/// this design language. `test/main_screen_color_scheme_test.dart` asserts
+/// every other role stays neutral.
+///
+/// A top-level function (not a method on [_MainScreenState]) so it is
+/// importable and unit-testable without pumping `MainScreen` — which
+/// cannot be widget-tested (it builds an `EditorCanvas`, which emits
+/// `Image.file`, which hangs `flutter_tester`).
+ColorScheme snipColorScheme(SnipTheme t) {
+  final brightness = t.isDark ? Brightness.dark : Brightness.light;
+  return ColorScheme(
+    brightness: brightness,
+    primary: t.ink,
+    onPrimary: t.onActive,
+    primaryContainer: t.activeFill,
+    onPrimaryContainer: t.onActive,
+    primaryFixed: t.activeFill,
+    primaryFixedDim: t.activeFill,
+    onPrimaryFixed: t.onActive,
+    onPrimaryFixedVariant: t.onActive,
+    secondary: t.inkMuted,
+    onSecondary: t.surfaceRaised,
+    secondaryContainer: t.surfaceRaised,
+    onSecondaryContainer: t.ink,
+    secondaryFixed: t.surfaceRaised,
+    secondaryFixedDim: t.surface,
+    onSecondaryFixed: t.ink,
+    onSecondaryFixedVariant: t.ink,
+    tertiary: t.inkMuted,
+    onTertiary: t.surfaceRaised,
+    tertiaryContainer: t.surfaceRaised,
+    onTertiaryContainer: t.ink,
+    tertiaryFixed: t.surfaceRaised,
+    tertiaryFixedDim: t.surface,
+    onTertiaryFixed: t.ink,
+    onTertiaryFixedVariant: t.ink,
+    error: t.danger,
+    onError: t.onDanger,
+    errorContainer: t.danger,
+    onErrorContainer: t.onDanger,
+    surface: t.surface,
+    onSurface: t.ink,
+    surfaceDim: t.canvas,
+    surfaceBright: t.surfaceRaised,
+    surfaceContainerLowest: t.canvas,
+    surfaceContainerLow: t.surface,
+    surfaceContainer: t.surface,
+    surfaceContainerHigh: t.surfaceRaised,
+    surfaceContainerHighest: t.surfaceRaised,
+    onSurfaceVariant: t.inkMuted,
+    outline: t.border,
+    outlineVariant: t.border,
+    // Deliberately not per-mode: see SnipTheme.scrim's own doc comment.
+    shadow: SnipTheme.scrim,
+    scrim: SnipTheme.scrim,
+    inverseSurface: t.activeFill,
+    onInverseSurface: t.onActive,
+    inversePrimary: t.onActive,
+    // Killed rather than mapped: M3's default elevation overlay tints raised
+    // surfaces with `surfaceTint` (normally `primary`), which would wash
+    // higher-elevation panels with a visible grey overlay — exactly the kind
+    // of unearned visual weight the hairline/flat skeleton language avoids.
+    surfaceTint: Colors.transparent,
+  );
+}
+
 /// Sentinel mirroring the one in the models so "leave unchanged" stays
 /// distinguishable from "clear this colour".
 const Object _unsetProperty = Object();
@@ -102,6 +184,25 @@ class _MainScreenState extends State<MainScreen> {
   bool _isCapturing = false;
   bool _isDarkMode = true;
 
+  /// The resolved theme for the current [_isDarkMode] state.
+  ///
+  /// `MainScreen` is the widget that *establishes* [SnipThemeScope] — its
+  /// `build()` constructs and returns it (see below). That means this
+  /// State's own [context] sits above, not below, that scope:
+  /// `SnipTheme.of(context)` walks context's ancestors, and there is no
+  /// SnipThemeScope among them (`lib/main.dart` wraps `MainScreen` directly
+  /// in a plain `MaterialApp`, nothing more) — it would never see the scope
+  /// this same build() call mounts beneath it. So every chrome read that
+  /// belongs to main_screen.dart itself is forced through [SnipTheme.forMode],
+  /// hoisted here once rather than repeating the ternary at each call site.
+  ///
+  /// Any *descendant* widget — HeaderBar, ToolSidebar, StylePicker, the
+  /// dialogs, GallerySidebar, OcrResultPanel, EditorCanvas (Tasks 3-6) — is
+  /// mounted with its own BuildContext genuinely inside the scope this
+  /// build() constructs, and should read via `SnipTheme.of(context)` instead.
+  SnipTheme get _theme =>
+      SnipTheme.forMode(_isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light);
+
   String? _selectedAnnotationId;
 
   Annotation? get _selectedAnnotation {
@@ -118,7 +219,7 @@ class _MainScreenState extends State<MainScreen> {
     // `CanvasTool` by `ToolProperties.createDefaults()`, so this branch is
     // never actually reached. The colour is chrome-adjacent rather than
     // annotation data, so it reads from the theme like everything else here.
-    final t = SnipTheme.forMode(_isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light);
+    final t = _theme;
     return _toolPropertiesMap[targetTool] ?? ToolProperties(activeColor: t.ink);
   }
 
@@ -155,7 +256,7 @@ class _MainScreenState extends State<MainScreen> {
     }
 
     setState(() {
-      final t = SnipTheme.forMode(_isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light);
+      final t = _theme;
       final currentProps =
           _toolPropertiesMap[targetTool] ?? ToolProperties(activeColor: t.ink);
 
@@ -854,7 +955,7 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _handleTimerCapture() async {
     setState(() => _isCapturing = true);
-    final t = SnipTheme.forMode(_isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light);
+    final t = _theme;
     _scaffoldMessengerKey.currentState?.showSnackBar(
       SnackBar(
         content: Text(
@@ -1273,7 +1374,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _showToast(String message) {
-    final t = SnipTheme.forMode(_isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light);
+    final t = _theme;
     final toastBg = t.surfaceRaised;
     final textColor = t.ink;
     final borderColor = t.border;
@@ -1296,9 +1397,10 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = SnipTheme.forMode(
-      _isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light,
-    );
+    // This State's own `context` sits above the SnipThemeScope built below,
+    // so `_theme` (SnipTheme.forMode, not .of(context)) is the only option
+    // here too — see `_theme`'s doc comment for why.
+    final theme = _theme;
 
     return SnipThemeScope(
       theme: theme,
@@ -1310,15 +1412,7 @@ class _MainScreenState extends State<MainScreen> {
         useMaterial3: true,
         brightness: theme.isDark ? Brightness.dark : Brightness.light,
         scaffoldBackgroundColor: theme.canvas,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: theme.ink,
-          brightness: theme.isDark ? Brightness.dark : Brightness.light,
-        ).copyWith(
-          surface: theme.surface,
-          onSurface: theme.ink,
-          primary: theme.ink,
-          onPrimary: theme.onActive,
-        ),
+        colorScheme: snipColorScheme(theme),
         textTheme: GoogleFonts.interTextTheme(
           theme.isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme,
         ).apply(bodyColor: theme.ink, displayColor: theme.ink),
@@ -1569,14 +1663,16 @@ class _MainScreenState extends State<MainScreen> {
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: theme.ink, width: 1.2),
+                                  // CTA emphasis, not the exclusive active
+                                  // control -- theme.emphasis, not activeFill.
+                                  border: Border.all(color: theme.emphasis, width: 1.2),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.tune_rounded, size: 16, color: theme.ink),
+                                    Icon(Icons.tune_rounded, size: 16, color: theme.emphasis),
                                     const SizedBox(width: 6),
-                                    Text('Properties', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: theme.ink)),
+                                    Text('Properties', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: theme.emphasis)),
                                   ],
                                 ),
                               ),
@@ -1608,16 +1704,17 @@ class _MainScreenState extends State<MainScreen> {
 
                     // Capturing Overlay Spinner
                     //
-                    // Deliberately theme-invariant: this scrim dims whatever
-                    // was on screen the instant before a real OS-level
-                    // capture, in both chrome modes, the same way a modal
-                    // barrier would. Tokenising it to `t.ink` would flip its
+                    // SnipTheme.scrim, not a per-mode token: this dims
+                    // whatever was on screen the instant before a real
+                    // OS-level capture, in both chrome modes, the same way a
+                    // modal barrier would. A per-mode token would flip
                     // polarity in dark mode (a light wash instead of a dim)
-                    // and risk the white spinner/caption vanishing against it.
+                    // and risk the white spinner/caption vanishing against it
+                    // — see SnipTheme.scrim's own doc comment.
                     if (_isCapturing)
                       Positioned.fill(
                         child: Container(
-                          color: Colors.black54,
+                          color: SnipTheme.scrim,
                           child: const Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,

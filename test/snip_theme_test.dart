@@ -28,7 +28,7 @@ void main() {
       expect(
         [t.canvas, t.surface, t.surfaceRaised, t.ink, t.inkMuted, t.inkFaint,
          t.border, t.borderStrong, t.activeFill, t.onActive,
-         t.selectedFill, t.hoverFill, t.danger, t.onDanger],
+         t.selectedFill, t.hoverFill, t.danger, t.onDanger, t.emphasis],
         everyElement(isA<Color>()),
         reason: '$mode has an incomplete token set',
       );
@@ -102,7 +102,7 @@ void main() {
       final t = SnipTheme.forMode(mode);
       for (final c in [t.canvas, t.surface, t.surfaceRaised, t.ink,
                        t.inkMuted, t.inkFaint, t.activeFill, t.onActive,
-                       t.selectedFill, t.hoverFill]) {
+                       t.selectedFill, t.hoverFill, t.emphasis]) {
         final maxC = math.max(c.r, math.max(c.g, c.b));
         final minC = math.min(c.r, math.min(c.g, c.b));
         expect(maxC - minC, lessThan(0.04),
@@ -123,6 +123,49 @@ void main() {
       expect(maxC - minC, greaterThanOrEqualTo(0.04),
           reason: '$mode: danger has lost its chroma');
     }
+  });
+
+  test('emphasis matches ink and stays legible on canvas/surface', () {
+    // emphasis is a named alias for "ink-strength weight on a
+    // call-to-action that is not the exclusive active control" (see the
+    // class doc comment) — currently identical to ink in both modes.
+    for (final mode in SnipThemeMode.values) {
+      final t = SnipTheme.forMode(mode);
+      expect(t.emphasis, t.ink, reason: '$mode: emphasis should equal ink');
+      expect(_contrast(t.emphasis, t.surface), greaterThanOrEqualTo(4.5),
+          reason: '$mode: emphasis on surface');
+      expect(_contrast(t.emphasis, t.canvas), greaterThanOrEqualTo(4.5),
+          reason: '$mode: emphasis on canvas');
+    }
+  });
+
+  test('scrim is a single mode-invariant translucent constant', () {
+    // Unlike every other token, scrim is not a per-mode field — it is a
+    // static const on the class, so there is only ever one value to read
+    // regardless of SnipThemeMode. This asserts both the value and that
+    // there is no light/dark variance to accidentally introduce later.
+    expect(SnipTheme.scrim, const Color(0x8A000000));
+    expect(SnipTheme.scrim.a, closeTo(0.54, 0.01),
+        reason: 'scrim should be translucent, matching the pre-conversion '
+            'Colors.black54 literal it replaces');
+    final maxC = math.max(SnipTheme.scrim.r, math.max(SnipTheme.scrim.g, SnipTheme.scrim.b));
+    final minC = math.min(SnipTheme.scrim.r, math.min(SnipTheme.scrim.g, SnipTheme.scrim.b));
+    expect(maxC - minC, lessThan(0.04), reason: 'scrim must be neutral');
+  });
+
+  test('dark ink deliberately reuses light\'s paper tone, not a fresh grey',
+      () {
+    // See SnipTheme.dark()'s doc comment: the two paper tones this design
+    // uses appear on both sides of the inversion with their roles swapped,
+    // rather than each mode inventing its own near-black/near-white. This
+    // pins that identity so a future "neutralise the 2-unit deficit" edit
+    // doesn't quietly break it.
+    expect(SnipTheme.dark().ink, SnipTheme.light().canvas,
+        reason: "dark's ink should be exactly light's canvas hex");
+    expect(SnipTheme.light().ink, SnipTheme.dark().onActive,
+        reason: "light's ink should be exactly dark's onActive hex");
+    expect(SnipTheme.light().ink, SnipTheme.dark().onDanger,
+        reason: "light's ink should be exactly dark's onDanger hex");
   });
 
   testWidgets('SnipThemeScope provides and updates', (tester) async {

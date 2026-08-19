@@ -16,7 +16,7 @@ enum SnipThemeMode { light, dark }
 /// control is a hairline outline, the active one is a solid [activeFill] plate
 /// with its icon knocked out in [onActive].
 ///
-/// Three chrome needs beyond the active/inactive binary have sanctioned
+/// Five chrome needs beyond the active/inactive binary have sanctioned
 /// tokens rather than being left for each call site to invent:
 ///
 /// * **Selected, not exclusive** — [selectedFill] is for multi-select or
@@ -29,11 +29,23 @@ enum SnipThemeMode { light, dark }
 ///   rows and tiles that have no border to strengthen (list rows, icon
 ///   buttons). [borderStrong] remains the hover treatment for anything
 ///   that already has a hairline. Foreground stays [ink]/[inkMuted].
+/// * **Call-to-action emphasis** — [emphasis] is for a control that wants
+///   more visual weight than a resting hairline (a pill nudging the user to
+///   reopen a collapsed panel, a header CTA) but is *not* the app's one
+///   exclusive active control — [activeFill] stays reserved for that.
+///   Skeleton has no colour to spend on emphasis, so [emphasis] borrows
+///   [ink]'s strength for a border/icon/text instead of introducing a tint.
 /// * **Destructive** — [danger] and [onDanger] are the one sanctioned
 ///   chromatic exception to the monochrome rule. Deleting a capture is
 ///   irreversible, and the safety affordance of a red warning outweighs
 ///   monochrome purity; naming it a token keeps the exception greppable
 ///   and singular instead of every call site picking its own red.
+/// * **Scrim** — [SnipTheme.scrim] dims live content behind a modal-style
+///   overlay (the moment between triggering an OS-level capture and it
+///   landing). It is the one token that is deliberately *not* per-mode: a
+///   scrim's job is to darken whatever is behind it regardless of chrome
+///   mode, so it is a single `static const`, not a light/dark pair. See its
+///   own doc comment for why per-mode would actively be wrong here.
 @immutable
 class SnipTheme {
   final SnipThemeMode mode;
@@ -88,9 +100,26 @@ class SnipTheme {
   /// active plate.
   final Color onDanger;
 
+  /// Border/icon/text strength for a call-to-action that wants more weight
+  /// than a resting hairline but is not the app's one exclusive active
+  /// control (that stays [activeFill]). Same value as [ink] in both modes —
+  /// named separately so header/toolbar call sites converge on one
+  /// convention instead of each reinventing "strong ink border" ad hoc.
+  final Color emphasis;
+
   final double hairline;
   final double activeBorderWidth;
   final double radius;
+
+  /// The one sanctioned translucent scrim, for a full-bleed dim over live
+  /// content. Deliberately mode-invariant, unlike every other token: a
+  /// scrim's job is to darken whatever is behind it regardless of chrome
+  /// mode. Tokenising it per-mode (e.g. to [ink] with alpha) would flip its
+  /// polarity in dark mode — [ink] is near-white there, so it would wash the
+  /// screen *lighter* mid-capture instead of dimming it, and risk whatever
+  /// foreground content sits on top of it (a spinner, a caption) becoming
+  /// illegible. Equal to the pre-conversion `Colors.black54` literal.
+  static const Color scrim = Color(0x8A000000);
 
   const SnipTheme({
     required this.mode,
@@ -108,6 +137,7 @@ class SnipTheme {
     required this.hoverFill,
     required this.danger,
     required this.onDanger,
+    required this.emphasis,
     this.hairline = 1.0,
     this.activeBorderWidth = 1.5,
     this.radius = 6.0,
@@ -130,9 +160,23 @@ class SnipTheme {
         hoverFill: Color(0xFFEDEDED),
         danger: Color(0xFFB3261E),
         onDanger: Color(0xFFFBFBFA),
+        emphasis: Color(0xFF141414),
       );
 
   /// The inversion. Every role swaps; nothing is tinted.
+  ///
+  /// [ink] here (`0xFFF2F2F0`) is not perfectly neutral — R/G are 242, B is
+  /// 240, a 2-unit deficit — and that is deliberate, not an oversight: it is
+  /// the exact same hex as [SnipTheme.light]'s [canvas]. The two paper tones
+  /// this design uses, `0xFF141414` (near-black) and `0xFFF2F2F0` (near-white
+  /// with a hair of warmth), each appear on both sides of the inversion —
+  /// `0xFF141414` is light's [ink] *and* dark's [onActive]/[onDanger];
+  /// `0xFFF2F2F0` is light's [canvas] *and* dark's [ink] — so "paper" and
+  /// "mark" are always the same two physical colours with their roles
+  /// swapped, never two different colour identities. Snapping dark's [ink]
+  /// to a fully neutral grey would be flatter but would break that identity.
+  /// `test/snip_theme_test.dart`'s "dark ink reuses light's paper tone"
+  /// case pins this so a future "cleanup" doesn't quietly undo it.
   factory SnipTheme.dark() => const SnipTheme(
         mode: SnipThemeMode.dark,
         canvas: Color(0xFF0E0E0E),
@@ -149,6 +193,7 @@ class SnipTheme {
         hoverFill: Color(0xFF202020),
         danger: Color(0xFFFF6B6B),
         onDanger: Color(0xFF141414),
+        emphasis: Color(0xFFF2F2F0),
       );
 
   static SnipTheme forMode(SnipThemeMode mode) =>
