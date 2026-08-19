@@ -16,6 +16,9 @@ enum CanvasTool {
   crop,
   fill,
   colorPicker,
+
+  /// Extracts text from the capture using the platform OCR engine.
+  ocr,
 }
 
 /// Outlines available to [CanvasTool.shape].

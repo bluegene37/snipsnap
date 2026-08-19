@@ -106,6 +106,10 @@ class ToolSidebar extends StatelessWidget {
     ToolSidebarItem(CanvasTool.ruler, Icons.straighten_rounded, 'Ruler', 'Measure pixel distance  (M)'),
     ToolSidebarItem(CanvasTool.fill, Icons.format_color_fill_rounded, 'Fill', 'Paint bucket fill (connected / global)  (G)'),
     ToolSidebarItem(CanvasTool.crop, Icons.crop_rounded, 'Crop', 'Crop & expand canvas bounds  (C)'),
+    // Labelled "Extract", not "Text": the Text tool above already owns that
+    // word, and two identically labelled buttons in a 56px column are
+    // indistinguishable.
+    ToolSidebarItem(CanvasTool.ocr, Icons.text_snippet_outlined, 'Extract', 'Extract text from the image — drag a region or click for the whole image  (E)'),
   ];
 
   @override

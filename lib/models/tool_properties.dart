@@ -120,6 +120,7 @@ class ToolProperties {
           opacity: 1.0,
           isGlobalFill: false),
       CanvasTool.colorPicker: const ToolProperties(activeColor: AppColors.accent),
+      CanvasTool.ocr: const ToolProperties(activeColor: AppColors.accent),
       CanvasTool.crop: const ToolProperties(activeColor: AppColors.accent),
     };
   }

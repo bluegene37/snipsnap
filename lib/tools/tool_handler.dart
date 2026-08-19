@@ -8,6 +8,7 @@ import 'crop_tool.dart';
 import 'fill_tool.dart';
 import 'highlighter_tool.dart';
 import 'line_tool.dart';
+import 'ocr_tool.dart';
 import 'pen_tool.dart';
 import 'ruler_tool.dart';
 import 'select_tool.dart';
@@ -23,6 +24,13 @@ abstract class ToolDelegate {
   void onToolSelected(CanvasTool tool);
   void onStepCounterIncremented(int step);
   void showTextPrompt(Offset pos);
+
+  /// Requests text extraction over [canvasRegion], in **canvas** coordinates.
+  /// A null region means the whole capture.
+  ///
+  /// The implementor converts to native image pixels before the request leaves
+  /// the canvas — handlers never see image space.
+  void onExtractText(Rect? canvasRegion);
 
   List<Annotation> get annotations;
   String? get selectedAnnotationId;
@@ -154,5 +162,7 @@ ToolHandler handlerFor(CanvasTool tool, ToolDelegate delegate) {
       return FillToolHandler(delegate);
     case CanvasTool.colorPicker:
       return ColorPickerToolHandler(delegate);
+    case CanvasTool.ocr:
+      return OcrToolHandler(delegate);
   }
 }

@@ -206,6 +206,47 @@ void main() {
       );
     });
 
+    // -------------------------------------------------------------------------
+    // Task 14's OCR boundary.
+    //
+    // `OcrToolHandler` hands over canvas-space rects; `OcrService.regionPx` is
+    // native image pixels. `onExtractText` on the canvas is the only place the
+    // two meet, and a missing conversion there would crop an arbitrary and
+    // plausible-looking rectangle of the bitmap — wrong text, no error.
+    // -------------------------------------------------------------------------
+
+    test('onExtractText converts the region canvas -> image pixels', () {
+      final body = _bodyOf(source, 'void onExtractText(');
+      expect(
+        body,
+        contains('toImageRect('),
+        reason: 'the handler works in canvas space and OcrService crops in '
+            'image pixels; without this the wrong region is read',
+      );
+      expect(
+        body,
+        contains('if (!p.isValid) return;'),
+        reason: 'an invalid projection cannot place the region; requesting '
+            'anyway would pass raw canvas numbers off as image pixels',
+      );
+      expect(
+        'widget.onExtractText?.call('.allMatches(source).length,
+        1,
+        reason: 'the extraction request must leave the canvas from exactly one '
+            'place, the one that converts',
+      );
+    });
+
+    test('a null region survives as null rather than becoming a rect', () {
+      // Null means "the whole capture", which is also the only cacheable
+      // request. Substituting a rect here would silently disable the cache and
+      // clip the full-image read to the viewport.
+      expect(
+        _bodyOf(source, 'void onExtractText('),
+        contains('canvasRegion == null ? null :'),
+      );
+    });
+
     test('delegate writes route through the converting helpers', () {
       expect(
         _bodyOf(source, 'void onAnnotationAdded('),

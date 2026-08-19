@@ -29,6 +29,7 @@ class MockToolDelegate implements ToolDelegate {
   Offset? promptedTextPos;
   Offset? canvasFillPos;
   Offset? sampledColorPos;
+  final List<Rect?> extractTextRegions = [];
 
   // Configuration properties
   @override
@@ -127,6 +128,9 @@ class MockToolDelegate implements ToolDelegate {
   void onSampleColorFromCanvas(Offset pos) {
     sampledColorPos = pos;
   }
+
+  @override
+  void onExtractText(Rect? canvasRegion) => extractTextRegions.add(canvasRegion);
 
   @override
   void updateAnnotation(String id, Annotation updatedAnnotation) {

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 import '../models/annotation.dart';
 import '../models/app_shortcut.dart';
 import '../models/capture_item.dart';
@@ -13,6 +14,8 @@ import '../models/tool_properties.dart';
 import '../services/capture_service.dart';
 import '../services/clipboard_service.dart';
 import '../services/database_service.dart';
+import '../services/ocr/ocr_engine.dart';
+import '../services/ocr/ocr_service.dart';
 import '../services/render_service.dart';
 import '../services/shortcut_service.dart';
 import '../services/storage_service.dart';
@@ -20,6 +23,7 @@ import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 import '../utils/image_operations.dart';
 import 'components/header_bar.dart';
+import 'components/ocr_result_panel.dart';
 import 'components/style_picker.dart';
 import 'components/tool_sidebar.dart';
 import 'dialogs/about_dialog.dart';
@@ -66,6 +70,19 @@ class _MainScreenState extends State<MainScreen> {
   final List<CanvasSnapshot> _redoStack = [];
   static const int _maxUndoSteps = 80;
   int _imageRevision = 0;
+
+  // Text extraction (OCR)
+  final OcrService _ocrService = OcrService();
+
+  /// Null while the result panel is closed. `OcrResult.empty` with no
+  /// [_ocrUnavailableReason] is the genuine "ran, found nothing" state.
+  OcrResult? _ocrResult;
+  bool _isOcrRunning = false;
+  String? _ocrUnavailableReason;
+
+  /// Guards against an older extraction landing after a newer one. Region
+  /// requests are never cached, so two quick drags really do race.
+  int _ocrRequestToken = 0;
 
   /// Debounces persistence during high-frequency drag updates.
   Timer? _persistDebounce;
@@ -510,6 +527,75 @@ class _MainScreenState extends State<MainScreen> {
     _redoStack.clear();
   }
 
+  /// The key `OcrService` caches full-image results under.
+  ///
+  /// The service cannot see the bitmap change underneath it, so invalidation is
+  /// entirely the caller's job. Three components, each covering a different way
+  /// the bytes at [CaptureItem.filePath] can stop matching a cached result:
+  ///
+  /// * the capture id — a different capture is a different image;
+  /// * the file path — the same capture can be repointed at another file;
+  /// * [_imageRevision] — bumped by crop, flatten, flood fill and undo/redo,
+  ///   i.e. every operation that rewrites the file in place while the id and
+  ///   the path both stay the same. It only ever increments and is never reset,
+  ///   so a key can never be reused for different pixels — undo does not walk
+  ///   it back onto the pre-edit key, it moves forward onto a fresh one and
+  ///   simply re-runs.
+  String _ocrCacheKeyFor(CaptureItem capture) =>
+      '${capture.id}|${capture.filePath}|$_imageRevision';
+
+  /// Runs OCR over the active capture, optionally limited to [imageRegionPx]
+  /// (native image pixels — `EditorCanvas` has already projected it).
+  Future<void> _handleExtractText(Rect? imageRegionPx) async {
+    final capture = _activeCapture;
+    if (capture == null) return;
+
+    final token = ++_ocrRequestToken;
+
+    // "Unavailable" and "found nothing" both come back from the service as an
+    // empty result. Probing availability first is the only way to tell the
+    // user which one happened.
+    final availability = await _ocrService.availability();
+    if (!mounted || token != _ocrRequestToken) return;
+    if (!availability.available) {
+      setState(() {
+        _isOcrRunning = false;
+        _ocrUnavailableReason = availability.reason ??
+            'Text extraction is not available on this system.';
+        _ocrResult = OcrResult.empty;
+      });
+      return;
+    }
+
+    setState(() {
+      _isOcrRunning = true;
+      _ocrUnavailableReason = null;
+      _ocrResult = OcrResult.empty;
+    });
+
+    final result = await _ocrService.recognizeCapture(
+      imagePath: capture.filePath,
+      cacheKey: _ocrCacheKeyFor(capture),
+      regionPx: imageRegionPx,
+    );
+
+    if (!mounted || token != _ocrRequestToken) return;
+    setState(() {
+      _isOcrRunning = false;
+      _ocrResult = result;
+    });
+  }
+
+  /// Closes the panel and drops every cached page. Called whenever the editor
+  /// switches to a different bitmap.
+  void _resetOcr() {
+    _ocrService.clearCache();
+    _ocrRequestToken++;
+    _ocrResult = null;
+    _isOcrRunning = false;
+    _ocrUnavailableReason = null;
+  }
+
   void _onAnnotationAdded(Annotation annotation) {
     _pushUndoState();
     setState(() {
@@ -742,6 +828,7 @@ class _MainScreenState extends State<MainScreen> {
     );
 
     setState(() {
+      _resetOcr();
       _captures.insert(0, newItem);
       _activeCapture = newItem;
       _annotations = [];
@@ -1248,6 +1335,7 @@ class _MainScreenState extends State<MainScreen> {
                             // the already-filled image.
                             onBeforeCanvasFill: () => _pushUndoState(captureImage: true),
                             onImageSizeResolved: _handleImageSizeResolved,
+                            onExtractText: _handleExtractText,
                             onPerformCanvasFill: (pos) {
                               setState(() {
                                 _imageRevision++;
@@ -1368,6 +1456,55 @@ class _MainScreenState extends State<MainScreen> {
                         ),
                       ),
 
+                    // Extracted-text panel. Bottom-left keeps it clear of the
+                    // properties drawer and its collapsed pill on the right.
+                    if (_ocrResult != null)
+                      Positioned(
+                        left: 84,
+                        bottom: 16,
+                        child: OcrResultPanel(
+                          result: _ocrResult!,
+                          isLoading: _isOcrRunning,
+                          unavailableReason: _ocrUnavailableReason,
+                          isDarkMode: _isDarkMode,
+                          onClose: () => setState(() {
+                            _ocrRequestToken++;
+                            _ocrResult = null;
+                            _isOcrRunning = false;
+                            _ocrUnavailableReason = null;
+                          }),
+                          onInsertAsText: (text) {
+                            // The Text tool's own defaults, not
+                            // `_currentToolProperties` — that would read the
+                            // OCR tool's placeholder style and drop a
+                            // 16pt accent-coloured caption.
+                            final style = _toolPropertiesMap[CanvasTool.text] ??
+                                const ToolProperties(activeColor: Colors.white);
+                            // startPoint is in image pixels, the space every
+                            // annotation is stored in — _onAnnotationAdded is
+                            // the storage-side path and does not convert.
+                            final annotation = Annotation(
+                              id: const Uuid().v4(),
+                              tool: CanvasTool.text,
+                              color: style.activeColor,
+                              backgroundColor: style.textBackgroundColor,
+                              fontSize: style.fontSize,
+                              fill: style.isFilled,
+                              opacity: style.opacity,
+                              text: text,
+                              startPoint: const Offset(40, 40),
+                            );
+                            _onAnnotationAdded(annotation);
+                            setState(() {
+                              _ocrResult = null;
+                              _ocrUnavailableReason = null;
+                              _activeTool = CanvasTool.select;
+                              _selectedAnnotationId = annotation.id;
+                            });
+                          },
+                        ),
+                      ),
+
                     // Capturing Overlay Spinner
                     if (_isCapturing)
                       Positioned.fill(
@@ -1403,6 +1540,9 @@ class _MainScreenState extends State<MainScreen> {
                   onSelectItem: (item) {
                     _syncCurrentCaptureAnnotations();
                     setState(() {
+                      // A different bitmap: nothing cached for the old one can
+                      // describe it, and the open panel is about the old one.
+                      _resetOcr();
                       _activeCapture = item;
                       _annotations = List.from(item.annotations);
                       _undoStack.clear();
@@ -1424,6 +1564,7 @@ class _MainScreenState extends State<MainScreen> {
                     setState(() {
                       _captures.removeWhere((c) => c.id == item.id);
                       if (_activeCapture?.id == item.id) {
+                        _resetOcr();
                         _activeCapture = _captures.isNotEmpty ? _captures.first : null;
                         _annotations = _activeCapture != null ? List.from(_activeCapture!.annotations) : [];
                         _undoStack.clear();

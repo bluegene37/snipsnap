@@ -37,6 +37,11 @@ class EditorCanvas extends StatefulWidget {
   final ValueChanged<Color>? onSampleColor;
   final ValueChanged<Offset>? onPerformCanvasFill;
 
+  /// Fired when the OCR tool asks for text, with the region in **native image
+  /// pixels** or null for the whole capture. The handler works in canvas
+  /// space; this callback is the converted side of that boundary.
+  final void Function(Rect? imageRegionPx)? onExtractText;
+
   /// Fired with the file path and native pixel size every time a bitmap
   /// finishes decoding. The parent stores annotations in image pixels, so it
   /// needs the same size this canvas projects through — reading it from here
@@ -87,6 +92,7 @@ class EditorCanvas extends StatefulWidget {
     this.onApplyCrop,
     this.onSampleColor,
     this.onPerformCanvasFill,
+    this.onExtractText,
     this.onImageSizeResolved,
     this.onBeforeCanvasFill,
     required this.repaintBoundaryKey,
@@ -149,8 +155,14 @@ const _tapToPlaceTools = {
 
 /// Tools whose tap acts on whatever sits under the cursor. They must run
 /// before the generic "clicking an annotation selects it" fallback, otherwise
-/// the eyedropper and the fill bucket would only ever select.
-const _tapActsUnderCursorTools = {CanvasTool.fill, CanvasTool.colorPicker};
+/// the eyedropper and the fill bucket would only ever select — and clicking to
+/// read the whole image would merely select the annotation that happens to sit
+/// where the user clicked.
+const _tapActsUnderCursorTools = {
+  CanvasTool.fill,
+  CanvasTool.colorPicker,
+  CanvasTool.ocr,
+};
 
 class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   final Uuid _uuid = const Uuid();
@@ -174,6 +186,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   // Marquee Selection & Cut-and-Move Floating State
   Rect? _selectionMarquee;
+
+  /// The in-flight OCR region, in canvas coordinates, drawn while the drag is
+  /// live so the user can see what will be read. Purely a preview — the
+  /// authoritative rect is the handler's, and it is converted to image pixels
+  /// in [onExtractText].
+  Rect? _ocrRegion;
   Rect? _floatingSelectionOriginRect;
   Rect? _floatingSelectionRect;
   img.Image? _cutSelectionImage;
@@ -272,6 +290,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         _hasExtractedSelection = false;
         _selectionMarquee = null;
       }
+
+      _ocrRegion = null;
 
       _selectedAnnotationId = null;
       if (widget.activeTool != CanvasTool.crop) {
@@ -974,6 +994,21 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   @override
   void onSampleColorFromCanvas(Offset pos) => _sampleColorAt(pos);
 
+  /// The single crossing point between the OCR handler's canvas space and the
+  /// image pixels `OcrService` crops in.
+  ///
+  /// An invalid projection cannot place the region anywhere — it would hand the
+  /// service raw canvas numbers and crop an arbitrary rectangle of the bitmap —
+  /// so nothing is requested at all rather than something wrong.
+  @override
+  void onExtractText(Rect? canvasRegion) {
+    final p = _projection;
+    if (!p.isValid) return;
+    widget.onExtractText?.call(
+      canvasRegion == null ? null : p.toImageRect(canvasRegion),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Gestures
   // ---------------------------------------------------------------------------
@@ -1013,6 +1048,19 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     _focusNode.requestFocus();
     final pos = details.localPosition;
     _gestureStartPos = pos;
+
+    // The OCR tool only ever reads. Letting it fall through to the shared
+    // fallbacks below would let a drag grab the annotation sitting on top of
+    // the very text the user is trying to extract, and move it instead.
+    if (widget.activeTool == CanvasTool.ocr) {
+      setState(() {
+        _selectedAnnotationId = null;
+        _drawStart = pos;
+        _ocrRegion = Rect.fromPoints(pos, pos);
+      });
+      _toolHandler.onPanStart(details, pos);
+      return;
+    }
 
     if (widget.activeTool == CanvasTool.crop) {
       if (_activeCropRect != null) {
@@ -1146,6 +1194,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final pos = details.localPosition;
     final totalDelta = pos - _gestureStartPos;
 
+    // OCR produces no annotation, so it would never survive the
+    // `_currentAnnotation == null` guard this method ends with.
+    if (widget.activeTool == CanvasTool.ocr) {
+      if (_drawStart == null) return;
+      setState(() => _ocrRegion = Rect.fromPoints(_drawStart!, pos));
+      _toolHandler.onPanUpdate(details, pos);
+      return;
+    }
+
     if (_isDraggingCrop) {
       _updateCropRect(totalDelta);
       return;
@@ -1273,6 +1330,20 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   void _onPanEnd(DragEndDetails details) {
+    if (widget.activeTool == CanvasTool.ocr) {
+      _toolHandler.onPanEnd(details);
+      // `_currentAnnotation` is cleared here for the same reason the tail of
+      // this method clears it: switch to OCR *mid-drag* with a single-letter
+      // shortcut and this branch is what answers mouse-up, leaving the
+      // previous tool's half-drawn preview painting forever.
+      setState(() {
+        _ocrRegion = null;
+        _currentAnnotation = null;
+      });
+      _drawStart = null;
+      return;
+    }
+
     if (_isDraggingCrop) {
       setState(() {
         _isDraggingCrop = false;
@@ -1873,6 +1944,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       LogicalKeyboardKey.keyG: CanvasTool.fill,
       LogicalKeyboardKey.keyI: CanvasTool.colorPicker,
       LogicalKeyboardKey.keyC: CanvasTool.crop,
+      LogicalKeyboardKey.keyE: CanvasTool.ocr,
     };
     final tool = toolKeys[key];
     if (tool != null) {
@@ -2155,6 +2227,24 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
                           // Inline on-canvas text editing overlay
                           if (_inlineTextPos != null) _buildInlineTextEditor(),
+
+                          // OCR region marquee, drawn while the drag is live.
+                          if (widget.activeTool == CanvasTool.ocr &&
+                              _ocrRegion != null)
+                            Positioned.fromRect(
+                              rect: _ocrRegion!,
+                              child: IgnorePointer(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: AppColors.accent.withValues(alpha: 0.14),
+                                    border: Border.all(
+                                      color: AppColors.accent,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
 
                           // Eyedropper magnifier loupe HUD
                           if (widget.activeTool == CanvasTool.colorPicker &&
