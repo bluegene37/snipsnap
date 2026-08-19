@@ -3,6 +3,7 @@
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "ocr_handler.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +26,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  RegisterOcrHandler(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -40,6 +42,12 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  // Must come before the controller is released: it owns the engine, and OCR
+  // workers on other threads post their replies back through that engine.
+  // After this returns, an in-flight worker drops its reply rather than
+  // touching freed memory.
+  ShutdownOcrHandler();
+
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

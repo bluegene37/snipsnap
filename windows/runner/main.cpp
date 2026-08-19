@@ -15,6 +15,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
+  //
+  // This also serves as the platform thread's C++/WinRT apartment: an STA.
+  // Do NOT add winrt::init_apartment() here — it is only a wrapper around this
+  // same CoInitializeEx call, so a second one would just add an unbalanced
+  // reference. Note that being an STA is why ocr_handler.cpp does all of its
+  // blocking WinRT work on its own multi-threaded worker instead.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   flutter::DartProject project(L"data");
