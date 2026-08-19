@@ -382,12 +382,13 @@ class HeaderBar extends StatelessWidget {
                 '${(zoomScale * 100).round()}%',
                 style: TextStyle(
                   fontSize: 11.5,
-                  fontWeight: FontWeight.bold,
+                  // Colour cannot carry this signal — emphasis is defined
+                  // equal to ink, so an ink-vs-emphasis branch would render
+                  // identically in both states. Weight is the only lever
+                  // skeleton has left for "this differs from default."
+                  fontWeight: isDefaultZoom ? FontWeight.w500 : FontWeight.w800,
                   fontFeatures: const [FontFeature.tabularFigures()],
-                  // At rest, ordinary ink; away from 100% the readout wants
-                  // the same "more weight than a hairline" signal as a CTA,
-                  // so it borrows the emphasis token rather than a tint.
-                  color: isDefaultZoom ? t.ink : t.emphasis,
+                  color: t.ink,
                 ),
               ),
             ),
@@ -441,56 +442,28 @@ class HeaderBar extends StatelessWidget {
     );
   }
 
+  // Both toggles below are independently switchable — the gallery and the
+  // properties drawer can be open at once, neither excludes the other — so
+  // neither is the exclusive active control. selectedFill/ink, not
+  // activeFill/onActive; see _ToggleIconButton.
   Widget _buildViewGroup(SnipTheme t) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          icon: Icon(
-            isSidebarOpen ? Icons.photo_library_rounded : Icons.photo_library_outlined,
-            size: 18,
-          ),
-          color: isSidebarOpen ? t.onActive : t.ink,
+        _ToggleIconButton(
+          icon: isSidebarOpen ? Icons.photo_library_rounded : Icons.photo_library_outlined,
+          active: isSidebarOpen,
           tooltip: isSidebarOpen
               ? 'Hide Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})'
               : 'Show Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})',
-          style: IconButton.styleFrom(
-            backgroundColor: isSidebarOpen ? t.activeFill : Colors.transparent,
-            minimumSize: const Size(36, 36),
-            padding: EdgeInsets.zero,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-              side: BorderSide(
-                color: isSidebarOpen ? t.activeFill : t.border,
-                width: isSidebarOpen ? t.activeBorderWidth : t.hairline,
-              ),
-            ),
-          ),
           onPressed: onToggleSidebar,
         ),
         if (onToggleProperties != null) ...[
           const SizedBox(width: 6),
-          IconButton(
-            icon: Icon(
-              isPropertiesOpen ? Icons.tune_rounded : Icons.tune_outlined,
-              size: 18,
-            ),
-            color: isPropertiesOpen ? t.onActive : t.ink,
-            tooltip: isPropertiesOpen
-                ? 'Hide Tool Properties'
-                : 'Show Tool Properties',
-            style: IconButton.styleFrom(
-              backgroundColor: isPropertiesOpen ? t.activeFill : Colors.transparent,
-              minimumSize: const Size(36, 36),
-              padding: EdgeInsets.zero,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-                side: BorderSide(
-                  color: isPropertiesOpen ? t.activeFill : t.border,
-                  width: isPropertiesOpen ? t.activeBorderWidth : t.hairline,
-                ),
-              ),
-            ),
+          _ToggleIconButton(
+            icon: isPropertiesOpen ? Icons.tune_rounded : Icons.tune_outlined,
+            active: isPropertiesOpen,
+            tooltip: isPropertiesOpen ? 'Hide Tool Properties' : 'Show Tool Properties',
             onPressed: onToggleProperties,
           ),
         ],
@@ -616,6 +589,53 @@ class _PillIconButton extends StatelessWidget {
       constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
       padding: EdgeInsets.zero,
       onPressed: onPressed,
+    );
+  }
+}
+
+/// A view-toggle icon button: independently switchable, so it renders
+/// through [SnipTheme.controlDecoration]/[SnipTheme.controlForeground] with
+/// `exclusive: false` — a [SnipTheme.selectedFill] highlight with ordinary
+/// [SnipTheme.ink] foreground when active, never the knocked-out
+/// [SnipTheme.activeFill] plate that's reserved for the sidebar's single
+/// selected tool. Shared by the gallery and properties toggles so the same
+/// three-state shape isn't hand-duplicated per call site.
+class _ToggleIconButton extends StatelessWidget {
+  final IconData icon;
+  final bool active;
+  final String tooltip;
+  final VoidCallback? onPressed;
+
+  const _ToggleIconButton({
+    required this.icon,
+    required this.active,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = SnipTheme.of(context);
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onPressed,
+          child: Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: t.controlDecoration(active: active, exclusive: false, radius: 8),
+            child: Icon(
+              icon,
+              size: 18,
+              color: t.controlForeground(active: active, exclusive: false),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

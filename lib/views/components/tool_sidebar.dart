@@ -148,14 +148,9 @@ class ToolSidebar extends StatelessWidget {
                               duration: const Duration(milliseconds: 150),
                               width: 56,
                               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                              decoration: BoxDecoration(
-                                color: isSelected ? t.activeFill : Colors.transparent,
-                                borderRadius: BorderRadius.circular(t.radius),
-                                border: Border.all(
-                                  color: isSelected ? t.activeFill : t.border,
-                                  width: isSelected ? t.activeBorderWidth : t.hairline,
-                                ),
-                              ),
+                              // The selected tool is the app's one exclusive
+                              // active control — activeFill/onActive.
+                              decoration: t.controlDecoration(active: isSelected),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 mainAxisAlignment: MainAxisAlignment.center,
@@ -168,7 +163,7 @@ class ToolSidebar extends StatelessWidget {
                                       Icon(
                                         isShape ? shapeKind.icon : toolItem.icon,
                                         size: 22,
-                                        color: isSelected ? t.onActive : t.ink,
+                                        color: t.controlForeground(active: isSelected),
                                       ),
                                       if (isShape && onShapeKindSelected != null)
                                         Positioned(
@@ -180,7 +175,7 @@ class ToolSidebar extends StatelessWidget {
                                               onShapeKindSelected!(kind);
                                               onToolSelected(CanvasTool.shape);
                                             },
-                                            color: isSelected ? t.onActive : t.ink,
+                                            color: t.controlForeground(active: isSelected),
                                           ),
                                         ),
                                     ],
@@ -189,7 +184,7 @@ class ToolSidebar extends StatelessWidget {
                                   Text(
                                     toolItem.label,
                                     style: TextStyle(
-                                      color: isSelected ? t.onActive : t.inkMuted,
+                                      color: t.controlForeground(active: isSelected, dim: true),
                                       fontSize: 10,
                                       fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                                     ),
@@ -225,14 +220,11 @@ class ToolSidebar extends StatelessWidget {
                       duration: const Duration(milliseconds: 150),
                       width: 56,
                       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                      decoration: BoxDecoration(
-                        color: isSidebarOpen ? t.activeFill : Colors.transparent,
-                        borderRadius: BorderRadius.circular(t.radius),
-                        border: Border.all(
-                          color: isSidebarOpen ? t.activeFill : t.border,
-                          width: isSidebarOpen ? t.activeBorderWidth : t.hairline,
-                        ),
-                      ),
+                      // Independently toggleable — it can be open at the
+                      // same time as any selected tool above, so it is not
+                      // the exclusive active control: selectedFill/ink, not
+                      // activeFill/onActive.
+                      decoration: t.controlDecoration(active: isSidebarOpen, exclusive: false),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -240,13 +232,13 @@ class ToolSidebar extends StatelessWidget {
                           Icon(
                             isSidebarOpen ? Icons.photo_library_rounded : Icons.photo_library_outlined,
                             size: 22,
-                            color: isSidebarOpen ? t.onActive : t.ink,
+                            color: t.controlForeground(active: isSidebarOpen, exclusive: false),
                           ),
                           const SizedBox(height: 3),
                           Text(
                             'Screenshots',
                             style: TextStyle(
-                              color: isSidebarOpen ? t.onActive : t.inkMuted,
+                              color: t.controlForeground(active: isSidebarOpen, exclusive: false, dim: true),
                               fontSize: 9,
                               fontWeight: isSidebarOpen ? FontWeight.bold : FontWeight.w500,
                             ),

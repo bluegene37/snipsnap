@@ -35,6 +35,13 @@ enum SnipThemeMode { light, dark }
 ///   exclusive active control — [activeFill] stays reserved for that.
 ///   Skeleton has no colour to spend on emphasis, so [emphasis] borrows
 ///   [ink]'s strength for a border/icon/text instead of introducing a tint.
+///   **It is a CTA-border/text token, not a state differentiator**:
+///   [emphasis] is defined equal to [ink] in both modes (see the fields
+///   below), so a branch like `isX ? ink : emphasis` renders both arms
+///   identically and communicates nothing. Any control that needs to show
+///   "this differs from some other state" must signal it by weight, border,
+///   fill, or glyph — never by reaching for [emphasis] as if it were a
+///   second, distinguishable hue.
 /// * **Destructive** — [danger] and [onDanger] are the one sanctioned
 ///   chromatic exception to the monochrome rule. Deleting a capture is
 ///   irreversible, and the safety affordance of a red warning outweighs
@@ -206,6 +213,63 @@ class SnipTheme {
 
   /// Border for a hovered control.
   Border get hoverBorder => Border.all(color: borderStrong, width: hairline);
+
+  /// The outline/fill for a control in one of this design's three states:
+  /// resting (hairline, no fill), a highlighted-but-not-exclusive selection
+  /// (`exclusive: false` — [selectedFill], e.g. an independently
+  /// toggleable panel that can be open at the same time as some other
+  /// control), or the app's one exclusive active control (`exclusive:
+  /// true`, the default — [activeFill], meant to be knocked out via
+  /// [controlForeground]). [radius] defaults to the [radius] field; pass an
+  /// explicit value to match a control's own corner radius.
+  ///
+  /// This exists so the same three-state shape doesn't get hand-duplicated
+  /// — and occasionally gotten subtly wrong (the resting border in
+  /// particular) — at every call site. [controlForeground] is its
+  /// foreground-colour companion; use them together so a control's icon
+  /// and label can never drift out of sync with its own fill.
+  BoxDecoration controlDecoration({
+    required bool active,
+    bool exclusive = true,
+    double? radius,
+  }) {
+    final r = radius ?? this.radius;
+    if (!active) {
+      return BoxDecoration(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(r),
+        border: Border.all(color: border, width: hairline),
+      );
+    }
+    if (exclusive) {
+      return BoxDecoration(
+        color: activeFill,
+        borderRadius: BorderRadius.circular(r),
+        border: Border.all(color: activeFill, width: activeBorderWidth),
+      );
+    }
+    return BoxDecoration(
+      color: selectedFill,
+      borderRadius: BorderRadius.circular(r),
+      border: Border.all(color: selectedFill, width: hairline),
+    );
+  }
+
+  /// The foreground (icon/label) colour paired with [controlDecoration] for
+  /// the same `(active, exclusive)` state. A selected-but-not-exclusive
+  /// control is a highlight, not an inversion, so its foreground is
+  /// ordinary [ink] — only the exclusive-active case knocks out to
+  /// [onActive]. [dim] selects the resting state's secondary tone
+  /// ([inkMuted]): pass `true` for a caption/label under an icon, `false`
+  /// (the default) for the icon itself, which stays full [ink] at rest.
+  Color controlForeground({
+    required bool active,
+    bool exclusive = true,
+    bool dim = false,
+  }) {
+    if (active) return exclusive ? onActive : ink;
+    return dim ? inkMuted : ink;
+  }
 
   /// Reads the theme from the nearest [SnipThemeScope].
   static SnipTheme of(BuildContext context) {
