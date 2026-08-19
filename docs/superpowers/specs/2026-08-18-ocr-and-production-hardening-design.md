@@ -7,8 +7,8 @@
 
 Three pieces of work: add a text-extraction (OCR) tool built on the OCR engines
 already in macOS and Windows; fix the correctness and platform defects that
-block a production release; and add a monochrome "skeleton" theme as a third
-mode alongside dark and light.
+block a production release; and replace the violet identity with a monochrome
+"skeleton" design language, keeping light and dark as its two variants.
 
 The order is not arbitrary. OCR needs to map a canvas drag rectangle to native
 image pixels, and that mapping is currently broken — so the coordinate rework
@@ -24,8 +24,9 @@ behavioral work is stable.
 - Fix the defects that make the app unsafe to ship: coordinate drift, silent
   annotation loss on export, broken Linux clipboard, unbounded temp files and
   undo memory.
-- Replace 212 hardcoded theme branches with a token layer, and ship a
-  monochrome skeleton mode on top of it.
+- Replace 220 hardcoded theme branches and 159 violet-accent references with a
+  token layer, and ship the monochrome skeleton language on top of it in both
+  light and dark.
 - Leave a seam for Linux OCR without designing for it now.
 
 ## Non-Goals
@@ -234,32 +235,46 @@ ScreenCaptureKit, or dropping the sandbox — and is out of scope here.
 
 # Part 3 — Skeleton Theme
 
+> **Decision revised.** Skeleton was originally scoped as a *third* mode
+> alongside dark and light. It is now the app's **only** design language, with
+> light and dark as its two variants. The Electric Violet identity is removed
+> from the chrome entirely. Two modes, not three — simpler than the original
+> plan, and it deletes a palette rather than adding one.
+
 ## 3.1 The blocker: there is no theming layer
 
 `AppColors` is a set of static constants and widgets branch on an `isDarkMode`
-boolean — **212 occurrences across 10 files**. `ThemeData` is declared at
-`main_screen.dart:884` but almost nothing reads `Theme.of(context)`.
+boolean — **220 occurrences across 11 files**. `ThemeData` is declared in
+`main_screen.dart` but almost nothing reads `Theme.of(context)`.
 
-That is a two-valued switch. A third mode cannot be added by extending it; 212
-three-way ternaries is not maintainable. The boolean must become a token object
-first.
+Worse than the count: **`AppColors.accent` — the violet — appears 159 times.**
+It is not an accent in the design sense; it is the chrome's primary colour.
+Removing it is the bulk of this work, not a finishing touch.
+
+The boolean must become a token object first.
 
 ```dart
-enum SnipThemeMode { dark, light, skeleton }
+enum SnipThemeMode { light, dark }
 
 class SnipTheme {
-  final Color canvas, surface, surfaceRaised, ink, inkMuted, inkFaint;
-  final Color border, borderStrong, activeFill, onActive;
-  final double borderWidth, activeBorderWidth, radius;
-  final bool usesFills;
+  final Color canvas, surface, surfaceRaised;
+  final Color ink, inkMuted, inkFaint;
+  final Color border, borderStrong;
+  final Color activeFill, onActive;
+  final double hairline, activeBorderWidth, radius;
   final TextTheme text;
 }
 ```
 
 Provided via `InheritedWidget` and read as `SnipTheme.of(context)`. Every
-`isDarkMode ? a : b` becomes a token reference. This is mechanical but broad —
-it is the single largest diff in the plan, and it is a prerequisite for the
-theme, not optional groundwork.
+`isDarkMode ? a : b` becomes a token reference, and every `AppColors.accent` in
+the chrome becomes `ink` or `activeFill`. This is mechanical but broad — the
+single largest diff in the project — and it is a prerequisite for the theme,
+not optional groundwork.
+
+**Light is ink-on-paper; dark is its inversion.** `ink` is near-black on a
+near-white ground in light mode, and near-white on near-black in dark. Every
+token flips; no token is defined in only one mode.
 
 ## 3.2 State without color
 
@@ -305,10 +320,25 @@ family so the app stops mixing defaults.
 
 ## 3.5 Persistence
 
-The stored `theme_mode` setting is currently `'dark' | 'light'`. It becomes a
-three-value enum; unrecognized values fall back to `dark` so existing installs
-are unaffected. The header's theme control becomes a three-way cycle rather
-than a toggle.
+The stored `theme_mode` setting stays `'dark' | 'light'` and keeps its existing
+values, so no migration is needed and existing installs keep the mode they were
+on. The header's control stays a two-way toggle. Unrecognized values fall back
+to `dark`.
+
+## 3.6 What is deleted
+
+`AppColors.accent`, `accentHover`, `blueAccent`, `greenAccent`, and the eight
+dark/light surface constants go, along with every one of the 159 chrome
+references to them. What survives, and why:
+
+- **`AppColors.palette`** — the annotation colour swatches. This is data the
+  user picks, not chrome. Untouched.
+- **`AppColors.framingGradients`** — user-selected export decorations, chosen
+  deliberately per export. Chrome around the picker goes monochrome; the
+  gradients themselves stay.
+
+A monochrome color picker is a broken color picker: the swatches render in
+their real colours in both modes.
 
 ---
 
@@ -326,7 +356,7 @@ WinRT, then the tool and result panel.
 **Phase 4 — Platform and resource fixes.** Section 2.4 remainder.
 
 **Phase 5 — Theming.** Token layer replacing 212 boolean branches, then the
-skeleton mode and the three-way theme setting. Sequenced last deliberately: it
+skeleton light and dark variants, and removal of the violet palette. Sequenced last deliberately: it
 touches nearly every view file, so running it after the functional work avoids
 rebasing behavioral changes across a large cosmetic diff. The OCR result panel
 (Phase 3) is built against tokens from the start so it needs no rework.
