@@ -1,32 +1,32 @@
 import 'package:flutter/material.dart';
 import '../../utils/constants.dart';
+import '../../utils/snip_theme.dart';
 
 /// Small chevron on the Shape tool button that opens the shape chooser.
 class _ShapeKindFlyout extends StatelessWidget {
   final ShapeKind selected;
   final ValueChanged<ShapeKind> onSelected;
-  final bool isDarkMode;
   final Color color;
 
   const _ShapeKindFlyout({
     required this.selected,
     required this.onSelected,
-    required this.isDarkMode,
     required this.color,
   });
 
   @override
   Widget build(BuildContext context) {
+    final t = SnipTheme.of(context);
     return PopupMenuButton<ShapeKind>(
       tooltip: 'Choose shape',
       initialValue: selected,
       position: PopupMenuPosition.under,
       padding: EdgeInsets.zero,
       splashRadius: 12,
-      color: isDarkMode ? AppColors.darkSurfaceVariant : Colors.white,
+      color: t.surfaceRaised,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: isDarkMode ? Colors.white12 : Colors.black12),
+        side: BorderSide(color: t.border),
       ),
       onSelected: onSelected,
       itemBuilder: (ctx) => [
@@ -39,9 +39,7 @@ class _ShapeKindFlyout extends StatelessWidget {
                 Icon(
                   kind.icon,
                   size: 17,
-                  color: kind == selected
-                      ? AppColors.accent
-                      : (isDarkMode ? Colors.white70 : Colors.black87),
+                  color: kind == selected ? t.ink : t.inkMuted,
                 ),
                 const SizedBox(width: 10),
                 Text(
@@ -49,9 +47,7 @@ class _ShapeKindFlyout extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: kind == selected ? FontWeight.bold : FontWeight.w500,
-                    color: kind == selected
-                        ? AppColors.accent
-                        : (isDarkMode ? Colors.white : Colors.black87),
+                    color: t.ink,
                   ),
                 ),
               ],
@@ -114,17 +110,14 @@ class ToolSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
-    final iconColor = isDarkMode ? Colors.white70 : Colors.black87;
-    final labelColor = isDarkMode ? Colors.white54 : Colors.black54;
-    final borderColor = isDarkMode ? Colors.white10 : Colors.black12;
+    final t = SnipTheme.of(context);
 
     return Container(
       width: 68,
       decoration: BoxDecoration(
-        color: bgColor,
+        color: t.surface,
         border: Border(
-          right: BorderSide(color: borderColor),
+          right: BorderSide(color: t.border),
         ),
       ),
       child: Column(
@@ -136,33 +129,32 @@ class ToolSidebar extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Column(
-                  children: tools.map((t) {
-                    final isSelected = activeTool == t.tool;
-                    final isShape = t.tool == CanvasTool.shape;
+                  children: tools.map((toolItem) {
+                    final isSelected = activeTool == toolItem.tool;
+                    final isShape = toolItem.tool == CanvasTool.shape;
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Tooltip(
                         message: isShape
                             ? '${shapeKind.label} — click to draw, use the ▾ corner to switch shape'
-                            : t.tooltip,
+                            : toolItem.tooltip,
                         child: Material(
                           color: Colors.transparent,
                           child: InkWell(
-                            borderRadius: BorderRadius.circular(10),
-                            onTap: () => onToolSelected(t.tool),
+                            borderRadius: BorderRadius.circular(t.radius),
+                            onTap: () => onToolSelected(toolItem.tool),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 150),
                               width: 56,
                               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                               decoration: BoxDecoration(
-                                color: isSelected
-                                    ? AppColors.accent.withValues(alpha: 0.18)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(10),
-                                border: isSelected
-                                    ? Border.all(color: AppColors.accent, width: 1.5)
-                                    : Border.all(color: Colors.transparent, width: 1.5),
+                                color: isSelected ? t.activeFill : Colors.transparent,
+                                borderRadius: BorderRadius.circular(t.radius),
+                                border: Border.all(
+                                  color: isSelected ? t.activeFill : t.border,
+                                  width: isSelected ? t.activeBorderWidth : t.hairline,
+                                ),
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -174,9 +166,9 @@ class ToolSidebar extends StatelessWidget {
                                     clipBehavior: Clip.none,
                                     children: [
                                       Icon(
-                                        isShape ? shapeKind.icon : t.icon,
+                                        isShape ? shapeKind.icon : toolItem.icon,
                                         size: 22,
-                                        color: isSelected ? AppColors.accent : iconColor,
+                                        color: isSelected ? t.onActive : t.ink,
                                       ),
                                       if (isShape && onShapeKindSelected != null)
                                         Positioned(
@@ -184,21 +176,20 @@ class ToolSidebar extends StatelessWidget {
                                           bottom: -4,
                                           child: _ShapeKindFlyout(
                                             selected: shapeKind,
-                                            isDarkMode: isDarkMode,
                                             onSelected: (kind) {
                                               onShapeKindSelected!(kind);
                                               onToolSelected(CanvasTool.shape);
                                             },
-                                            color: isSelected ? AppColors.accent : iconColor,
+                                            color: isSelected ? t.onActive : t.ink,
                                           ),
                                         ),
                                     ],
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
-                                    t.label,
+                                    toolItem.label,
                                     style: TextStyle(
-                                      color: isSelected ? AppColors.accent : labelColor,
+                                      color: isSelected ? t.onActive : t.inkMuted,
                                       fontSize: 10,
                                       fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                                     ),
@@ -219,7 +210,7 @@ class ToolSidebar extends StatelessWidget {
             ),
           ),
           if (onToggleSidebar != null) ...[
-            Divider(height: 1, color: borderColor),
+            Divider(height: 1, color: t.border),
             const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -228,20 +219,19 @@ class ToolSidebar extends StatelessWidget {
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(t.radius),
                     onTap: onToggleSidebar,
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
                       width: 56,
                       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                       decoration: BoxDecoration(
-                        color: isSidebarOpen
-                            ? AppColors.accent.withValues(alpha: 0.18)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(10),
-                        border: isSidebarOpen
-                            ? Border.all(color: AppColors.accent, width: 1.5)
-                            : Border.all(color: Colors.transparent, width: 1.5),
+                        color: isSidebarOpen ? t.activeFill : Colors.transparent,
+                        borderRadius: BorderRadius.circular(t.radius),
+                        border: Border.all(
+                          color: isSidebarOpen ? t.activeFill : t.border,
+                          width: isSidebarOpen ? t.activeBorderWidth : t.hairline,
+                        ),
                       ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -250,13 +240,13 @@ class ToolSidebar extends StatelessWidget {
                           Icon(
                             isSidebarOpen ? Icons.photo_library_rounded : Icons.photo_library_outlined,
                             size: 22,
-                            color: isSidebarOpen ? AppColors.accent : iconColor,
+                            color: isSidebarOpen ? t.onActive : t.ink,
                           ),
                           const SizedBox(height: 3),
                           Text(
                             'Screenshots',
                             style: TextStyle(
-                              color: isSidebarOpen ? AppColors.accent : labelColor,
+                              color: isSidebarOpen ? t.onActive : t.inkMuted,
                               fontSize: 9,
                               fontWeight: isSidebarOpen ? FontWeight.bold : FontWeight.w500,
                             ),

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/app_shortcut.dart';
-import '../../utils/constants.dart';
+import '../../utils/snip_theme.dart';
 
 /// Top application bar.
 ///
@@ -79,16 +79,15 @@ class HeaderBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
-    final borderColor = isDarkMode ? Colors.white10 : Colors.black12;
+    final t = SnipTheme.of(context);
 
     return Container(
       height: 64,
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
-        color: bgColor,
-        border: Border(bottom: BorderSide(color: borderColor)),
+        color: t.surface,
+        border: Border(bottom: BorderSide(color: t.border)),
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -97,29 +96,29 @@ class HeaderBar extends StatelessWidget {
 
           return Row(
             children: [
-              _buildBrand(),
+              _buildBrand(t),
               const SizedBox(width: 14),
-              _buildCaptureGroup(showLabels),
+              _buildCaptureGroup(t, showLabels),
 
               // Centre: editing controls, kept optically centred by the two
               // flexible gaps on either side.
               if (showCentre) ...[
                 const Spacer(),
-                _buildEditGroup(borderColor),
+                _buildEditGroup(t),
                 if (onZoomScaleChanged != null && hasCapture) ...[
                   const SizedBox(width: 8),
-                  _buildZoomGroup(borderColor),
+                  _buildZoomGroup(t),
                 ],
                 const Spacer(),
               ] else
                 const Spacer(),
 
-              _buildExportGroup(showLabels),
+              _buildExportGroup(t, showLabels),
               const SizedBox(width: 10),
-              _divider(borderColor),
+              _divider(t.border),
               const SizedBox(width: 6),
-              _buildViewGroup(),
-              _buildOverflowMenu(),
+              _buildViewGroup(t),
+              _buildOverflowMenu(t),
             ],
           );
         },
@@ -129,13 +128,11 @@ class HeaderBar extends StatelessWidget {
 
   Widget _divider(Color color) => Container(height: 24, width: 1, color: color);
 
-  Color get _iconColor => isDarkMode ? Colors.white70 : Colors.black87;
-
   // ---------------------------------------------------------------------------
   // Zones
   // ---------------------------------------------------------------------------
 
-  Widget _buildBrand() {
+  Widget _buildBrand(SnipTheme t) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -144,12 +141,13 @@ class HeaderBar extends StatelessWidget {
           height: 30,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.accent.withValues(alpha: 0.3),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
+            // A plain elevation shadow, not a theme role: like the rest of
+            // the app's drop shadows (editor_canvas.dart, ocr_result_panel.dart)
+            // this stays a literal dark value in both modes rather than
+            // following ink's inversion — a "shadow" that turned white in
+            // dark mode would read as a glow, not a shadow.
+            boxShadow: const [
+              BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2)),
             ],
           ),
           child: ClipRRect(
@@ -158,8 +156,8 @@ class HeaderBar extends StatelessWidget {
               'assets/images/app_logo.png',
               fit: BoxFit.cover,
               errorBuilder: (ctx, err, stack) => Container(
-                color: AppColors.accent,
-                child: const Icon(Icons.camera_rounded, color: Colors.white, size: 18),
+                color: t.ink,
+                child: Icon(Icons.camera_rounded, color: t.onActive, size: 18),
               ),
             ),
           ),
@@ -168,7 +166,7 @@ class HeaderBar extends StatelessWidget {
         Text(
           'SnipSnap',
           style: TextStyle(
-            color: isDarkMode ? Colors.white : Colors.black87,
+            color: t.ink,
             fontSize: 17,
             fontWeight: FontWeight.bold,
             letterSpacing: 0.4,
@@ -179,94 +177,102 @@ class HeaderBar extends StatelessWidget {
   }
 
   /// Split button: the main half captures a region, the chevron picks a mode.
-  Widget _buildCaptureGroup(bool showLabels) {
+  ///
+  /// The header's primary call-to-action, not a toggle — [SnipTheme.emphasis]
+  /// per the "CTA emphasis, not the active control" rule. Matches the
+  /// treatment `main_screen.dart`'s floating Properties pill already
+  /// established: [SnipTheme.emphasis] borrows ink's *strength* for a
+  /// border/icon/text, it is never a fill — [SnipTheme.activeFill] stays
+  /// reserved for the single exclusive active control (the selected tool).
+  Widget _buildCaptureGroup(SnipTheme t, bool showLabels) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onSnipInteractive,
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(8),
-              bottomLeft: Radius.circular(8),
-            ),
-            child: Tooltip(
-              message: 'Capture Area (${_shortcut(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1')})',
-              child: Container(
-                height: 36,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: const BoxDecoration(
-                  color: AppColors.accent,
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(8),
-                    bottomLeft: Radius.circular(8),
+        Container(
+          height: 36,
+          decoration: BoxDecoration(
+            color: t.surfaceRaised,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: t.emphasis, width: 1.2),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onSnipInteractive,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(7),
+                    bottomLeft: Radius.circular(7),
                   ),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.crop_free_rounded, color: Colors.white, size: 16),
-                    SizedBox(width: 6),
-                    Text(
-                      'Snip',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
+                  child: Tooltip(
+                    message: 'Capture Area (${_shortcut(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1')})',
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.crop_free_rounded, color: t.emphasis, size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Snip',
+                            style: TextStyle(
+                              color: t.emphasis,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ),
-        ),
-        Container(height: 36, width: 1, color: Colors.white24),
-        PopupMenuButton<String>(
-          tooltip: 'Capture Modes',
-          position: PopupMenuPosition.under,
-          color: isDarkMode ? AppColors.darkSurfaceVariant : Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-            side: BorderSide(color: isDarkMode ? Colors.white12 : Colors.black12),
-          ),
-          onSelected: (val) => switch (val) {
-            'area' => onSnipInteractive(),
-            'full' => onSnipFullScreen?.call(),
-            'timer' => onSnipTimer?.call(),
-            _ => null,
-          },
-          itemBuilder: (ctx) => [
-            _captureMenuItem(
-              value: 'area',
-              icon: Icons.crop_free_rounded,
-              title: 'Capture Area',
-              subtitle: _shortcut(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1'),
-            ),
-            _captureMenuItem(
-              value: 'full',
-              icon: Icons.fullscreen_rounded,
-              title: 'Capture Full Screen',
-              subtitle: _shortcut(AppShortcutAction.fullScreenSnip, 'Cmd+Shift+2'),
-            ),
-            _captureMenuItem(
-              value: 'timer',
-              icon: Icons.timer_rounded,
-              title: 'Timed Capture (3s)',
-              subtitle: _shortcut(AppShortcutAction.timerSnip, 'Cmd+Shift+5'),
-            ),
-          ],
-          child: Container(
-            height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            decoration: const BoxDecoration(
-              color: AppColors.accent,
-              borderRadius: BorderRadius.only(
-                topRight: Radius.circular(8),
-                bottomRight: Radius.circular(8),
+              Container(height: 24, width: t.hairline, color: t.border),
+              PopupMenuButton<String>(
+                tooltip: 'Capture Modes',
+                position: PopupMenuPosition.under,
+                color: t.surfaceRaised,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(color: t.border),
+                ),
+                onSelected: (val) => switch (val) {
+                  'area' => onSnipInteractive(),
+                  'full' => onSnipFullScreen?.call(),
+                  'timer' => onSnipTimer?.call(),
+                  _ => null,
+                },
+                itemBuilder: (ctx) => [
+                  _captureMenuItem(
+                    t,
+                    value: 'area',
+                    icon: Icons.crop_free_rounded,
+                    title: 'Capture Area',
+                    subtitle: _shortcut(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1'),
+                  ),
+                  _captureMenuItem(
+                    t,
+                    value: 'full',
+                    icon: Icons.fullscreen_rounded,
+                    title: 'Capture Full Screen',
+                    subtitle: _shortcut(AppShortcutAction.fullScreenSnip, 'Cmd+Shift+2'),
+                  ),
+                  _captureMenuItem(
+                    t,
+                    value: 'timer',
+                    icon: Icons.timer_rounded,
+                    title: 'Timed Capture (3s)',
+                    subtitle: _shortcut(AppShortcutAction.timerSnip, 'Cmd+Shift+5'),
+                  ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Icon(Icons.arrow_drop_down_rounded, color: t.emphasis, size: 20),
+                ),
               ),
-            ),
-            child: const Icon(Icons.arrow_drop_down_rounded, color: Colors.white, size: 20),
+            ],
           ),
         ),
         const SizedBox(width: 6),
@@ -276,13 +282,13 @@ class HeaderBar extends StatelessWidget {
           showLabel: showLabels,
           tooltip: 'Open Image File (${_shortcut(AppShortcutAction.openImage, 'Cmd+O')})',
           onPressed: onImportImage,
-          isDarkMode: isDarkMode,
         ),
       ],
     );
   }
 
-  PopupMenuItem<String> _captureMenuItem({
+  PopupMenuItem<String> _captureMenuItem(
+    SnipTheme t, {
     required String value,
     required IconData icon,
     required String title,
@@ -292,7 +298,7 @@ class HeaderBar extends StatelessWidget {
       value: value,
       child: Row(
         children: [
-          Icon(icon, color: AppColors.accent, size: 18),
+          Icon(icon, color: t.ink, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -304,10 +310,10 @@ class HeaderBar extends StatelessWidget {
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
-                    color: isDarkMode ? Colors.white : Colors.black87,
+                    color: t.ink,
                   ),
                 ),
-                Text(subtitle, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                Text(subtitle, style: TextStyle(fontSize: 11, color: t.inkMuted)),
               ],
             ),
           ),
@@ -316,32 +322,29 @@ class HeaderBar extends StatelessWidget {
     );
   }
 
-  Widget _buildEditGroup(Color borderColor) {
-    final enabledColor = isDarkMode ? Colors.white : Colors.black87;
-    final disabledColor = isDarkMode ? Colors.white24 : Colors.black26;
-
+  Widget _buildEditGroup(SnipTheme t) {
     return _Pill(
-      isDarkMode: isDarkMode,
-      borderColor: borderColor,
+      borderColor: t.border,
+      fillColor: t.surfaceRaised,
       children: [
         _PillIconButton(
           icon: Icons.undo_rounded,
           tooltip: 'Undo (${_shortcut(AppShortcutAction.undo, 'Cmd+Z')})',
-          color: canUndo ? enabledColor : disabledColor,
+          color: canUndo ? t.ink : t.inkFaint,
           onPressed: canUndo ? onUndo : null,
         ),
         _PillIconButton(
           icon: Icons.redo_rounded,
           tooltip: 'Redo (${_shortcut(AppShortcutAction.redo, 'Cmd+Shift+Z')})',
-          color: canRedo ? enabledColor : disabledColor,
+          color: canRedo ? t.ink : t.inkFaint,
           onPressed: canRedo ? onRedo : null,
         ),
-        Container(height: 18, width: 1, color: borderColor),
+        Container(height: 18, width: 1, color: t.border),
         _PillIconButton(
           icon: Icons.delete_outline_rounded,
           tooltip: 'Clear All Annotations '
               '(${_shortcut(AppShortcutAction.clearAnnotations, 'Cmd+Shift+K')})',
-          color: canClear ? enabledColor : disabledColor,
+          color: canClear ? t.ink : t.inkFaint,
           onPressed: canClear ? onClear : null,
         ),
       ],
@@ -350,20 +353,19 @@ class HeaderBar extends StatelessWidget {
 
   /// Compact zoom stepper. The gallery tray carries a full slider, but that
   /// tray can be hidden — zoom must stay reachable either way.
-  Widget _buildZoomGroup(Color borderColor) {
-    final enabledColor = isDarkMode ? Colors.white : Colors.black87;
-    final disabledColor = isDarkMode ? Colors.white24 : Colors.black26;
+  Widget _buildZoomGroup(SnipTheme t) {
     final canZoomOut = zoomScale > 0.2;
     final canZoomIn = zoomScale < 4.0;
+    final isDefaultZoom = (zoomScale - 1.0).abs() < 0.01;
 
     return _Pill(
-      isDarkMode: isDarkMode,
-      borderColor: borderColor,
+      borderColor: t.border,
+      fillColor: t.surfaceRaised,
       children: [
         _PillIconButton(
           icon: Icons.remove_rounded,
           tooltip: 'Zoom Out',
-          color: canZoomOut ? enabledColor : disabledColor,
+          color: canZoomOut ? t.ink : t.inkFaint,
           onPressed:
               canZoomOut ? () => onZoomScaleChanged!((zoomScale - 0.25).clamp(0.2, 4.0)) : null,
         ),
@@ -382,7 +384,10 @@ class HeaderBar extends StatelessWidget {
                   fontSize: 11.5,
                   fontWeight: FontWeight.bold,
                   fontFeatures: const [FontFeature.tabularFigures()],
-                  color: (zoomScale - 1.0).abs() < 0.01 ? enabledColor : AppColors.accent,
+                  // At rest, ordinary ink; away from 100% the readout wants
+                  // the same "more weight than a hairline" signal as a CTA,
+                  // so it borrows the emphasis token rather than a tint.
+                  color: isDefaultZoom ? t.ink : t.emphasis,
                 ),
               ),
             ),
@@ -391,7 +396,7 @@ class HeaderBar extends StatelessWidget {
         _PillIconButton(
           icon: Icons.add_rounded,
           tooltip: 'Zoom In',
-          color: canZoomIn ? enabledColor : disabledColor,
+          color: canZoomIn ? t.ink : t.inkFaint,
           onPressed:
               canZoomIn ? () => onZoomScaleChanged!((zoomScale + 0.25).clamp(0.2, 4.0)) : null,
         ),
@@ -399,7 +404,7 @@ class HeaderBar extends StatelessWidget {
     );
   }
 
-  Widget _buildExportGroup(bool showLabels) {
+  Widget _buildExportGroup(SnipTheme t, bool showLabels) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -410,7 +415,6 @@ class HeaderBar extends StatelessWidget {
           tooltip: 'Copy Image to Clipboard '
               '(${_shortcut(AppShortcutAction.copyToClipboard, 'Cmd+C')})',
           onPressed: onCopyToClipboard,
-          isDarkMode: isDarkMode,
           enabled: hasCapture,
         ),
         const SizedBox(width: 6),
@@ -420,7 +424,6 @@ class HeaderBar extends StatelessWidget {
           showLabel: showLabels,
           tooltip: 'Save Image to Disk (${_shortcut(AppShortcutAction.saveAs, 'Cmd+S')})',
           onPressed: onSaveAs,
-          isDarkMode: isDarkMode,
           enabled: hasCapture,
           isPrimary: true,
         ),
@@ -432,15 +435,13 @@ class HeaderBar extends StatelessWidget {
           tooltip: 'Bake Annotations into the Image '
               '(${_shortcut(AppShortcutAction.flattenCanvas, 'Cmd+Shift+F')})',
           onPressed: onFlattenCanvas ?? () {},
-          isDarkMode: isDarkMode,
           enabled: onFlattenCanvas != null,
         ),
       ],
     );
   }
 
-  Widget _buildViewGroup() {
-    final borderColor = isDarkMode ? Colors.white10 : Colors.black12;
+  Widget _buildViewGroup(SnipTheme t) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -449,21 +450,20 @@ class HeaderBar extends StatelessWidget {
             isSidebarOpen ? Icons.photo_library_rounded : Icons.photo_library_outlined,
             size: 18,
           ),
-          color: isSidebarOpen ? AppColors.accent : _iconColor,
+          color: isSidebarOpen ? t.onActive : t.ink,
           tooltip: isSidebarOpen
               ? 'Hide Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})'
               : 'Show Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})',
           style: IconButton.styleFrom(
-            backgroundColor: isSidebarOpen
-                ? AppColors.accent.withValues(alpha: 0.16)
-                : (isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant),
+            backgroundColor: isSidebarOpen ? t.activeFill : Colors.transparent,
             minimumSize: const Size(36, 36),
             padding: EdgeInsets.zero,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
-              side: isSidebarOpen
-                  ? const BorderSide(color: AppColors.accent, width: 1.2)
-                  : BorderSide(color: borderColor),
+              side: BorderSide(
+                color: isSidebarOpen ? t.activeFill : t.border,
+                width: isSidebarOpen ? t.activeBorderWidth : t.hairline,
+              ),
             ),
           ),
           onPressed: onToggleSidebar,
@@ -475,21 +475,20 @@ class HeaderBar extends StatelessWidget {
               isPropertiesOpen ? Icons.tune_rounded : Icons.tune_outlined,
               size: 18,
             ),
-            color: isPropertiesOpen ? AppColors.accent : _iconColor,
+            color: isPropertiesOpen ? t.onActive : t.ink,
             tooltip: isPropertiesOpen
                 ? 'Hide Tool Properties'
                 : 'Show Tool Properties',
             style: IconButton.styleFrom(
-              backgroundColor: isPropertiesOpen
-                  ? AppColors.accent.withValues(alpha: 0.16)
-                  : (isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant),
+              backgroundColor: isPropertiesOpen ? t.activeFill : Colors.transparent,
               minimumSize: const Size(36, 36),
               padding: EdgeInsets.zero,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
-                side: isPropertiesOpen
-                    ? const BorderSide(color: AppColors.accent, width: 1.2)
-                    : BorderSide(color: borderColor),
+                side: BorderSide(
+                  color: isPropertiesOpen ? t.activeFill : t.border,
+                  width: isPropertiesOpen ? t.activeBorderWidth : t.hairline,
+                ),
               ),
             ),
             onPressed: onToggleProperties,
@@ -501,17 +500,16 @@ class HeaderBar extends StatelessWidget {
 
   /// Low-frequency app settings live behind one menu so they never compete
   /// with the editing controls for space.
-  Widget _buildOverflowMenu() {
-    final borderColor = isDarkMode ? Colors.white10 : Colors.black12;
+  Widget _buildOverflowMenu(SnipTheme t) {
     return Padding(
       padding: const EdgeInsets.only(left: 6),
       child: PopupMenuButton<String>(
         tooltip: 'More Options',
         position: PopupMenuPosition.under,
-        color: isDarkMode ? AppColors.darkSurfaceVariant : Colors.white,
+        color: t.surfaceRaised,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
-          side: BorderSide(color: isDarkMode ? Colors.white12 : Colors.black12),
+          side: BorderSide(color: t.border),
         ),
         onSelected: (val) => switch (val) {
           'shortcuts' => onOpenShortcutSettings(),
@@ -520,42 +518,43 @@ class HeaderBar extends StatelessWidget {
           _ => null,
         },
         itemBuilder: (ctx) => [
-          _overflowItem('shortcuts', Icons.keyboard_rounded, 'Keyboard Shortcuts…'),
+          _overflowItem(t, 'shortcuts', Icons.keyboard_rounded, 'Keyboard Shortcuts…'),
           _overflowItem(
+            t,
             'theme',
             isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
             isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
           ),
-          _overflowItem('about', Icons.info_outline_rounded, 'About SnipSnap'),
+          _overflowItem(t, 'about', Icons.info_outline_rounded, 'About SnipSnap'),
         ],
         child: Container(
           width: 36,
           height: 36,
           decoration: BoxDecoration(
-            color: isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+            color: Colors.transparent,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: borderColor),
+            border: Border.all(color: t.border),
           ),
-          child: Icon(Icons.more_vert_rounded, color: _iconColor, size: 18),
+          child: Icon(Icons.more_vert_rounded, color: t.ink, size: 18),
         ),
       ),
     );
   }
 
-  PopupMenuItem<String> _overflowItem(String value, IconData icon, String label) {
+  PopupMenuItem<String> _overflowItem(SnipTheme t, String value, IconData icon, String label) {
     return PopupMenuItem(
       value: value,
       height: 40,
       child: Row(
         children: [
-          Icon(icon, size: 18, color: isDarkMode ? Colors.white70 : Colors.black87),
+          Icon(icon, size: 18, color: t.ink),
           const SizedBox(width: 10),
           Text(
             label,
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,
-              color: isDarkMode ? Colors.white : Colors.black87,
+              color: t.ink,
             ),
           ),
         ],
@@ -567,13 +566,13 @@ class HeaderBar extends StatelessWidget {
 /// Rounded container grouping related icon buttons.
 class _Pill extends StatelessWidget {
   final List<Widget> children;
-  final bool isDarkMode;
   final Color borderColor;
+  final Color fillColor;
 
   const _Pill({
     required this.children,
-    required this.isDarkMode,
     required this.borderColor,
+    required this.fillColor,
   });
 
   @override
@@ -582,7 +581,7 @@ class _Pill extends StatelessWidget {
       height: 36,
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
       decoration: BoxDecoration(
-        color: isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant,
+        color: fillColor,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: borderColor),
       ),
@@ -621,12 +620,15 @@ class _PillIconButton extends StatelessWidget {
   }
 }
 
+/// Bordered header action button: hairline outline at rest; when [isPrimary]
+/// marks it as the zone's call to action, its border/icon/text step up to
+/// [SnipTheme.emphasis] strength (never a fill — see [SnipTheme.emphasis]'s
+/// doc comment, "a header CTA" is its own worked example).
 class _HeaderButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onPressed;
   final String tooltip;
-  final bool isDarkMode;
   final bool showLabel;
   final bool enabled;
   final bool isPrimary;
@@ -636,7 +638,6 @@ class _HeaderButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     required this.tooltip,
-    this.isDarkMode = true,
     this.showLabel = true,
     this.enabled = true,
     this.isPrimary = false,
@@ -644,27 +645,30 @@ class _HeaderButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = isDarkMode ? Colors.white10 : Colors.black12;
-    final bgColor = isPrimary
-        ? AppColors.accent.withValues(alpha: 0.16)
-        : (isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant);
-    final fgColor = isPrimary
-        ? AppColors.accent
-        : (isDarkMode ? Colors.white : Colors.black87);
+    final t = SnipTheme.of(context);
+
+    // isPrimary borrows SnipTheme.emphasis for border/icon/text weight only
+    // — never a fill. Matches main_screen.dart's floating Properties pill:
+    // emphasis signals "more weight than a resting hairline," activeFill
+    // stays reserved for the single exclusive active control.
+    final bgColor = isPrimary ? t.surfaceRaised : Colors.transparent;
+    final fgColor = isPrimary ? t.emphasis : (enabled ? t.ink : t.inkFaint);
+    final borderColor = isPrimary ? t.emphasis : t.border;
 
     final style = ElevatedButton.styleFrom(
       backgroundColor: bgColor,
       foregroundColor: fgColor,
-      disabledBackgroundColor: bgColor.withValues(alpha: 0.35),
-      disabledForegroundColor: isDarkMode ? Colors.white24 : Colors.black26,
+      disabledBackgroundColor: bgColor,
+      disabledForegroundColor: t.inkFaint,
       elevation: 0,
       padding: EdgeInsets.symmetric(horizontal: showLabel ? 12 : 9, vertical: 8),
       minimumSize: const Size(0, 36),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: isPrimary
-            ? BorderSide(color: AppColors.accent.withValues(alpha: enabled ? 0.6 : 0.2), width: 1.2)
-            : BorderSide(color: borderColor, width: 1.0),
+        side: BorderSide(
+          color: enabled ? borderColor : t.border,
+          width: isPrimary ? 1.2 : t.hairline,
+        ),
       ),
     );
 

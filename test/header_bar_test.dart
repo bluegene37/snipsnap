@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/components/header_bar.dart';
 
 Widget _harness({
@@ -11,32 +12,35 @@ Widget _harness({
   bool isDarkMode = true,
   VoidCallback? onFlattenCanvas,
 }) {
-  return MaterialApp(
-    home: Scaffold(
-      body: SizedBox(
-        width: width,
-        child: HeaderBar(
-          onSnipInteractive: () {},
-          onSnipFullScreen: () {},
-          onSnipTimer: () {},
-          onImportImage: () {},
-          onUndo: () {},
-          onRedo: () {},
-          onClear: () {},
-          onCopyToClipboard: () {},
-          onSaveAs: () {},
-          onFlattenCanvas: onFlattenCanvas,
-          onToggleSidebar: () {},
-          onToggleProperties: () {},
-          onOpenShortcutSettings: () {},
-          onToggleThemeMode: () {},
-          onOpenAboutDialog: () {},
-          canUndo: canUndo,
-          canRedo: canRedo,
-          canClear: canClear,
-          hasCapture: hasCapture,
-          isSidebarOpen: true,
-          isDarkMode: isDarkMode,
+  return SnipThemeScope(
+    theme: SnipTheme.forMode(isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light),
+    child: MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: width,
+          child: HeaderBar(
+            onSnipInteractive: () {},
+            onSnipFullScreen: () {},
+            onSnipTimer: () {},
+            onImportImage: () {},
+            onUndo: () {},
+            onRedo: () {},
+            onClear: () {},
+            onCopyToClipboard: () {},
+            onSaveAs: () {},
+            onFlattenCanvas: onFlattenCanvas,
+            onToggleSidebar: () {},
+            onToggleProperties: () {},
+            onOpenShortcutSettings: () {},
+            onToggleThemeMode: () {},
+            onOpenAboutDialog: () {},
+            canUndo: canUndo,
+            canRedo: canRedo,
+            canClear: canClear,
+            hasCapture: hasCapture,
+            isSidebarOpen: true,
+            isDarkMode: isDarkMode,
+          ),
         ),
       ),
     ),
@@ -143,28 +147,31 @@ void main() {
     addTearDown(tester.view.reset);
 
     double? requested;
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: SizedBox(
-          width: 1440,
-          child: HeaderBar(
-            onSnipInteractive: () {},
-            onImportImage: () {},
-            onUndo: () {},
-            onRedo: () {},
-            onClear: () {},
-            onCopyToClipboard: () {},
-            onSaveAs: () {},
-            onToggleSidebar: () {},
-            onOpenShortcutSettings: () {},
-            onToggleThemeMode: () {},
-            onOpenAboutDialog: () {},
-            canUndo: false,
-            canRedo: false,
-            isSidebarOpen: true,
-            hasCapture: true,
-            zoomScale: 1.5,
-            onZoomScaleChanged: (v) => requested = v,
+    await tester.pumpWidget(SnipThemeScope(
+      theme: SnipTheme.forMode(SnipThemeMode.dark),
+      child: MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1440,
+            child: HeaderBar(
+              onSnipInteractive: () {},
+              onImportImage: () {},
+              onUndo: () {},
+              onRedo: () {},
+              onClear: () {},
+              onCopyToClipboard: () {},
+              onSaveAs: () {},
+              onToggleSidebar: () {},
+              onOpenShortcutSettings: () {},
+              onToggleThemeMode: () {},
+              onOpenAboutDialog: () {},
+              canUndo: false,
+              canRedo: false,
+              isSidebarOpen: true,
+              hasCapture: true,
+              zoomScale: 1.5,
+              onZoomScaleChanged: (v) => requested = v,
+            ),
           ),
         ),
       ),
@@ -175,4 +182,16 @@ void main() {
     await tester.tap(find.widgetWithIcon(IconButton, Icons.remove_rounded));
     expect(requested, closeTo(1.25, 0.001));
   });
+
+  for (final dark in [false, true]) {
+    testWidgets('lays out without overflow in ${dark ? "dark" : "light"}',
+        (tester) async {
+      tester.view.physicalSize = const Size(1180, 700);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_harness(width: 1180, isDarkMode: dark));
+      expect(tester.takeException(), isNull);
+    });
+  }
 }
