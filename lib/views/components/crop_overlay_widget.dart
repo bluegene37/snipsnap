@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import '../../utils/constants.dart';
+import '../../utils/snip_theme.dart';
 
 class CropOverlayWidget extends StatefulWidget {
   final Rect cropRect;
@@ -57,6 +57,7 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final t = SnipTheme.of(context);
     final rect = widget.cropRect;
     const handleHitSize = 36.0;
     const halfHit = handleHitSize / 2;
@@ -68,7 +69,7 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
         Positioned.fill(
           child: IgnorePointer(
             child: CustomPaint(
-              painter: _CropBorderPainter(cropRect: rect),
+              painter: _CropBorderPainter(theme: t, cropRect: rect),
             ),
           ),
         ),
@@ -159,6 +160,7 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
           width: handleHitSize,
           height: handleHitSize,
           child: _buildCornerHandle(
+            theme: t,
             onPanUpdate: (details) => _updateRect(left: rect.left + details.delta.dx, top: rect.top + details.delta.dy),
           ),
         ),
@@ -169,6 +171,7 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
           width: handleHitSize,
           height: handleHitSize,
           child: _buildCornerHandle(
+            theme: t,
             onPanUpdate: (details) => _updateRect(right: rect.right + details.delta.dx, top: rect.top + details.delta.dy),
           ),
         ),
@@ -179,6 +182,7 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
           width: handleHitSize,
           height: handleHitSize,
           child: _buildCornerHandle(
+            theme: t,
             onPanUpdate: (details) => _updateRect(left: rect.left + details.delta.dx, bottom: rect.bottom + details.delta.dy),
           ),
         ),
@@ -189,15 +193,16 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
           width: handleHitSize,
           height: handleHitSize,
           child: _buildCornerHandle(
+            theme: t,
             onPanUpdate: (details) => _updateRect(right: rect.right + details.delta.dx, bottom: rect.bottom + details.delta.dy),
           ),
         ),
 
         // 5. Four Midpoint Edge Square Handles Visual
-        _buildMidpointVisual(Offset(rect.center.dx, rect.top)),
-        _buildMidpointVisual(Offset(rect.center.dx, rect.bottom)),
-        _buildMidpointVisual(Offset(rect.left, rect.center.dy)),
-        _buildMidpointVisual(Offset(rect.right, rect.center.dy)),
+        _buildMidpointVisual(t, Offset(rect.center.dx, rect.top)),
+        _buildMidpointVisual(t, Offset(rect.center.dx, rect.bottom)),
+        _buildMidpointVisual(t, Offset(rect.left, rect.center.dy)),
+        _buildMidpointVisual(t, Offset(rect.right, rect.center.dy)),
 
         // 6. Floating Action Chip Bar ("Apply Crop" / "Cancel")
         if (!_isDragging && rect.width > 10 && rect.height > 10)
@@ -220,22 +225,23 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
                 left: barLeft,
                 top: barTop,
                 child: Material(
-                  color: widget.isDarkMode ? AppColors.darkSurface : AppColors.lightSurface,
+                  color: t.surface,
                   elevation: 8,
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: AppColors.accent, width: 1.5),
+                      border: Border.all(color: t.border),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.accent,
-                            foregroundColor: Colors.white,
+                            backgroundColor: t.surfaceRaised,
+                            foregroundColor: t.emphasis,
+                            side: BorderSide(color: t.emphasis, width: 1.2),
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
@@ -246,6 +252,8 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
                         const SizedBox(width: 8),
                         OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
+                            foregroundColor: t.ink,
+                            side: BorderSide(color: t.border),
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
@@ -264,7 +272,12 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
     );
   }
 
-  Widget _buildCornerHandle({required Function(DragUpdateDetails) onPanUpdate}) {
+  // Grabbable marks over arbitrary screenshot content, not chrome over our
+  // own panel background — same ink-fill/onActive-ring pairing used by
+  // EditorCanvas's crop and floating-selection handles, so the ring always
+  // contrasts with its own fill regardless of mode, instead of a plain
+  // `ink` square that could blend into similarly-toned image content.
+  Widget _buildCornerHandle({required SnipTheme theme, required Function(DragUpdateDetails) onPanUpdate}) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onPanStart: (_) => setState(() => _isDragging = true),
@@ -276,10 +289,10 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
           width: 14,
           height: 14,
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: theme.ink,
             shape: BoxShape.rectangle,
             borderRadius: BorderRadius.circular(2),
-            border: Border.all(color: AppColors.accent, width: 1.6),
+            border: Border.all(color: theme.onActive, width: 1.6),
             boxShadow: const [
               BoxShadow(color: Colors.black38, blurRadius: 3, offset: Offset(0, 1.5)),
             ],
@@ -289,7 +302,7 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
     );
   }
 
-  Widget _buildMidpointVisual(Offset center) {
+  Widget _buildMidpointVisual(SnipTheme theme, Offset center) {
     const handleSize = 14.0;
     return Positioned(
       left: center.dx - handleSize / 2,
@@ -299,10 +312,10 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
       child: IgnorePointer(
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: theme.ink,
             shape: BoxShape.rectangle,
             borderRadius: BorderRadius.circular(2),
-            border: Border.all(color: AppColors.accent, width: 1.6),
+            border: Border.all(color: theme.onActive, width: 1.6),
             boxShadow: const [
               BoxShadow(color: Colors.black38, blurRadius: 3, offset: Offset(0, 1.5)),
             ],
@@ -314,15 +327,18 @@ class _CropOverlayWidgetState extends State<CropOverlayWidget> {
 }
 
 class _CropBorderPainter extends CustomPainter {
+  final SnipTheme theme;
   final Rect cropRect;
 
-  _CropBorderPainter({required this.cropRect});
+  _CropBorderPainter({required this.theme, required this.cropRect});
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 1. Dark semi-transparent background mask around cropRect
+    // 1. Dimming mask around cropRect. `SnipTheme.scrim` is deliberately
+    // mode-invariant — see its own doc comment — so the mask never flips
+    // polarity in dark mode.
     final maskPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.55)
+      ..color = SnipTheme.scrim
       ..style = PaintingStyle.fill;
 
     final fullRect = Rect.fromLTWH(-5000, -5000, size.width + 10000, size.height + 10000);
@@ -332,14 +348,28 @@ class _CropBorderPainter extends CustomPainter {
     path.fillType = PathFillType.evenOdd;
     canvas.drawPath(path, maskPaint);
 
-    // 2. Accent Crop Rect Outline
-    final borderPaint = Paint()
-      ..color = AppColors.accent
-      ..strokeWidth = 2.0
-      ..style = PaintingStyle.stroke;
-    canvas.drawRect(cropRect, borderPaint);
+    // 2. Crop Rect Outline. Skeleton has no accent hue left to guarantee
+    // this reads against arbitrary screenshot content, so — matching
+    // EditorCanvas's own crop overlay — it is a matched ink/onActive pair: a
+    // halo behind the main line, so at least one of the two always
+    // contrasts with whatever is underneath.
+    canvas.drawRect(
+      cropRect,
+      Paint()
+        ..color = theme.onActive
+        ..strokeWidth = 3.6
+        ..style = PaintingStyle.stroke,
+    );
+    canvas.drawRect(
+      cropRect,
+      Paint()
+        ..color = theme.ink
+        ..strokeWidth = 2.0
+        ..style = PaintingStyle.stroke,
+    );
 
-    // 3. Grid Rule of Thirds Lines
+    // 3. Grid Rule of Thirds Lines — subtle helper lines over live image
+    // content; kept fixed for the same reason as EditorCanvas's own guides.
     if (cropRect.width > 60 && cropRect.height > 60) {
       final gridPaint = Paint()
         ..color = Colors.white.withValues(alpha: 0.25)
@@ -358,11 +388,11 @@ class _CropBorderPainter extends CustomPainter {
       canvas.drawLine(Offset(cropRect.left, cropRect.top + h3 * 2), Offset(cropRect.right, cropRect.top + h3 * 2), gridPaint);
     }
 
-    // 4. Dimension Badge Pill
+    // 4. Dimension Badge Pill — ink mark plate, onActive knockout text.
     final textSpan = TextSpan(
       text: '${cropRect.width.round()} × ${cropRect.height.round()} px',
-      style: const TextStyle(
-        color: Colors.white,
+      style: TextStyle(
+        color: theme.onActive,
         fontSize: 11,
         fontWeight: FontWeight.bold,
       ),
@@ -378,13 +408,13 @@ class _CropBorderPainter extends CustomPainter {
       Rect.fromCenter(center: badgeCenter, width: textPainter.width + 14, height: textPainter.height + 6),
       const Radius.circular(10),
     );
-    final badgePaint = Paint()..color = AppColors.accent..style = PaintingStyle.fill;
+    final badgePaint = Paint()..color = theme.ink..style = PaintingStyle.fill;
     canvas.drawRRect(badgeRect, badgePaint);
     textPainter.paint(canvas, badgeCenter - Offset(textPainter.width / 2, textPainter.height / 2));
   }
 
   @override
   bool shouldRepaint(covariant _CropBorderPainter oldDelegate) {
-    return oldDelegate.cropRect != cropRect;
+    return oldDelegate.cropRect != cropRect || oldDelegate.theme != theme;
   }
 }

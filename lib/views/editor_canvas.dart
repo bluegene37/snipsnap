@@ -16,6 +16,7 @@ import '../tools/tool_handler.dart';
 import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 import '../utils/image_operations.dart';
+import '../utils/snip_theme.dart';
 import 'components/annotation_renderer.dart';
 
 class EditorCanvas extends StatefulWidget {
@@ -2153,6 +2154,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       return _buildEmptyState();
     }
 
+    final t = SnipTheme.of(context);
     final selected = _selectedAnnotation;
     final selectedBounds =
         selected != null ? AnnotationRenderer.selectionRect(selected) : Rect.zero;
@@ -2164,10 +2166,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       child: ClipRect(
         child: Stack(
           children: [
-            // Solid dark/light workspace background (Snagit-style)
+            // Solid workspace background (Snagit-style)
             Positioned.fill(
               child: Container(
-                color: widget.isDarkMode ? AppColors.canvasBg : AppColors.canvasBgLight,
+                color: t.canvas,
               ),
             ),
             SizedBox.expand(
@@ -2212,7 +2214,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                           Positioned.fill(
                             child: ClipRect(
                               child: CustomPaint(
-                                painter: _SteadyCheckerboardPainter(isDarkMode: widget.isDarkMode),
+                                painter: _SteadyCheckerboardPainter(theme: t),
                               ),
                             ),
                           ),
@@ -2275,6 +2277,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                               child: IgnorePointer(
                                 child: CustomPaint(
                                   painter: _FloatingSelectionPainter(
+                                    theme: t,
                                     marqueeRect: _selectionMarquee,
                                     floatingRect: _floatingSelectionRect,
                                     floatingImage: _floatingSelectionUiImage,
@@ -2296,13 +2299,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                               child: IgnorePointer(
                                 child: CustomPaint(
                                   painter: _CropOverlayPainter(
+                                    theme: t,
                                     cropRect: _activeCropRect!,
                                     imageRect: _imageRect,
                                     nativeImageSize: _baseImage != null
                                         ? Size(_baseImage!.width.toDouble(),
                                             _baseImage!.height.toDouble())
                                         : null,
-                                    isDarkMode: widget.isDarkMode,
                                   ),
                                 ),
                               ),
@@ -2323,9 +2326,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                               child: IgnorePointer(
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
-                                    color: AppColors.accent.withValues(alpha: 0.14),
+                                    color: t.ink.withValues(alpha: 0.1),
                                     border: Border.all(
-                                      color: AppColors.accent,
+                                      color: t.border,
                                       width: 1.5,
                                     ),
                                   ),
@@ -2352,12 +2355,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   Widget _buildEmptyState() {
-    final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
-    final subTextColor = widget.isDarkMode ? Colors.white54 : Colors.black54;
-    final circleBg = widget.isDarkMode
-        ? AppColors.darkSurface.withValues(alpha: 0.5)
-        : AppColors.lightSurface;
-    final borderColor = widget.isDarkMode ? Colors.white10 : Colors.black12;
+    final t = SnipTheme.of(context);
 
     return Center(
       child: Column(
@@ -2366,21 +2364,21 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: circleBg,
+              color: t.surface,
               shape: BoxShape.circle,
-              border: Border.all(color: borderColor),
+              border: Border.all(color: t.border),
             ),
-            child: const Icon(Icons.add_a_photo_rounded, size: 56, color: AppColors.accent),
+            child: Icon(Icons.add_a_photo_rounded, size: 56, color: t.emphasis),
           ),
           const SizedBox(height: 16),
           Text(
             'No Screenshot Selected',
-            style: TextStyle(color: textColor, fontSize: 20, fontWeight: FontWeight.bold),
+            style: TextStyle(color: t.ink, fontSize: 20, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
             'Click "Snip" in the top bar to capture screen area, or open an existing image.',
-            style: TextStyle(color: subTextColor, fontSize: 13),
+            style: TextStyle(color: t.inkMuted, fontSize: 13),
           ),
         ],
       ),
@@ -2388,6 +2386,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   Widget _buildCropActionBar() {
+    final t = SnipTheme.of(context);
     final cropRect = _activeCropRect!;
     final size = _canvasSize;
 
@@ -2409,22 +2408,23 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       left: barLeft,
       top: barTop,
       child: Material(
-        color: widget.isDarkMode ? AppColors.darkSurface : AppColors.lightSurface,
+        color: t.surface,
         elevation: 8,
         borderRadius: BorderRadius.circular(20),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppColors.accent, width: 1.5),
+            border: Border.all(color: t.border),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.accent,
-                  foregroundColor: Colors.white,
+                  backgroundColor: t.surfaceRaised,
+                  foregroundColor: t.emphasis,
+                  side: BorderSide(color: t.emphasis, width: 1.2),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
@@ -2438,6 +2438,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
               const SizedBox(width: 8),
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
+                  foregroundColor: t.ink,
+                  side: BorderSide(color: t.border),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
@@ -2456,21 +2458,22 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   Widget _buildDeleteChip(Rect selectedBounds) {
+    final t = SnipTheme.of(context);
     return Positioned(
       left: math.max(0, selectedBounds.topRight.dx - 10),
       top: math.max(0, selectedBounds.topRight.dy - 14),
       child: Tooltip(
         message: 'Delete selected annotation (Delete / Backspace)',
         child: Material(
-          color: Colors.redAccent,
+          color: t.danger,
           elevation: 4,
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),
             onTap: _deleteSelectedAnnotation,
-            child: const Padding(
-              padding: EdgeInsets.all(5),
-              child: Icon(Icons.close_rounded, size: 14, color: Colors.white),
+            child: Padding(
+              padding: const EdgeInsets.all(5),
+              child: Icon(Icons.close_rounded, size: 14, color: t.onDanger),
             ),
           ),
         ),
@@ -2482,6 +2485,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final pos = _inlineTextPos;
     if (pos == null) return const SizedBox.shrink();
 
+    final t = SnipTheme.of(context);
     final showBg = widget.isFilled &&
         widget.textBackgroundColor != null &&
         widget.textBackgroundColor!.a > 0;
@@ -2495,11 +2499,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           constraints: const BoxConstraints(minWidth: 120, maxWidth: 450),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: showBg
-                ? (widget.textBackgroundColor ?? Colors.black87)
-                : (widget.isDarkMode ? AppColors.darkSurface : Colors.white),
+            color: showBg ? (widget.textBackgroundColor ?? Colors.black87) : t.surface,
             borderRadius: BorderRadius.circular(widget.borderRadius.clamp(4.0, 16.0)),
-            border: Border.all(color: AppColors.accent, width: 2.0),
+            border: Border.all(color: t.ink, width: 2.0),
             boxShadow: const [
               BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
             ],
@@ -2517,12 +2519,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 fontWeight: FontWeight.w600,
                 height: 1.25,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: EdgeInsets.zero,
                 hintText: 'Type text here...',
-                hintStyle: TextStyle(color: Colors.white38, fontSize: 13),
+                hintStyle: TextStyle(color: t.inkMuted, fontSize: 13),
               ),
               onSubmitted: (_) => _commitInlineText(),
               onTapOutside: (_) => _commitInlineText(),
@@ -2534,6 +2536,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   Widget _buildMagnifierLoupe() {
+    final t = SnipTheme.of(context);
     final pos = _hoverPos;
     final color = _hoverColor;
     final pixelPos = _hoverPixelPos;
@@ -2565,7 +2568,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
               height: 80,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2.5),
+                border: Border.all(color: t.ink, width: 2.5),
                 boxShadow: const [
                   BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 3)),
                 ],
@@ -2574,6 +2577,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 child: CustomPaint(
                   size: const Size(80, 80),
                   painter: _LoupeGridPainter(
+                    theme: t,
                     sourceImage: cached,
                     centerPixel: pixelPos,
                   ),
@@ -2585,9 +2589,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
               decoration: BoxDecoration(
-                color: widget.isDarkMode ? AppColors.darkSurfaceVariant : Colors.white,
+                color: t.surfaceRaised,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.accent, width: 1.0),
+                border: Border.all(color: t.border),
                 boxShadow: const [
                   BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
                 ],
@@ -2604,7 +2608,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                         decoration: BoxDecoration(
                           color: color,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 0.8),
+                          border: Border.all(color: t.ringOn(color), width: 0.8),
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -2614,7 +2618,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                           fontSize: 10.5,
                           fontWeight: FontWeight.bold,
                           fontFamily: 'monospace',
-                          color: widget.isDarkMode ? Colors.white : Colors.black87,
+                          color: t.ink,
                         ),
                       ),
                     ],
@@ -2624,7 +2628,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                     rgb,
                     style: TextStyle(
                       fontSize: 9,
-                      color: widget.isDarkMode ? Colors.white70 : Colors.black54,
+                      color: t.inkMuted,
                     ),
                   ),
                 ],
@@ -2638,17 +2642,17 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 }
 
 class _SteadyCheckerboardPainter extends CustomPainter {
-  final bool isDarkMode;
+  final SnipTheme theme;
 
-  _SteadyCheckerboardPainter({required this.isDarkMode});
+  _SteadyCheckerboardPainter({required this.theme});
 
   @override
   void paint(Canvas canvas, Size size) {
     const squareSize = 14.0;
-    final paint1 =
-        Paint()..color = isDarkMode ? const Color(0xFF2E2E34) : const Color(0xFFE2E2E8);
-    final paint2 =
-        Paint()..color = isDarkMode ? const Color(0xFF1E1E22) : const Color(0xFFF4F4F8);
+    // Neutral, low-contrast panel-on-panel pair in both modes — the
+    // checkerboard just needs to read as "transparent," not draw attention.
+    final paint1 = Paint()..color = theme.surface;
+    final paint2 = Paint()..color = theme.surfaceRaised;
 
     int row = 0;
     for (double y = 0; y < size.height; y += squareSize) {
@@ -2667,31 +2671,33 @@ class _SteadyCheckerboardPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _SteadyCheckerboardPainter oldDelegate) =>
-      oldDelegate.isDarkMode != isDarkMode;
+      oldDelegate.theme != theme;
 }
 
 class _CropOverlayPainter extends CustomPainter {
   final Rect cropRect;
   final Rect imageRect;
   final Size? nativeImageSize;
-  final bool isDarkMode;
+  final SnipTheme theme;
 
   _CropOverlayPainter({
+    required this.theme,
     required this.cropRect,
     required this.imageRect,
     this.nativeImageSize,
-    this.isDarkMode = true,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 1. Dark dimming mask on outside of cropRect
+    // 1. Dimming mask on outside of cropRect. `SnipTheme.scrim` is
+    // deliberately mode-invariant — see its own doc comment — so the mask
+    // never flips polarity in dark mode.
     final fullRect = (Offset.zero & size).expandToInclude(cropRect).inflate(200.0);
     final path = Path()
       ..addRect(fullRect)
       ..addRect(cropRect)
       ..fillType = PathFillType.evenOdd;
-    canvas.drawPath(path, Paint()..color = Colors.black.withValues(alpha: 0.65));
+    canvas.drawPath(path, Paint()..color = SnipTheme.scrim);
 
     // 2. If cropRect extends outside imageRect, render transparent checkerboard grid like Snagit!
     if (cropRect.left < imageRect.left ||
@@ -2705,11 +2711,16 @@ class _CropOverlayPainter extends CustomPainter {
 
       canvas.save();
       canvas.clipPath(expandedPath);
-      _drawCheckerboardGrid(canvas, cropRect, isDarkMode);
+      _drawCheckerboardGrid(canvas, cropRect, theme);
       canvas.restore();
     }
 
-    // 3. Draw original image boundary if cropRect is adjusted
+    // 3. Draw original image boundary if cropRect is adjusted. This sits on
+    // top of the mode-invariant scrim (or arbitrary image content, once
+    // expanded past it) rather than on app chrome, so it stays a fixed light
+    // mark for the same reason `SnipTheme.scrim` itself stays fixed — a
+    // mode-flipping `ink` would go near-black in light mode and vanish
+    // against the always-dark scrim.
     if (cropRect != imageRect && imageRect.width > 0 && imageRect.height > 0) {
       final origBorderPaint = Paint()
         ..color = Colors.white.withValues(alpha: 0.7)
@@ -2718,16 +2729,28 @@ class _CropOverlayPainter extends CustomPainter {
       canvas.drawRect(imageRect, origBorderPaint);
     }
 
-    // 4. Accent crop border
+    // 4. Crop border. Skeleton has no accent hue left to guarantee this reads
+    // against arbitrary screenshot content, so it is drawn as a matched
+    // ink/onActive pair — a lighter halo behind a darker line, or the
+    // reverse in dark mode — so at least one of the two always contrasts
+    // with whatever is underneath.
     canvas.drawRect(
       cropRect,
       Paint()
-        ..color = AppColors.accent
+        ..color = theme.onActive
+        ..strokeWidth = 3.4
+        ..style = PaintingStyle.stroke,
+    );
+    canvas.drawRect(
+      cropRect,
+      Paint()
+        ..color = theme.ink
         ..strokeWidth = 1.8
         ..style = PaintingStyle.stroke,
     );
 
-    // 5. Rule-of-thirds guides
+    // 5. Rule-of-thirds guides — subtle helper lines over live image content;
+    // kept fixed for the same reason as the original-boundary stroke above.
     final guidePaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.28)
       ..strokeWidth = 1.0;
@@ -2738,16 +2761,22 @@ class _CropOverlayPainter extends CustomPainter {
       canvas.drawLine(Offset(cropRect.left, dy), Offset(cropRect.right, dy), guidePaint);
     }
 
-    // 6. 8 Square handles
+    // 6. 8 Square handles. A physical drop shadow (literal, not themed — it
+    // is a depth cue, not a state signal) plus an ink fill ringed in the
+    // opposite mark tone (onActive), so the ring always contrasts with its
+    // own fill regardless of mode — the same guaranteed-contrast pairing
+    // `SnipTheme.ringOn` documents, applied at draw time since a plain
+    // `ink` handle over a screenshot close to `ink`'s own tone is exactly
+    // the invisible-handle bug this pairing avoids.
     const handleSize = 9.0;
     void drawSquareHandle(Offset center) {
       final rect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
       canvas.drawRect(rect.shift(const Offset(0, 1)), Paint()..color = Colors.black45);
-      canvas.drawRect(rect, Paint()..color = Colors.white);
+      canvas.drawRect(rect, Paint()..color = theme.ink);
       canvas.drawRect(
         rect,
         Paint()
-          ..color = AppColors.accent
+          ..color = theme.onActive
           ..strokeWidth = 1.2
           ..style = PaintingStyle.stroke,
       );
@@ -2766,7 +2795,8 @@ class _CropOverlayPainter extends CustomPainter {
       drawSquareHandle(c);
     }
 
-    // 7. Dimensions badge
+    // 7. Dimensions badge — the same "ink mark plate, onActive knockout
+    // text" pattern used elsewhere for chrome badges.
     int pixelW = cropRect.width.round();
     int pixelH = cropRect.height.round();
     if (nativeImageSize != null && imageRect.width > 0) {
@@ -2778,7 +2808,7 @@ class _CropOverlayPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: '$pixelW × $pixelH px',
-        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+        style: TextStyle(color: theme.onActive, fontSize: 11, fontWeight: FontWeight.bold),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -2790,17 +2820,15 @@ class _CropOverlayPainter extends CustomPainter {
             center: badgeCenter, width: tp.width + 12, height: tp.height + 6),
         const Radius.circular(10),
       ),
-      Paint()..color = AppColors.accent,
+      Paint()..color = theme.ink,
     );
     tp.paint(canvas, badgeCenter - Offset(tp.width / 2, tp.height / 2));
   }
 
-  static void _drawCheckerboardGrid(Canvas canvas, Rect rect, bool isDarkMode) {
+  static void _drawCheckerboardGrid(Canvas canvas, Rect rect, SnipTheme theme) {
     const squareSize = 14.0;
-    final p1 = Paint()
-      ..color = isDarkMode ? const Color(0xFF2E2E34) : const Color(0xFFE2E2E8);
-    final p2 = Paint()
-      ..color = isDarkMode ? const Color(0xFF1E1E22) : const Color(0xFFF4F4F8);
+    final p1 = Paint()..color = theme.surface;
+    final p2 = Paint()..color = theme.surfaceRaised;
 
     final startX = (rect.left / squareSize).floor() * squareSize;
     final startY = (rect.top / squareSize).floor() * squareSize;
@@ -2826,10 +2854,11 @@ class _CropOverlayPainter extends CustomPainter {
   bool shouldRepaint(covariant _CropOverlayPainter oldDelegate) =>
       oldDelegate.cropRect != cropRect ||
       oldDelegate.imageRect != imageRect ||
-      oldDelegate.isDarkMode != isDarkMode;
+      oldDelegate.theme != theme;
 }
 
 class _FloatingSelectionPainter extends CustomPainter {
+  final SnipTheme theme;
   final Rect? marqueeRect;
   final Rect? floatingRect;
   final ui.Image? floatingImage;
@@ -2837,6 +2866,7 @@ class _FloatingSelectionPainter extends CustomPainter {
   final Rect? imageRect;
 
   _FloatingSelectionPainter({
+    required this.theme,
     this.marqueeRect,
     this.floatingRect,
     this.floatingImage,
@@ -2868,34 +2898,40 @@ class _FloatingSelectionPainter extends CustomPainter {
     } else if (marqueeRect != null) {
       canvas.drawRect(
         marqueeRect!,
-        Paint()..color = const Color(0xFF38BDF8).withValues(alpha: 0.15),
+        Paint()..color = theme.ink.withValues(alpha: 0.12),
       );
     }
 
-    // 2. Dashed Marquee / Selection Boundary Border
+    // 2. Dashed Marquee / Selection Boundary Border. Skeleton has no accent
+    // hue to guarantee this reads against arbitrary screenshot content, so —
+    // like the crop border — it is a matched ink/onActive pair rather than a
+    // single mark that could blend into similarly-toned image content.
     final borderPaint = Paint()
-      ..color = const Color(0xFF38BDF8)
+      ..color = theme.ink
       ..strokeWidth = 1.6
       ..style = PaintingStyle.stroke;
 
-    final shadowBorderPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.6)
+    final echoBorderPaint = Paint()
+      ..color = theme.onActive
       ..strokeWidth = 1.6
       ..style = PaintingStyle.stroke;
 
-    _drawDashedRect(canvas, rect, borderPaint, shadowBorderPaint);
+    _drawDashedRect(canvas, rect, borderPaint, echoBorderPaint);
 
-    // 3. 8 Resize Handles
+    // 3. 8 Resize Handles — same physical-shadow + ink-fill + onActive-ring
+    // treatment as the crop overlay's handles, for the same reason: these
+    // are grabbable marks over arbitrary image content, not chrome over our
+    // own panel background.
     if (floatingRect != null) {
       const handleSize = 9.0;
       void drawSquareHandle(Offset center) {
         final hRect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
         canvas.drawRect(hRect.shift(const Offset(0, 1)), Paint()..color = Colors.black38);
-        canvas.drawRect(hRect, Paint()..color = Colors.white);
+        canvas.drawRect(hRect, Paint()..color = theme.ink);
         canvas.drawRect(
           hRect,
           Paint()
-            ..color = const Color(0xFF38BDF8)
+            ..color = theme.onActive
             ..strokeWidth = 1.4
             ..style = PaintingStyle.stroke,
         );
@@ -2915,7 +2951,7 @@ class _FloatingSelectionPainter extends CustomPainter {
       }
     }
 
-    // 4. Dimensions Pill Badge
+    // 4. Dimensions Pill Badge — ink mark plate, onActive knockout text.
     int pixelW = rect.width.round();
     int pixelH = rect.height.round();
     if (nativeImageSize != null && imageRect != null && imageRect!.width > 0) {
@@ -2927,7 +2963,7 @@ class _FloatingSelectionPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: '$pixelW × $pixelH px',
-        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+        style: TextStyle(color: theme.onActive, fontSize: 11, fontWeight: FontWeight.bold),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -2938,7 +2974,7 @@ class _FloatingSelectionPainter extends CustomPainter {
         Rect.fromCenter(center: badgeCenter, width: tp.width + 12, height: tp.height + 6),
         const Radius.circular(10),
       ),
-      Paint()..color = const Color(0xFF0284C7),
+      Paint()..color = theme.ink,
     );
     tp.paint(canvas, badgeCenter - Offset(tp.width / 2, tp.height / 2));
   }
@@ -2978,6 +3014,8 @@ class _FloatingSelectionPainter extends CustomPainter {
   }
 
   @override
+  // Already unconditional, so a theme change (like every other change) is
+  // covered without inspecting `oldDelegate.theme` explicitly.
   bool shouldRepaint(covariant _FloatingSelectionPainter oldDelegate) => true;
 }
 
@@ -3056,10 +3094,11 @@ class _AnnotationPainter extends CustomPainter {
 }
 
 class _LoupeGridPainter extends CustomPainter {
+  final SnipTheme theme;
   final img.Image sourceImage;
   final ({int x, int y}) centerPixel;
 
-  _LoupeGridPainter({required this.sourceImage, required this.centerPixel});
+  _LoupeGridPainter({required this.theme, required this.sourceImage, required this.centerPixel});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -3089,7 +3128,11 @@ class _LoupeGridPainter extends CustomPainter {
 
         canvas.drawRect(cellRect, Paint()..color = cellColor);
 
-        // Grid cell outline
+        // Grid cell outline — a faint, non-interactive separator between
+        // sampled-pixel cells. Kept fixed rather than theme-driven for the
+        // same reason as the crop overlay's rule-of-thirds guides: it sits
+        // directly on arbitrary sampled image colour, and its job is only to
+        // be a barely-visible hint of the grid, not a legible mark.
         canvas.drawRect(
           cellRect,
           Paint()
@@ -3100,7 +3143,11 @@ class _LoupeGridPainter extends CustomPainter {
       }
     }
 
-    // Center pixel crosshair target
+    // Center pixel crosshair target — the loupe's one load-bearing mark, so
+    // (unlike the grid outline above) it gets the guaranteed-contrast
+    // ink/onActive pairing: whichever of the two is near-black or near-white
+    // in this mode, the other one is always the opposite, so the crosshair
+    // stays visible against any sampled colour underneath.
     final centerRect = Rect.fromLTWH(
       halfGrid * cellSize,
       halfGrid * cellSize,
@@ -3110,14 +3157,14 @@ class _LoupeGridPainter extends CustomPainter {
     canvas.drawRect(
       centerRect,
       Paint()
-        ..color = Colors.black
+        ..color = theme.ink
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.0,
     );
     canvas.drawRect(
       centerRect,
       Paint()
-        ..color = Colors.white
+        ..color = theme.onActive
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.0,
     );
@@ -3126,5 +3173,6 @@ class _LoupeGridPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _LoupeGridPainter oldDelegate) =>
       oldDelegate.centerPixel.x != centerPixel.x ||
-      oldDelegate.centerPixel.y != centerPixel.y;
+      oldDelegate.centerPixel.y != centerPixel.y ||
+      oldDelegate.theme != theme;
 }
