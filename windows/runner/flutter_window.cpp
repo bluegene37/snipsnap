@@ -8,7 +8,14 @@
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
 
-FlutterWindow::~FlutterWindow() {}
+FlutterWindow::~FlutterWindow() {
+  // Belt and braces alongside OnDestroy: by the time the base class's
+  // destructor runs Destroy(), this derived override is already gone, so a
+  // teardown that reaches the destructor without going through OnDestroy would
+  // otherwise leave workers holding a live pointer to a dead engine.
+  // ShutdownOcrHandler is idempotent.
+  ShutdownOcrHandler();
+}
 
 bool FlutterWindow::OnCreate() {
   if (!Win32Window::OnCreate()) {

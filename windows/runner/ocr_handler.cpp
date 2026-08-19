@@ -13,6 +13,10 @@
 #include <winrt/Windows.Media.Ocr.h>
 #include <winrt/Windows.Storage.Streams.h>
 
+// For CoIncrementMTAUsage. Reached via windows.h in practice, but named
+// explicitly so the dependency is not silently lost to a WIN32_LEAN_AND_MEAN.
+#include <combaseapi.h>
+
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -74,6 +78,31 @@ struct EngineGate {
 std::shared_ptr<EngineGate>& Gate() {
   static std::shared_ptr<EngineGate> gate;
   return gate;
+}
+
+// Keeps the process-wide multi-threaded apartment alive for the process's
+// lifetime.
+//
+// Each worker calls `init_apartment(multi_threaded)` / `uninit_apartment()`
+// around its work. Since nothing else in this process joins the MTA, that pair
+// is the *only* thing holding the process MTA open — so the last uninit tears
+// it down again, and the OCR runtime's COM servers get unloaded and reloaded on
+// every single call. That is not a correctness bug; it presents purely as
+// "Windows OCR is slow", with a cause that profiling will not point at.
+//
+// `CoIncrementMTAUsage` pins the MTA *without* making the calling thread a
+// member of it, which is exactly what is wanted: the platform thread stays an
+// STA. The cookie is deliberately never released — the pin is meant to last as
+// long as the process.
+void PinProcessMta() {
+  static CO_MTA_USAGE_COOKIE cookie = nullptr;
+  if (cookie) return;
+  HRESULT const result = ::CoIncrementMTAUsage(&cookie);
+  if (FAILED(result)) {
+    // Non-fatal: workers still create the MTA themselves, they just pay to
+    // rebuild it on each call.
+    cookie = nullptr;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,26 +195,46 @@ class ResultSink {
 // The worker initialises its own apartment because a fresh thread has none, and
 // any WinRT call without one fails with CO_E_NOTINITIALIZED. Multi-threaded is
 // both the correct choice for a worker and the one that makes `.get()` legal.
-void RunOnWorker(std::unique_ptr<ResultSink> sink,
+// `PinProcessMta` (called once at registration) stops that apartment from being
+// torn down and rebuilt between calls.
+//
+// |sink| is a `shared_ptr` rather than a `unique_ptr` specifically so that a
+// failure to *start* the thread still leaves this function holding a live sink
+// to answer with.
+void RunOnWorker(std::shared_ptr<ResultSink> sink,
                  std::function<void(ResultSink&)> work) {
-  std::thread([sink = std::move(sink), work = std::move(work)]() mutable {
-    bool apartment_ready = false;
-    try {
-      winrt::init_apartment(winrt::apartment_type::multi_threaded);
-      apartment_ready = true;
-      work(*sink);
-    } catch (winrt::hresult_error const& error) {
-      sink->Error("winrt_error", ToUtf8(error.message()));
-    } catch (...) {
-      sink->Error("ocr_failed", "The OCR worker failed with an unknown error.");
-    }
-    // Drain the sink (and thus release everything it holds) *before* tearing
-    // the apartment down. The sink itself holds no WinRT objects, but anything
-    // `work` created must already be gone by this point — it is, since `work`
-    // has returned and its locals were scoped to it.
-    sink.reset();
-    if (apartment_ready) winrt::uninit_apartment();
-  }).detach();
+  try {
+    std::thread([sink, work = std::move(work)]() mutable {
+      bool apartment_ready = false;
+      try {
+        winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        apartment_ready = true;
+        work(*sink);
+      } catch (winrt::hresult_error const& error) {
+        sink->Error("winrt_error", ToUtf8(error.message()));
+      } catch (...) {
+        sink->Error("ocr_failed",
+                    "The OCR worker failed with an unknown error.");
+      }
+      // Drain the sink (and thus release everything it holds) *before* tearing
+      // the apartment down. The sink itself holds no WinRT objects, but
+      // anything `work` created must already be gone by this point — it is,
+      // since `work` has returned and its locals were scoped to it.
+      sink.reset();
+      if (apartment_ready) winrt::uninit_apartment();
+    }).detach();
+  } catch (...) {
+    // The thread never started, so no worker will ever drain the sink. Answer
+    // it here rather than letting the exception unwind into Flutter's C
+    // boundary, which is undefined behaviour.
+    //
+    // Note this catch only helps if the runner is ever built with STL
+    // exceptions enabled: under the `_HAS_EXCEPTIONS=0` that
+    // APPLY_STANDARD_SETTINGS currently sets, a failed `std::thread`
+    // construction calls std::terminate instead of throwing, and nothing can
+    // intercept it. Cheap either way, and correct if that flag ever changes.
+    sink->Error("ocr_failed", "Could not start the OCR worker thread.");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +298,14 @@ void HandleAvailability(ResultSink& sink) {
 // `macos/Runner/OcrPlugin.swift`, which *does* convert, because Vision reports
 // normalised boxes with a bottom-left origin. Do not "align" this file with the
 // Swift by adding a flip; the two are correct in different ways.
+//
+// ROTATION: `OcrResult::TextAngle` is deliberately ignored. Windows de-skews
+// internally, so when it detects rotated text the word rects come back in the
+// *de-rotated* frame; landing them on source pixels would mean rotating each
+// box by `TextAngle` about the image centre. SnipSnap OCRs screen regions,
+// which are axis-aligned, so `TextAngle` is null in practice and the impact
+// today is nil. Revisit only if OCR is ever pointed at photographed or scanned
+// input.
 //
 // CONFIDENCE: Windows OCR exposes no per-line or per-word score, so a constant
 // 1.0 stands in. Dart only carries the value through — nothing filters or
@@ -393,6 +450,16 @@ void HandleRecognize(std::vector<uint8_t> const& png, ResultSink& sink) {
 void RegisterOcrHandler(flutter::FlutterEngine* engine) {
   if (!engine) return;
 
+  // A second registration would orphan the previous gate with a stale but
+  // non-null engine pointer, and any worker still holding that gate would post
+  // to freed memory. Retiring the old gate first makes re-registration safe by
+  // construction. (Unreachable in this runner — OnCreate runs once.)
+  ShutdownOcrHandler();
+
+  // Pin the process MTA before any worker exists, so the apartment is not torn
+  // down and rebuilt between calls. See PinProcessMta.
+  PinProcessMta();
+
   auto gate = std::make_shared<EngineGate>();
   gate->engine = engine;
   Gate() = gate;
@@ -411,7 +478,7 @@ void RegisterOcrHandler(flutter::FlutterEngine* engine) {
         // travel inside a `std::function` (see `ResultSink::Deliver`), which
         // requires a copyable capture. Convert once, here.
         auto shared = std::shared_ptr<OcrMethodResult>(std::move(result));
-        auto sink = std::make_unique<ResultSink>(gate, std::move(shared));
+        auto sink = std::make_shared<ResultSink>(gate, std::move(shared));
 
         if (call.method_name() == "availability") {
           RunOnWorker(std::move(sink),
