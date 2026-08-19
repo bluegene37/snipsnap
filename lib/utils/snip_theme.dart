@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// The two variants of the skeleton design language.
@@ -257,8 +259,14 @@ class SnipTheme {
   ///   [inkFaint] regardless of the fill drawn here.
   /// * **destructive** (`tone: SnipControlTone.danger`): the same
   ///   resting/hovered/active shape, but every colour that would have been
-  ///   [border]/[borderStrong]/[activeFill] is [danger] instead — the one
-  ///   sanctioned chromatic exception.
+  ///   [border]/[borderStrong] is [danger] instead. For **exclusive-active**
+  ///   the fill itself swaps too ([activeFill] → [danger]) — the one
+  ///   sanctioned chromatic exception. For **non-exclusive selected** the
+  ///   fill stays [selectedFill] (only the outline becomes [danger]):
+  ///   [controlForeground] answers plain [danger] text there, not the
+  ///   [onDanger] knockout, precisely because [selectedFill] is never
+  ///   replaced — see [controlForeground]'s own doc comment for why the two
+  ///   must branch on `exclusive` before `tone` to stay paired.
   ///
   /// [radius] defaults to the [radius] field; pass an explicit value to
   /// match a control's own corner radius.
@@ -324,18 +332,31 @@ class SnipTheme {
   /// the exact same arguments — pass the two together so a control's
   /// content can never drift out of sync with its own fill.
   ///
+  /// Branches in the same order as [controlDecoration], so the two always
+  /// agree on which fill a given argument set produced:
+  ///
   /// * `enabled: false` always answers [inkFaint], regardless of every other
   ///   argument — disabled state is signalled by foreground alone,
   ///   [controlDecoration] having already downgraded the fill itself.
-  /// * `tone: SnipControlTone.danger` answers [onDanger] when active,
-  ///   [danger] at rest — never a plain [ink]/[inkMuted], so a destructive
-  ///   control's label reads as destructive even before it's pressed.
-  /// * Otherwise: [onActive] only for exclusive-active — a
-  ///   selected-but-not-exclusive control is a highlight, not an inversion,
-  ///   so its foreground stays ordinary [ink]. [dim] selects the resting
-  ///   state's secondary tone ([inkMuted]): pass `true` for a caption/label
-  ///   under an icon, `false` (the default) for the icon itself, which stays
-  ///   full [ink] at rest.
+  /// * Otherwise, exclusivity is checked *before* tone, because
+  ///   [controlDecoration] only ever paints the full [activeFill]/[danger]
+  ///   knockout plate for the exclusive-active case — a non-exclusive
+  ///   selected control stays on [selectedFill] even with a destructive
+  ///   [tone]. Knocking its text out to [onDanger] there would put
+  ///   [onDanger] directly on [selectedFill], which is not a designed pair
+  ///   and is illegible (checked by
+  ///   `test/snip_theme_test.dart`'s full-combination contrast sweep). So:
+  ///   - **exclusive-active**: [onDanger] for `tone: danger`, [onActive]
+  ///     otherwise — the knockout, matching [controlDecoration]'s full-fill
+  ///     plate.
+  ///   - **non-exclusive selected**: [danger] for `tone: danger` (still
+  ///     legible on [selectedFill] — this is the ring colour too), [ink]
+  ///     otherwise — a highlight, never a knockout.
+  ///   - **resting**: [danger] for `tone: danger` — a destructive control
+  ///     reads as destructive even before it's pressed — otherwise [dim]
+  ///     selects the secondary tone ([inkMuted]: pass `true` for a
+  ///     caption/label under an icon, `false`, the default, for the icon
+  ///     itself, which stays full [ink] at rest).
   Color controlForeground({
     required bool active,
     bool exclusive = true,
@@ -344,9 +365,52 @@ class SnipTheme {
     SnipControlTone tone = SnipControlTone.neutral,
   }) {
     if (!enabled) return inkFaint;
-    if (tone == SnipControlTone.danger) return active ? onDanger : danger;
-    if (active) return exclusive ? onActive : ink;
+    final isDanger = tone == SnipControlTone.danger;
+    if (active) {
+      if (exclusive) return isDanger ? onDanger : onActive;
+      return isDanger ? danger : ink;
+    }
+    if (isDanger) return danger;
     return dim ? inkMuted : ink;
+  }
+
+  /// A selection-ring colour guaranteed to stay visible against real,
+  /// arbitrary colour data — an annotation-palette swatch, a framing-gradient
+  /// preview, anything this design deliberately lets stay saturated rather
+  /// than tokenising.
+  ///
+  /// Monochrome chrome drawn *on* real colour is the one place a fixed token
+  /// isn't safe: [ink] alone reads fine against most swatches, but a ring
+  /// fixed to [ink] drops to roughly 1.1:1 — effectively invisible — against
+  /// a swatch that happens to be close to [ink] itself (a pure-black swatch
+  /// in light mode, where [ink] *is* near-black; a pure-white swatch in dark
+  /// mode, where [ink] is near-white). [ink] and [onActive] are this
+  /// design's two "mark" tones — the near-black/near-white pair the whole
+  /// inversion is built from (see the class doc comment) — so this picks
+  /// whichever of the two actually contrasts better against [swatchColor]
+  /// and uses that instead of assuming [ink] is always the right one.
+  ///
+  /// Any future call site that draws chrome on top of real colour data
+  /// should reach for this rather than hardcoding [ink] — that hardcoding is
+  /// exactly the bug this method exists to close (see
+  /// `test/snip_theme_test.dart`'s full-palette contrast sweep and the
+  /// task-4 report).
+  Color ringOn(Color swatchColor) {
+    double luminance(Color c) {
+      double channel(double v) =>
+          v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+      return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+    }
+
+    double contrast(Color a, Color b) {
+      final la = luminance(a);
+      final lb = luminance(b);
+      final hi = math.max(la, lb);
+      final lo = math.min(la, lb);
+      return (hi + 0.05) / (lo + 0.05);
+    }
+
+    return contrast(ink, swatchColor) >= contrast(onActive, swatchColor) ? ink : onActive;
   }
 
   /// Reads the theme from the nearest [SnipThemeScope].

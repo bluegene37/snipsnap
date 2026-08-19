@@ -1,8 +1,26 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/components/style_picker.dart';
+
+/// WCAG contrast, duplicated locally rather than shared — same small helper
+/// `test/snip_theme_test.dart` defines for itself.
+double _contrast(Color a, Color b) {
+  double luminance(Color c) {
+    double channel(double v) =>
+        v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+    return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+  }
+
+  final la = luminance(a);
+  final lb = luminance(b);
+  final hi = math.max(la, lb);
+  final lo = math.min(la, lb);
+  return (hi + 0.05) / (lo + 0.05);
+}
 
 /// Pumps [StylePicker] under a real [SnipThemeScope] for the given [mode],
 /// with [activeTool] driving which conditional sections render.
@@ -104,7 +122,9 @@ void main() {
     }
 
     for (final mode in SnipThemeMode.values) {
-      testWidgets('$mode: the selected swatch ring is t.ink, not an accent hue', (tester) async {
+      testWidgets(
+          '$mode: the selected swatch ring is SnipTheme.ringOn(colour), not a hardcoded hue',
+          (tester) async {
         final t = SnipTheme.forMode(mode);
         const selected = Color(0xFFEF4444); // first AppColors.palette entry
         await _pump(tester, mode: mode, tool: CanvasTool.pen, selectedColor: selected);
@@ -117,8 +137,37 @@ void main() {
           orElse: () => throw StateError('no selected swatch found for $mode'),
         );
         expect(selectedSwatch.color, selected, reason: '$mode: fill is data, must stay real colour');
-        expect((selectedSwatch.border as Border).top.color, t.ink,
-            reason: '$mode: the ring is chrome, must be t.ink — not a hardcoded/accent colour');
+        // Not a fixed t.ink — ringOn genuinely differs by mode for the same
+        // swatch colour (ink itself flips polarity between modes), so the
+        // only correct expectation is "whatever ringOn(selected) computes".
+        expect((selectedSwatch.border as Border).top.color, t.ringOn(selected),
+            reason: '$mode: the ring is chrome, must route through SnipTheme.ringOn '
+                '— not a hardcoded/accent colour');
+      });
+    }
+
+    for (final entry in [
+      (mode: SnipThemeMode.light, swatch: const Color(0xFF000000), label: 'Pure Black'),
+      (mode: SnipThemeMode.dark, swatch: const Color(0xFFFFFFFF), label: 'Pure White'),
+    ]) {
+      testWidgets(
+          '${entry.mode}: the selected ring on the ${entry.label} palette swatch '
+          'is not silently invisible',
+          (tester) async {
+        // Regression for the exact case a fixed t.ink ring failed on: a
+        // near-black ring on a black swatch (light mode) / near-white ring
+        // on a white swatch (dark mode) both drop to ~1.1:1. Both swatches
+        // are live AppColors.palette entries reachable from this grid.
+        await _pump(tester, mode: entry.mode, tool: CanvasTool.pen, selectedColor: entry.swatch);
+
+        final selectedSwatch = _circleSwatchDecorations(tester).singleWhere(
+          (d) => d.color?.toARGB32() == entry.swatch.toARGB32() && d.border?.top.width == 2.5,
+          orElse: () => throw StateError('no selected swatch found for ${entry.mode}'),
+        );
+        final ring = (selectedSwatch.border as Border).top.color;
+        expect(_contrast(ring, entry.swatch), greaterThanOrEqualTo(3.0),
+            reason: '${entry.mode}: ring $ring on ${entry.label} '
+                '${entry.swatch} only clears ${_contrast(ring, entry.swatch).toStringAsFixed(2)}:1');
       });
     }
   });

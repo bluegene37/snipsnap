@@ -1419,7 +1419,7 @@ class StylePicker extends StatelessWidget {
                             color: bgC,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: isSelected ? t.ink : t.border,
+                              color: isSelected ? t.ringOn(bgC) : t.border,
                               width: isSelected ? 2.5 : 1,
                             ),
                           ),
@@ -1504,7 +1504,7 @@ class StylePicker extends StatelessWidget {
                             color: c,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: isSelected ? t.ink : t.border,
+                              color: isSelected ? t.ringOn(c) : t.border,
                               width: isSelected ? 2.5 : 1,
                             ),
                           ),
@@ -1694,7 +1694,10 @@ class _RadiusPresetChip extends StatelessWidget {
 /// One annotation-colour swatch. The fill is real, saturated colour — data,
 /// not chrome — pulled straight from [AppColors.palette] or a tool's own
 /// preset list, and stays untouched by the skeleton conversion. Only the
-/// ring around it is chrome: [SnipTheme.ink] for the selected ring,
+/// ring around it is chrome: [SnipTheme.ringOn] for the selected ring (picks
+/// whichever of [SnipTheme.ink]/[SnipTheme.onActive] actually contrasts
+/// against this swatch's own colour, rather than a fixed [SnipTheme.ink]
+/// that vanishes against a pure-black or pure-white swatch),
 /// [SnipTheme.border] for the quiet "this swatch needs a touch of
 /// definition against the panel" ring some unselected swatches still carry.
 /// See `SnipTheme`'s class doc and the task-4 report for why the fill and
@@ -1735,7 +1738,13 @@ class _CircleColorSwatch extends StatelessWidget {
             shape: BoxShape.circle,
             border: Border.all(
               color: isSelected
-                  ? t.ink
+                  // The swatch's own fill is real, arbitrary colour data —
+                  // t.ink alone would drop to ~1.1:1 (invisible) against a
+                  // pure-black swatch in light mode or pure-white in dark
+                  // mode, both live AppColors.palette entries. Not a
+                  // meaningful ring colour for the transparent tile (no
+                  // single fill to contrast against), which keeps t.ink.
+                  ? (isTransparent ? t.ink : t.ringOn(color))
                   : (isTransparent
                       ? t.border
                       : (isLightColor

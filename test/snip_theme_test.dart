@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 
 /// WCAG relative luminance.
@@ -292,15 +293,43 @@ void main() {
         expect(deco.color, isNot(t.activeFill), reason: '$mode');
       }
     });
+
+    test('a non-exclusive selected destructive control (e.g. an item marked '
+        'for bulk delete) stays on selectedFill, not the onDanger knockout',
+        () {
+      // Regression for a real mismatch: controlDecoration's non-exclusive
+      // branch never swaps the *fill* for danger (only the outline), so
+      // controlForeground must check `exclusive` before `tone` too, or a
+      // call site passing identical arguments to both gets onDanger drawn
+      // on selectedFill — 1.12:1 in light, 1.3:1 in dark. Invisible.
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        final deco = t.controlDecoration(
+            active: true, exclusive: false, tone: SnipControlTone.danger);
+        final fg = t.controlForeground(
+            active: true, exclusive: false, tone: SnipControlTone.danger);
+        expect(deco.color, t.selectedFill, reason: '$mode: fill is never swapped here');
+        expect((deco.border as Border).top.color, t.danger, reason: '$mode');
+        expect(fg, t.danger, reason: '$mode: must not be onDanger — that pairs only with '
+            'the exclusive-active danger fill, never with selectedFill');
+        expect(fg, isNot(t.onDanger), reason: '$mode');
+      }
+    });
   });
 
   test('foreground never drifts from fill: every (active, exclusive, enabled, '
-      'tone) pair a call site can construct resolves to a legible combination',
-      () {
+      'tone) pair a call site can construct resolves to a legible, '
+      'WCAG-passing combination', () {
     // The two helpers are meant to always be called together with the same
-    // arguments. This sweeps the full combination space and just asserts
-    // both helpers return without throwing and stay internally consistent
-    // (disabled always faint, danger tone never answers onActive/activeFill).
+    // arguments. This sweeps the full combination space and asserts both
+    // return without throwing, stay internally consistent (disabled always
+    // faint), and — the real guarantee a call site relies on — that the
+    // foreground colour controlForeground returns actually clears 4.5:1
+    // against the exact fill controlDecoration painted for the same
+    // arguments. `enabled: false` is deliberately exempt: inkFaint's lower
+    // contrast (2.72:1 in light mode) is sanctioned specifically for
+    // disabled state by SnipTheme's own field doc comment, not a gap in
+    // this guarantee.
     for (final mode in SnipThemeMode.values) {
       final t = SnipTheme.forMode(mode);
       for (final active in [false, true]) {
@@ -314,11 +343,68 @@ void main() {
               expect(deco, isNotNull, reason: '$mode $active $exclusive $enabled $tone');
               if (!enabled) {
                 expect(fg, t.inkFaint, reason: '$mode $active $exclusive $enabled $tone');
+                continue;
               }
+              // The fill a resting/transparent decoration paints on is
+              // whatever surface it sits on — surfaceRaised is the panel
+              // tone used throughout the app for a control's own backdrop.
+              final effectiveFill =
+                  deco.color == Colors.transparent ? t.surfaceRaised : deco.color!;
+              expect(_contrast(fg, effectiveFill), greaterThanOrEqualTo(4.5),
+                  reason: '$mode active=$active exclusive=$exclusive tone=$tone: '
+                      'foreground $fg on fill $effectiveFill');
             }
           }
         }
       }
     }
+  });
+
+  group('ringOn — a selection ring that stays visible against real colour', () {
+    test('the two cases a fixed ink ring silently failed on', () {
+      // Both are live AppColors.palette entries reachable from the main
+      // swatch grid. A ring hardcoded to t.ink drops to ~1.14:1 (light,
+      // black swatch) / ~1.12:1 (dark, white swatch) — effectively
+      // invisible. ringOn must pick the *other* mark tone in each case.
+      final light = SnipTheme.light();
+      expect(light.ringOn(const Color(0xFF000000)), light.onActive,
+          reason: 'light mode, pure black swatch: ink itself is near-black, '
+              'must fall back to onActive (near-white)');
+      expect(_contrast(light.ringOn(const Color(0xFF000000)), const Color(0xFF000000)),
+          greaterThanOrEqualTo(3.0));
+
+      final dark = SnipTheme.dark();
+      expect(dark.ringOn(const Color(0xFFFFFFFF)), dark.onActive,
+          reason: 'dark mode, pure white swatch: ink itself is near-white, '
+              'must fall back to onActive (near-black)');
+      expect(_contrast(dark.ringOn(const Color(0xFFFFFFFF)), const Color(0xFFFFFFFF)),
+          greaterThanOrEqualTo(3.0));
+    });
+
+    test('every AppColors.palette entry gets a ring that clears 3:1 in both modes', () {
+      // 3:1 is the WCAG non-text UI-indicator bar (not the 4.5:1 text bar) —
+      // a selection ring is a graphical indicator, not body text.
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        for (final swatch in AppColors.palette) {
+          final ring = t.ringOn(swatch);
+          expect(_contrast(ring, swatch), greaterThanOrEqualTo(3.0),
+              reason: '$mode: ring for '
+                  '#${swatch.toARGB32().toRadixString(16)} only clears '
+                  '${_contrast(ring, swatch).toStringAsFixed(2)}:1');
+        }
+      }
+    });
+
+    test('ringOn only ever answers one of the theme\'s own two mark tones', () {
+      // Never a third, invented colour — stays inside the design's existing
+      // ink/onActive vocabulary.
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        for (final swatch in [...AppColors.palette, Colors.transparent, const Color(0xFF808080)]) {
+          expect([t.ink, t.onActive], contains(t.ringOn(swatch)), reason: '$mode');
+        }
+      }
+    });
   });
 }
