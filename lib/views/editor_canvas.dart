@@ -2318,23 +2318,43 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                           // Inline on-canvas text editing overlay
                           if (_inlineTextPos != null) _buildInlineTextEditor(),
 
-                          // OCR region marquee, drawn while the drag is live.
+                          // OCR region marquee, drawn while the drag is live —
+                          // the affordance telling the user exactly what is
+                          // about to be OCR'd, so (like the crop and
+                          // floating-selection boundaries) it is a primary
+                          // interactive affordance over arbitrary screenshot
+                          // content, not app-panel chrome. A single
+                          // `t.border` hairline is the PANEL token — nowhere
+                          // near ink/onActive's near-black/near-white
+                          // extremes — and would nearly vanish against the
+                          // common case of a light-grey app UI or document
+                          // region. Paired ink/onActive instead, same as the
+                          // other boundary marks: an outer onActive ring
+                          // (inflated 1px) behind an inner ink ring.
                           if (widget.activeTool == CanvasTool.ocr &&
-                              _ocrRegion != null)
+                              _ocrRegion != null) ...[
+                            Positioned.fromRect(
+                              rect: _ocrRegion!.inflate(1.0),
+                              child: IgnorePointer(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: t.onActive, width: 2.2),
+                                  ),
+                                ),
+                              ),
+                            ),
                             Positioned.fromRect(
                               rect: _ocrRegion!,
                               child: IgnorePointer(
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
                                     color: t.ink.withValues(alpha: 0.1),
-                                    border: Border.all(
-                                      color: t.border,
-                                      width: 1.5,
-                                    ),
+                                    border: Border.all(color: t.ink, width: 1.4),
                                   ),
                                 ),
                               ),
                             ),
+                          ],
 
                           // Eyedropper magnifier loupe HUD
                           if (widget.activeTool == CanvasTool.colorPicker &&
@@ -2489,6 +2509,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final showBg = widget.isFilled &&
         widget.textBackgroundColor != null &&
         widget.textBackgroundColor!.a > 0;
+    // The frame's own background is `t.surface` (a known token, high
+    // contrast against `t.ink` by construction) UNLESS `showBg` is true, in
+    // which case it is the user's own arbitrary `textBackgroundColor` —
+    // annotation data, not chrome. A fixed `t.ink` border would repeat Task
+    // 4's swatch-ring bug (a ring vanishing against a near-black or
+    // near-white real colour) the moment someone picks a dark text
+    // background in light mode or vice versa, so the border contrasts
+    // against whichever background is actually painted.
+    final frameBg = showBg ? (widget.textBackgroundColor ?? Colors.black87) : t.surface;
 
     return Positioned(
       left: math.max(10, pos.dx - 8),
@@ -2499,9 +2528,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           constraints: const BoxConstraints(minWidth: 120, maxWidth: 450),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: showBg ? (widget.textBackgroundColor ?? Colors.black87) : t.surface,
+            color: frameBg,
             borderRadius: BorderRadius.circular(widget.borderRadius.clamp(4.0, 16.0)),
-            border: Border.all(color: t.ink, width: 2.0),
+            border: Border.all(color: t.ringOn(frameBg), width: 2.0),
             boxShadow: const [
               BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
             ],
@@ -2562,24 +2591,40 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Circular 9x9 Zoom Grid Loupe
+            // Circular 9x9 Zoom Grid Loupe. The brief names "the loupe
+            // frame" itself as an example of chrome that sits on unknown
+            // image pixels near the cursor, so — like the crop and
+            // floating-selection boundaries, and the OCR marquee — the
+            // outer ring is a paired onActive/ink halo rather than a single
+            // `ink` ring that could blend into a similarly-toned screenshot
+            // region right where the user is about to sample a colour.
             Container(
-              width: 80,
-              height: 80,
+              width: 84,
+              height: 84,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: t.ink, width: 2.5),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 3)),
-                ],
+                border: Border.all(color: t.onActive, width: 2.2),
               ),
-              child: ClipOval(
-                child: CustomPaint(
-                  size: const Size(80, 80),
-                  painter: _LoupeGridPainter(
-                    theme: t,
-                    sourceImage: cached,
-                    centerPixel: pixelPos,
+              child: Center(
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: t.ink, width: 1.6),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 3)),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: CustomPaint(
+                      size: const Size(80, 80),
+                      painter: _LoupeGridPainter(
+                        theme: t,
+                        sourceImage: cached,
+                        centerPixel: pixelPos,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -2715,18 +2760,32 @@ class _CropOverlayPainter extends CustomPainter {
       canvas.restore();
     }
 
-    // 3. Draw original image boundary if cropRect is adjusted. This sits on
-    // top of the mode-invariant scrim (or arbitrary image content, once
-    // expanded past it) rather than on app chrome, so it stays a fixed light
-    // mark for the same reason `SnipTheme.scrim` itself stays fixed — a
-    // mode-flipping `ink` would go near-black in light mode and vanish
-    // against the always-dark scrim.
+    // 3. Draw original image boundary if cropRect is adjusted — this is the
+    // only indicator of where the real image ends and the transparent
+    // expansion padding begins, so it is load-bearing, not decorative. It
+    // draws whenever cropRect != imageRect, which in practice is mostly the
+    // *expansion* case (the crop action bar even labels it "Apply
+    // Expansion") — meaning this line typically sits on the checkerboard
+    // (`theme.surface`/`theme.surfaceRaised`, near-white in light mode),
+    // not on the scrim. A fixed light stroke tuned for the scrim would
+    // nearly disappear there. Paired ink/onActive, like the crop border
+    // below, so it stays visible against both the checkerboard and the
+    // scrim it may also partly cross when only some edges are expanded.
     if (cropRect != imageRect && imageRect.width > 0 && imageRect.height > 0) {
-      final origBorderPaint = Paint()
-        ..color = Colors.white.withValues(alpha: 0.7)
-        ..strokeWidth = 1.0
-        ..style = PaintingStyle.stroke;
-      canvas.drawRect(imageRect, origBorderPaint);
+      canvas.drawRect(
+        imageRect,
+        Paint()
+          ..color = theme.onActive
+          ..strokeWidth = 2.2
+          ..style = PaintingStyle.stroke,
+      );
+      canvas.drawRect(
+        imageRect,
+        Paint()
+          ..color = theme.ink
+          ..strokeWidth = 1.0
+          ..style = PaintingStyle.stroke,
+      );
     }
 
     // 4. Crop border. Skeleton has no accent hue left to guarantee this reads
@@ -2749,8 +2808,11 @@ class _CropOverlayPainter extends CustomPainter {
         ..style = PaintingStyle.stroke,
     );
 
-    // 5. Rule-of-thirds guides — subtle helper lines over live image content;
-    // kept fixed for the same reason as the original-boundary stroke above.
+    // 5. Rule-of-thirds guides — a purely decorative composition aid, not an
+    // affordance the user must be able to see and act on (unlike the crop
+    // border, handles, and the boundary stroke above, all of which are now
+    // paired). Kept as a fixed, low-alpha literal on purpose: reviewed and
+    // accepted as low-stakes.
     final guidePaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.28)
       ..strokeWidth = 1.0;
