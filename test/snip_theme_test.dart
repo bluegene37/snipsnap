@@ -27,7 +27,8 @@ void main() {
       // A mode may never ship with a null colour.
       expect(
         [t.canvas, t.surface, t.surfaceRaised, t.ink, t.inkMuted, t.inkFaint,
-         t.border, t.borderStrong, t.activeFill, t.onActive],
+         t.border, t.borderStrong, t.activeFill, t.onActive,
+         t.selectedFill, t.hoverFill, t.danger, t.onDanger],
         everyElement(isA<Color>()),
         reason: '$mode has an incomplete token set',
       );
@@ -62,6 +63,30 @@ void main() {
     }
   });
 
+  test('ink stays legible on selectedFill and hoverFill', () {
+    // selectedFill (non-exclusive selection) and hoverFill (hover-as-a-wash)
+    // both still carry the ordinary ink token as foreground, not a knocked-
+    // out label — so ink must clear body-text contrast against each.
+    for (final mode in SnipThemeMode.values) {
+      final t = SnipTheme.forMode(mode);
+      expect(_contrast(t.ink, t.selectedFill), greaterThanOrEqualTo(4.5),
+          reason: '$mode: ink on selectedFill');
+      expect(_contrast(t.ink, t.hoverFill), greaterThanOrEqualTo(4.5),
+          reason: '$mode: ink on hoverFill');
+    }
+  });
+
+  test('danger meets WCAG AA against onDanger and stays visible on surface',
+      () {
+    for (final mode in SnipThemeMode.values) {
+      final t = SnipTheme.forMode(mode);
+      expect(_contrast(t.onDanger, t.danger), greaterThanOrEqualTo(4.5),
+          reason: '$mode: onDanger on danger');
+      expect(_contrast(t.danger, t.surface), greaterThanOrEqualTo(3.0),
+          reason: '$mode: danger on surface');
+    }
+  });
+
   test('dark is an inversion, not a tint', () {
     final l = SnipTheme.light();
     final d = SnipTheme.dark();
@@ -70,15 +95,33 @@ void main() {
   });
 
   test('the theme is monochrome — no chroma in any chrome token', () {
+    // danger/onDanger are deliberately excluded: they are the one sanctioned
+    // chromatic exception to the monochrome rule (see SnipTheme's doc
+    // comment), not an oversight.
     for (final mode in SnipThemeMode.values) {
       final t = SnipTheme.forMode(mode);
       for (final c in [t.canvas, t.surface, t.surfaceRaised, t.ink,
-                       t.inkMuted, t.inkFaint, t.activeFill, t.onActive]) {
+                       t.inkMuted, t.inkFaint, t.activeFill, t.onActive,
+                       t.selectedFill, t.hoverFill]) {
         final maxC = math.max(c.r, math.max(c.g, c.b));
         final minC = math.min(c.r, math.min(c.g, c.b));
         expect(maxC - minC, lessThan(0.04),
             reason: '$mode: ${c.toARGB32().toRadixString(16)} is not neutral');
       }
+    }
+  });
+
+  test('danger is the only chromatic chrome token', () {
+    // The monochrome test above intentionally skips danger/onDanger. Assert
+    // here that danger actually does carry chroma in both modes, so a future
+    // edit that accidentally neutralises it (defeating the point of the
+    // token) is caught rather than silently passing every other test.
+    for (final mode in SnipThemeMode.values) {
+      final t = SnipTheme.forMode(mode);
+      final maxC = math.max(t.danger.r, math.max(t.danger.g, t.danger.b));
+      final minC = math.min(t.danger.r, math.min(t.danger.g, t.danger.b));
+      expect(maxC - minC, greaterThanOrEqualTo(0.04),
+          reason: '$mode: danger has lost its chroma');
     }
   });
 
