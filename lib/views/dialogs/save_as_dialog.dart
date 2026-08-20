@@ -200,7 +200,7 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                           // so there's no reason to keep a
                                           // fixed hue here at all. t.ink on
                                           // t.surfaceRaised is 18.4:1 light /
-                                          // 16.1:1 dark (see
+                                          // 14.87:1 dark (see
                                           // `SnipTheme.of` "ink on surface"
                                           // in snip_theme_test.dart for the
                                           // same pairing computed generally;

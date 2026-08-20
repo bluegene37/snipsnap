@@ -2,25 +2,27 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Files whose chrome must be entirely token-driven.
-const _viewFiles = [
-  'lib/views/main_screen.dart',
-  'lib/views/editor_canvas.dart',
-  'lib/views/gallery_sidebar.dart',
-  'lib/views/components/tool_sidebar.dart',
-  'lib/views/components/header_bar.dart',
-  'lib/views/components/style_picker.dart',
-  'lib/views/components/ocr_result_panel.dart',
-  'lib/views/components/crop_overlay_widget.dart',
-  'lib/views/dialogs/save_as_dialog.dart',
-  'lib/views/dialogs/shortcut_settings_dialog.dart',
-  'lib/views/dialogs/about_dialog.dart',
-];
+/// Every `.dart` file under `lib/views/`, discovered rather than hardcoded.
+///
+/// A static allowlist can only guard files that existed when the list was
+/// written — a new dialog or panel added later would simply be absent from
+/// it, and the guard would pass while quietly not checking anything. Walking
+/// the directory means every file under `lib/views/` is in scope forever,
+/// including ones that don't exist yet.
+List<String> _viewFiles() {
+  final dir = Directory('lib/views');
+  return dir
+      .listSync(recursive: true)
+      .whereType<File>()
+      .map((f) => f.path)
+      .where((p) => p.endsWith('.dart'))
+      .toList();
+}
 
 void main() {
   test('no view references a deleted chrome colour', () {
     final offenders = <String>[];
-    for (final path in _viewFiles) {
+    for (final path in _viewFiles()) {
       final source = File(path).readAsStringSync();
       for (final banned in const [
         'AppColors.accent',
@@ -43,7 +45,7 @@ void main() {
 
   test('no view branches on an isDarkMode boolean', () {
     final offenders = <String>[];
-    for (final path in _viewFiles) {
+    for (final path in _viewFiles()) {
       if (File(path).readAsStringSync().contains('isDarkMode')) {
         offenders.add(path);
       }
