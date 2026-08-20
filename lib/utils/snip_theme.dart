@@ -397,14 +397,26 @@ class SnipTheme {
   /// Resolves [c] to the opaque colour that actually reaches the screen.
   /// Opaque colours pass through untouched. A translucent [c] is composited
   /// over [backdrop] with [Color.alphaBlend] — [backdrop] itself must be
-  /// opaque (asserted), since compositing over an unresolved backdrop would
-  /// just move the same unresolved-alpha problem one level down.
+  /// opaque, since compositing over an unresolved backdrop would just move
+  /// the same unresolved-alpha problem one level down. Checked
+  /// unconditionally (an [ArgumentError], not an `assert`), so this fails
+  /// loudly in release builds too, not only in debug.
   static Color _resolveOpaque(Color c, Color? backdrop, String callerName) {
-    assert(
-      backdrop == null || backdrop.a >= 1.0,
-      '$callerName: backdrop must itself be opaque (a=${backdrop.a}) — '
-      'otherwise compositing against it still leaves an unresolved pixel.',
-    );
+    // Deliberately NOT an assert(): a translucent backdrop composited via
+    // Color.alphaBlend below can itself come out translucent, which would
+    // then silently reach _luminance/_contrast (ignoring alpha) — exactly
+    // the bug this whole step existed to close — with no crash to reveal
+    // it, since assert() is stripped in release builds. The translucent-`c`
+    // path below has a release-mode backstop for free (`backdrop!` throws
+    // a TypeError even with asserts off); this branch had none until this
+    // check was moved off assert() and made unconditional, so both halves
+    // of this contract now fail loudly in every build mode, not just debug.
+    if (backdrop != null && backdrop.a < 1.0) {
+      throw ArgumentError(
+        '$callerName: backdrop must itself be opaque (a=${backdrop.a}) — '
+        'otherwise compositing against it still leaves an unresolved pixel.',
+      );
+    }
     assert(
       c.a >= 1.0 || backdrop != null,
       "$callerName: this colour is translucent (a=${c.a}), so its raw RGB "
@@ -413,7 +425,9 @@ class SnipTheme {
       "over so contrast is scored against the true composited pixel. "
       "Scoring the raw, unpremultiplied RGB was exactly this method's bug "
       "before the task-6 fix (see the task-6 report) — silently reusing "
-      "that bug here would reintroduce it.",
+      "that bug here would reintroduce it. (In a release build, where this "
+      "assert is stripped, the `backdrop!` null-check below throws a "
+      "TypeError instead, so this still fails loudly rather than silently.)",
     );
     return c.a >= 1.0 ? c : Color.alphaBlend(c, backdrop!);
   }

@@ -183,13 +183,32 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                       value: 'downloads',
                                       child: Row(
                                         children: [
-                                          // Finder/Explorer-style folder-kind
-                                          // icon colours — a real-world
-                                          // convention independent of app
-                                          // theme, not a state signal, and
-                                          // saturated enough to stay legible
-                                          // on both t.surfaceRaised tones.
-                                          const Icon(Icons.folder_rounded, size: 16, color: Color(0xFFFFC107)),
+                                          // Was a fixed Finder/Explorer-style
+                                          // folder-kind hue (gold/green/blue)
+                                          // regardless of theme — a review
+                                          // round computed real contrast
+                                          // against light mode's
+                                          // t.surfaceRaised (0xFFFFFFFF) and
+                                          // found two of three fail the 3:1
+                                          // bar this same task enforces
+                                          // everywhere else: gold #FFC107
+                                          // 1.63:1, green #4CAF50 2.78:1, blue
+                                          // #2196F3 3.12:1 (barely). Dark mode
+                                          // was fine (10.2/6.0/5.3:1), which
+                                          // is why an eyeball check missed
+                                          // it. Tokenised to t.ink instead —
+                                          // these are decorative folder-kind
+                                          // hints, not user annotation data,
+                                          // so there's no reason to keep a
+                                          // fixed hue here at all. t.ink on
+                                          // t.surfaceRaised is 18.4:1 light /
+                                          // 16.1:1 dark (see
+                                          // `SnipTheme.of` "ink on surface"
+                                          // in snip_theme_test.dart for the
+                                          // same pairing computed generally;
+                                          // save_as_dialog_test.dart pins
+                                          // these three specific icons).
+                                          Icon(Icons.folder_rounded, size: 16, color: t.ink),
                                           const SizedBox(width: 8),
                                           Text('Downloads', style: TextStyle(color: t.ink)),
                                         ],
@@ -199,7 +218,7 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                       value: 'desktop',
                                       child: Row(
                                         children: [
-                                          const Icon(Icons.desktop_windows_rounded, size: 16, color: Color(0xFF4CAF50)),
+                                          Icon(Icons.desktop_windows_rounded, size: 16, color: t.ink),
                                           const SizedBox(width: 8),
                                           Text('Desktop', style: TextStyle(color: t.ink)),
                                         ],
@@ -209,7 +228,7 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                       value: 'documents',
                                       child: Row(
                                         children: [
-                                          const Icon(Icons.description_rounded, size: 16, color: Color(0xFF2196F3)),
+                                          Icon(Icons.description_rounded, size: 16, color: t.ink),
                                           const SizedBox(width: 8),
                                           Text('Documents', style: TextStyle(color: t.ink)),
                                         ],

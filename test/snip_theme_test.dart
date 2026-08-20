@@ -431,12 +431,40 @@ void main() {
       }
     });
 
-    test('a translucent backdrop itself asserts, even with an opaque swatch', () {
+    test(
+        'a translucent backdrop itself throws — an ArgumentError, not an '
+        'assert, so this is the same code path in a release build too '
+        '(review round, Finding 2)', () {
+      // The backdrop-opacity check runs unconditionally, before either the
+      // swatch's own opacity is examined or Color.alphaBlend is reached —
+      // so it fires regardless of whether swatchColor itself is opaque or
+      // translucent (both are exercised: this test uses a translucent
+      // swatch, the one below an opaque one). Because it's a plain `if
+      // (...) throw`, not `assert(...)`, this test runs the exact same
+      // code `flutter test`, a debug build, and a release build
+      // (assertions stripped) would all execute — there is only one path,
+      // so this test IS the release-mode coverage, not a debug-only proxy
+      // for it.
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        expect(
+          () => t.ringOn(
+            Colors.black.withValues(alpha: 0.5),
+            backdrop: Colors.white.withValues(alpha: 0.5),
+          ),
+          throwsArgumentError,
+          reason: '$mode',
+        );
+      }
+    });
+
+    test('a translucent backdrop paired with an opaque swatch also throws '
+        '(the early-return path must not skip the backdrop check)', () {
       for (final mode in SnipThemeMode.values) {
         final t = SnipTheme.forMode(mode);
         expect(
           () => t.ringOn(const Color(0xFF112233), backdrop: Colors.white.withValues(alpha: 0.5)),
-          throwsAssertionError,
+          throwsArgumentError,
           reason: '$mode',
         );
       }

@@ -1,8 +1,27 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/dialogs/save_as_dialog.dart';
+
+/// WCAG contrast, duplicated locally rather than shared — same small helper
+/// `test/snip_theme_test.dart` and `test/style_picker_test.dart` each
+/// define for themselves.
+double _contrast(Color a, Color b) {
+  double luminance(Color c) {
+    double channel(double v) =>
+        v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+    return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+  }
+
+  final la = luminance(a);
+  final lb = luminance(b);
+  final hi = math.max(la, lb);
+  final lo = math.min(la, lb);
+  return (hi + 0.05) / (lo + 0.05);
+}
 
 // SaveAsDialog embeds no Image.file — pumpable in both modes per the
 // task-6 brief.
@@ -123,6 +142,31 @@ void _runStateTests(SnipThemeMode mode) {
 
     expect(result?.fileName, 'screenshot');
     expect(result?.format, SaveFormat.png);
+  });
+
+  testWidgets(
+      '[$label] the Where dropdown\'s folder-kind icons clear 3:1 against '
+      'surfaceRaised, in both modes', (tester) async {
+    // Regression for a review finding: these icons used to be a fixed
+    // gold/green/blue trio regardless of mode, and two of three failed the
+    // 3:1 bar against light mode's surfaceRaised (gold #FFC107 1.63:1,
+    // green #4CAF50 2.78:1, blue #2196F3 3.12:1 barely) — dark mode was
+    // fine (10.2/6.0/5.3:1), which is why an eyeball check missed it. Now
+    // tokenised to t.ink, so this pins the *actual rendered* colour, not a
+    // value computed independently, against the exact backdrop it paints on.
+    await _pump(tester, mode: mode);
+
+    await tester.tap(find.byType(DropdownButton<String>));
+    await tester.pumpAndSettle();
+    tester.takeException();
+
+    for (final icon in [Icons.folder_rounded, Icons.desktop_windows_rounded, Icons.description_rounded]) {
+      final rendered = tester.widget<Icon>(find.byIcon(icon).first);
+      expect(rendered.color, t.ink, reason: '$label: $icon must be tokenised to t.ink');
+      final contrast = _contrast(rendered.color!, t.surfaceRaised);
+      expect(contrast, greaterThanOrEqualTo(3.0),
+          reason: '$label: $icon only clears ${contrast.toStringAsFixed(2)}:1 against surfaceRaised');
+    }
   });
 
   testWidgets('[$label] header chrome routes through SnipTheme', (tester) async {
