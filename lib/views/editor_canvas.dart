@@ -15,6 +15,7 @@ import '../services/render_service.dart';
 import '../tools/tool_handler.dart';
 import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
+import '../utils/image_eviction.dart';
 import '../utils/image_operations.dart';
 import '../utils/snip_theme.dart';
 import 'components/annotation_renderer.dart';
@@ -199,6 +200,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// [_reportUnplaceableEdit].
   DateTime? _lastUnplaceableReport;
 
+  /// Set just before notifying the parent about a bitmap this canvas rewrote
+  /// itself (flood fill, floating-selection cut/move/delete). The parent
+  /// answers with an `imageRevision` bump, and `didUpdateWidget` consumes this
+  /// flag to skip re-decoding a bitmap that was already reloaded here.
+  bool _suppressNextRevisionReload = false;
+
   // Selection / transform state
   String? _selectedAnnotationId;
   String? _prevSelectedAnnotationId;
@@ -294,7 +301,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (oldWidget.imagePath != widget.imagePath ||
         oldWidget.imageRevision != widget.imageRevision) {
       _checkFileExists();
-      _loadBaseImage();
+      // A revision bump the canvas itself caused (flood fill, cut/move/delete)
+      // has already reloaded the bitmap before notifying the parent — decoding
+      // it a second time here would only burn CPU on the exact same bytes.
+      final isSelfEdit =
+          _suppressNextRevisionReload && oldWidget.imagePath == widget.imagePath;
+      _suppressNextRevisionReload = false;
+      if (!isSelfEdit) _loadBaseImage();
     }
 
     if (oldWidget.zoomScale != widget.zoomScale && !_isInteractiveZooming) {
@@ -376,7 +389,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     try {
       final bytes = await File(path).readAsBytes();
-      final decodedImg = img.decodeImage(bytes);
+      // Decoded off the UI isolate: a pure-Dart PNG decode of a Retina-sized
+      // capture takes long enough to visibly freeze the interface, and this
+      // runs on every capture switch and every bitmap rewrite.
+      final decodedImg = await compute(img.decodeImage, bytes);
       final image = await RenderService.decodeImageFile(path);
       // A newer load (or disposal) won the race — drop this frame's native memory.
       if (!mounted || token != _baseImageToken) {
@@ -1739,9 +1755,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       }
 
       await File(path).writeAsBytes(Uint8List.fromList(img.encodePng(decoded)));
-      await FileImage(File(path)).evict();
-      PaintingBinding.instance.imageCache.clear();
-      PaintingBinding.instance.imageCache.clearLiveImages();
+      // Targeted eviction only: the gallery thumbnail for this path must
+      // refresh, but a global imageCache.clear() would force every other
+      // thumbnail to re-decode too — the visible "everything flashes" bug.
+      await evictImageFileFromCaches(path);
 
       setState(() {
         _cutSelectionImage = extracted;
@@ -1754,7 +1771,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       // The file just changed underneath the parent, at the same path and the
       // same pixel size, so nothing else tells it. `_deleteFloatingSelection`
       // reaches the bitmap through this method, so it is covered here too.
-      if (mounted) widget.onImageBytesChanged?.call();
+      if (mounted && widget.onImageBytesChanged != null) {
+        _suppressNextRevisionReload = true;
+        widget.onImageBytesChanged!.call();
+      }
     } catch (e) {
       debugPrint('Error extracting floating selection: $e');
     }
@@ -1811,9 +1831,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         );
 
         await File(path).writeAsBytes(Uint8List.fromList(img.encodePng(decoded)));
-        await FileImage(File(path)).evict();
-        PaintingBinding.instance.imageCache.clear();
-        PaintingBinding.instance.imageCache.clearLiveImages();
+        await evictImageFileFromCaches(path);
         wroteBitmap = true;
       }
     } catch (e) {
@@ -1833,7 +1851,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       // Only when the paste actually reached the file — an early bail or a
       // decode failure leaves the bitmap exactly as the parent already knows
       // it, and a spurious bump would throw away a valid OCR cache.
-      if (wroteBitmap && mounted) widget.onImageBytesChanged?.call();
+      if (wroteBitmap && mounted && widget.onImageBytesChanged != null) {
+        _suppressNextRevisionReload = true;
+        widget.onImageBytesChanged!.call();
+      }
     }
   }
 
@@ -1906,12 +1927,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
       final pngBytes = Uint8List.fromList(img.encodePng(decoded));
       await File(path).writeAsBytes(pngBytes);
-      await FileImage(File(path)).evict();
-      PaintingBinding.instance.imageCache.clear();
-      PaintingBinding.instance.imageCache.clearLiveImages();
+      await evictImageFileFromCaches(path);
 
       await _loadBaseImage();
-      widget.onPerformCanvasFill?.call(localPos);
+      if (widget.onPerformCanvasFill != null) {
+        _suppressNextRevisionReload = true;
+        widget.onPerformCanvasFill!.call(localPos);
+      }
     } catch (e) {
       debugPrint('Error performing flood fill: $e');
     }
@@ -2227,9 +2249,14 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                             ),
                           ),
 
-                          Image.file(
-                            File(widget.imagePath!),
-                            key: ValueKey('${widget.imagePath!}_${widget.imageRevision}'),
+                          // The already-decoded bitmap, not `Image.file`: a
+                          // keyed Image.file remounts on every revision bump
+                          // and paints nothing until its new decode lands —
+                          // the visible flash on fill/crop/undo. `_baseImage`
+                          // swaps atomically inside setState, so the old
+                          // frame stays up until the new one is ready.
+                          RawImage(
+                            image: _baseImage,
                             fit: BoxFit.contain,
                             filterQuality: FilterQuality.medium,
                           ),
@@ -2770,9 +2797,15 @@ class _CropOverlayPainter extends CustomPainter {
         cropRect.top < imageRect.top ||
         cropRect.right > imageRect.right ||
         cropRect.bottom > imageRect.bottom) {
-      final expandedPath = Path()
-        ..addRect(cropRect)
-        ..addRect(imageRect.intersect(cropRect));
+      // Checkerboard everywhere the crop extends beyond the bitmap. The
+      // overlap is only subtracted when it exists — a crop dragged entirely
+      // off the image produces a negative-size intersection, and adding that
+      // degenerate rect to the even-odd path corrupts the whole preview.
+      final overlap = imageRect.intersect(cropRect);
+      final expandedPath = Path()..addRect(cropRect);
+      if (overlap.width > 0 && overlap.height > 0) {
+        expandedPath.addRect(overlap);
+      }
       expandedPath.fillType = PathFillType.evenOdd;
 
       canvas.save();

@@ -215,7 +215,9 @@ void main() {
         final end = canvas.indexOf('\n  }', start);
         expect(
           canvas.substring(start, end),
-          contains('widget.onImageBytesChanged?.call()'),
+          // Guarded form: the flag that suppresses the redundant reload is
+          // only set when the callback actually exists and will fire.
+          contains('widget.onImageBytesChanged!.call()'),
           reason: '$method rewrites the bitmap and must say so',
         );
       }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,6 +22,7 @@ import '../services/shortcut_service.dart';
 import '../services/storage_service.dart';
 import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
+import '../utils/image_eviction.dart';
 import '../utils/image_operations.dart';
 import '../utils/snip_theme.dart';
 import 'components/header_bar.dart';
@@ -443,12 +445,60 @@ class _MainScreenState extends State<MainScreen> {
 
   Map<AppShortcutAction, CustomShortcut> _shortcuts = ShortcutService.getDefaultShortcuts();
 
+  /// User-saved custom colours, shown as extra swatches in every colour
+  /// palette (fill bucket included) and persisted across sessions.
+  List<Color> _savedColors = [];
+  static const int _maxSavedColors = 18;
+
   @override
   void initState() {
     super.initState();
     _loadShortcuts();
     _loadHistory();
     _loadThemePreference();
+    _loadSavedColors();
+  }
+
+  Future<void> _loadSavedColors() async {
+    final raw = await DatabaseService.getSetting('saved_colors');
+    if (raw == null || raw.isEmpty || !mounted) return;
+    final colors = <Color>[
+      for (final part in raw.split(','))
+        if (int.tryParse(part) case final v?) Color(v),
+    ];
+    setState(() => _savedColors = colors);
+  }
+
+  void _persistSavedColors() {
+    DatabaseService.setSetting(
+      'saved_colors',
+      _savedColors.map((c) => c.toARGB32().toString()).join(','),
+    );
+  }
+
+  void _handleSaveColor(Color color) {
+    if (_savedColors.any((c) => c.toARGB32() == color.toARGB32())) {
+      _showToast('Colour is already in your saved swatches');
+      return;
+    }
+    setState(() {
+      _savedColors = [..._savedColors, color];
+      // Oldest out first once the strip is full — a bounded strip stays
+      // scannable, and the newest save is always present.
+      if (_savedColors.length > _maxSavedColors) {
+        _savedColors = _savedColors.sublist(_savedColors.length - _maxSavedColors);
+      }
+    });
+    _persistSavedColors();
+    _showToast('Colour saved to your swatches');
+  }
+
+  void _handleRemoveSavedColor(Color color) {
+    setState(() {
+      _savedColors =
+          _savedColors.where((c) => c.toARGB32() != color.toARGB32()).toList();
+    });
+    _persistSavedColors();
   }
 
   @override
@@ -587,7 +637,8 @@ class _MainScreenState extends State<MainScreen> {
     // common case for existing installs. Decode once to recover them.
     if (!capture.hasDimensions) {
       try {
-        final decoded = img.decodeImage(await File(capture.filePath).readAsBytes());
+        final decoded =
+            await compute(img.decodeImage, await File(capture.filePath).readAsBytes());
         if (decoded == null) return;
         capture = capture.copyWith(width: decoded.width, height: decoded.height);
       } catch (e) {
@@ -1115,7 +1166,7 @@ class _MainScreenState extends State<MainScreen> {
     int width = 0;
     int height = 0;
     try {
-      final decoded = img.decodeImage(await File(path).readAsBytes());
+      final decoded = await compute(img.decodeImage, await File(path).readAsBytes());
       if (decoded != null) {
         width = decoded.width;
         height = decoded.height;
@@ -1355,14 +1406,18 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  /// Writes [bytes] over the active capture's file and forces every image cache
-  /// layer to drop the stale bitmap so the canvas updates immediately.
+  /// Writes [bytes] over the active capture's file and evicts that file's
+  /// cached bitmap so the gallery thumbnail re-reads it.
+  ///
+  /// Deliberately *not* a global `imageCache.clear()`: that forced every
+  /// thumbnail in the gallery to re-decode at full resolution on every crop,
+  /// flatten, fill and undo — the app-wide flicker. The editor canvas itself
+  /// no longer reads through the image cache at all (it decodes and swaps its
+  /// own `ui.Image`), so the targeted evict is all that is needed.
   Future<void> _replaceActiveImageBytes(Uint8List bytes) async {
     final targetPath = _activeCapture!.filePath;
     await File(targetPath).writeAsBytes(bytes);
-    await FileImage(File(targetPath)).evict();
-    PaintingBinding.instance.imageCache.clear();
-    PaintingBinding.instance.imageCache.clearLiveImages();
+    await evictImageFileFromCaches(targetPath);
   }
 
   Future<void> _handleFlattenCanvas() async {
@@ -1421,7 +1476,7 @@ class _MainScreenState extends State<MainScreen> {
           ? originalBytes
           : (await _renderAnnotatedBytes() ?? originalBytes);
 
-      final decoded = img.decodeImage(sourceBytes);
+      final decoded = await compute(img.decodeImage, sourceBytes);
       if (decoded == null) return;
 
       final imageRect = RenderService.imageRectInCanvas(
@@ -1459,7 +1514,7 @@ class _MainScreenState extends State<MainScreen> {
         targetHeight: targetHeight,
       );
 
-      await _replaceActiveImageBytes(Uint8List.fromList(img.encodePng(result)));
+      await _replaceActiveImageBytes(await compute(img.encodePng, result));
 
       setState(() {
         _bumpImageRevision();
@@ -1703,6 +1758,9 @@ class _MainScreenState extends State<MainScreen> {
                                 child: StylePicker(
                                   selectedColor: _currentToolProperties.activeColor,
                                   onColorChanged: (color) => _updateActiveToolProperty(activeColor: color),
+                                  savedColors: _savedColors,
+                                  onSaveColor: _handleSaveColor,
+                                  onRemoveSavedColor: _handleRemoveSavedColor,
                                   textBackgroundColor: _currentToolProperties.textBackgroundColor,
                                   onTextBackgroundColorChanged: (c) => _updateActiveToolProperty(textBackgroundColor: c),
                                   fillColor: _currentToolProperties.fillColor,
@@ -1852,6 +1910,7 @@ class _MainScreenState extends State<MainScreen> {
                 GallerySidebar(
                   items: _captures,
                   activeItem: _activeCapture,
+                  imageRevision: _imageRevision,
                   zoomScale: _zoomScale,
                   onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
                   onSelectItem: (item) {

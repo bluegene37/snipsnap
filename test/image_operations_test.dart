@@ -220,5 +220,99 @@ void main() {
       expect(centerPixel.b, 30);
       expect(centerPixel.a, 255);
     });
+
+    test('mixed expansion and crop pads only the expanded edges', () {
+      final image = img.Image(width: 100, height: 80, numChannels: 4);
+      img.fill(image, color: img.ColorRgba8(10, 20, 30, 255));
+
+      // Expand left by 30, crop right to 70: [-30, 0] .. [70, 80].
+      final result = ImageOperations.expandOrCropCanvas(
+        sourceImage: image,
+        targetLeft: -30,
+        targetTop: 0,
+        targetWidth: 100,
+        targetHeight: 80,
+      );
+
+      expect(result.width, 100);
+      expect(result.height, 80);
+      // New left band is transparent.
+      expect(result.getPixel(10, 40).a.toInt(), 0);
+      // Original content starts at x=30.
+      final inside = result.getPixel(40, 40);
+      expect([inside.r, inside.g, inside.b, inside.a], [10, 20, 30, 255]);
+    });
+
+    test('cropping a previous expansion back inside drops the padding', () {
+      final image = img.Image(width: 100, height: 80, numChannels: 4);
+      img.fill(image, color: img.ColorRgba8(10, 20, 30, 255));
+
+      final expanded = ImageOperations.expandOrCropCanvas(
+        sourceImage: image,
+        targetLeft: -20,
+        targetTop: -20,
+        targetWidth: 140,
+        targetHeight: 120,
+      );
+      // Crop back to the original content region only.
+      final recropped = ImageOperations.expandOrCropCanvas(
+        sourceImage: expanded,
+        targetLeft: 20,
+        targetTop: 20,
+        targetWidth: 100,
+        targetHeight: 80,
+      );
+
+      expect(recropped.width, 100);
+      expect(recropped.height, 80);
+      // Every corner is original opaque content again — no transparent band.
+      for (final corner in [(0, 0), (99, 0), (0, 79), (99, 79)]) {
+        final p = recropped.getPixel(corner.$1, corner.$2);
+        expect(p.a.toInt(), 255, reason: 'corner $corner should be opaque');
+      }
+    });
+  });
+
+  group('ImageOperations.floodFill edge cases', () {
+    test('respects opacity by writing a reduced alpha', () {
+      final image = img.Image(width: 4, height: 4, numChannels: 4);
+      img.fill(image, color: img.ColorRgba8(255, 255, 255, 255));
+
+      ImageOperations.floodFill(
+        image: image,
+        startX: 0,
+        startY: 0,
+        fillColor: const Color(0xFF000000),
+        opacity: 0.5,
+      );
+      expect(image.getPixel(2, 2).a.toInt(), closeTo(128, 2));
+    });
+
+    test('clicking out of bounds is a no-op', () {
+      final image = img.Image(width: 4, height: 4, numChannels: 4);
+      expect(
+        ImageOperations.floodFill(
+          image: image,
+          startX: -1,
+          startY: 0,
+          fillColor: const Color(0xFFEF4444),
+        ),
+        isFalse,
+      );
+    });
+
+    test('filling with the exact same colour is a no-op', () {
+      final image = img.Image(width: 4, height: 4, numChannels: 4);
+      img.fill(image, color: img.ColorRgba8(255, 0, 0, 255));
+      expect(
+        ImageOperations.floodFill(
+          image: image,
+          startX: 1,
+          startY: 1,
+          fillColor: const Color(0xFFFF0000),
+        ),
+        isFalse,
+      );
+    });
   });
 }

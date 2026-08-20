@@ -54,6 +54,13 @@ class StylePicker extends StatelessWidget {
   final bool isGlobalFill;
   final ValueChanged<bool>? onGlobalFillChanged;
 
+  /// User-saved swatches, shown after the stock palette in every colour
+  /// section. Saving happens from the custom colour dialog; right-click (or
+  /// long-press) a saved swatch to remove it.
+  final List<Color> savedColors;
+  final ValueChanged<Color>? onSaveColor;
+  final ValueChanged<Color>? onRemoveSavedColor;
+
   const StylePicker({
     super.key,
     required this.selectedColor,
@@ -102,10 +109,16 @@ class StylePicker extends StatelessWidget {
     this.onFillToleranceChanged,
     this.isGlobalFill = false,
     this.onGlobalFillChanged,
+    this.savedColors = const [],
+    this.onSaveColor,
+    this.onRemoveSavedColor,
   });
 
   void _showColorPickerDialog(BuildContext context) {
     final t = SnipTheme.of(context);
+    // The dialog route does not rebuild with this (stateless) panel, so the
+    // colour being picked is tracked locally for the Save action.
+    var current = selectedColor;
 
     showDialog(
       context: context,
@@ -115,11 +128,21 @@ class StylePicker extends StatelessWidget {
         content: SingleChildScrollView(
           child: ColorPicker(
             pickerColor: selectedColor,
-            onColorChanged: onColorChanged,
+            onColorChanged: (c) {
+              current = c;
+              onColorChanged(c);
+            },
             pickerAreaHeightPercent: 0.7,
           ),
         ),
         actions: [
+          if (onSaveColor != null)
+            TextButton.icon(
+              icon: Icon(Icons.bookmark_add_outlined, size: 16, color: t.ink),
+              label: Text('Save Color',
+                  style: TextStyle(color: t.ink, fontWeight: FontWeight.w600)),
+              onPressed: () => onSaveColor!(current),
+            ),
           TextButton(
             child: Text('Done', style: TextStyle(color: t.emphasis, fontWeight: FontWeight.bold)),
             onPressed: () => Navigator.of(ctx).pop(),
@@ -127,6 +150,34 @@ class StylePicker extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// The saved-swatch strip appended to a colour section's Wrap. [onPick]
+  /// selects the swatch; removal is right-click or long-press so a plain tap
+  /// never destroys data.
+  List<Widget> _savedColorSwatches({
+    required SnipTheme t,
+    required ValueChanged<Color> onPick,
+  }) {
+    if (savedColors.isEmpty) return const [];
+    return [
+      for (final color in savedColors)
+        GestureDetector(
+          onSecondaryTap:
+              onRemoveSavedColor == null ? null : () => onRemoveSavedColor!(color),
+          onLongPress:
+              onRemoveSavedColor == null ? null : () => onRemoveSavedColor!(color),
+          child: _CircleColorSwatch(
+            color: color,
+            isSelected: selectedColor.toARGB32() == color.toARGB32(),
+            onTap: () => onPick(color),
+            size: 30,
+            tooltip:
+                'Saved #${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}'
+                ' — right-click or long-press to remove',
+          ),
+        ),
+    ];
   }
 
   void _showBgColorPickerDialog(BuildContext context) {
@@ -512,6 +563,15 @@ class StylePicker extends StatelessWidget {
                       size: 30,
                     );
                   }),
+                  ..._savedColorSwatches(
+                    t: t,
+                    onPick: (color) {
+                      onColorChanged(color);
+                      // A saved colour is always an opaque pick — leaving the
+                      // eraser's 0% opacity behind would make it a silent no-op.
+                      if (opacity <= 0.05) onOpacityChanged(1.0);
+                    },
+                  ),
                   Tooltip(
                     message: 'Custom Color Picker',
                     child: GestureDetector(
@@ -805,6 +865,7 @@ class StylePicker extends StatelessWidget {
                       size: 30,
                     );
                   }),
+                  ..._savedColorSwatches(t: t, onPick: onColorChanged),
                   // Custom Color Button
                   Tooltip(
                     message: 'Custom Color Picker',
@@ -1681,6 +1742,7 @@ class _CircleColorSwatch extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
   final double size;
+  final String? tooltip;
 
   const _CircleColorSwatch({
     required this.color,
@@ -1688,14 +1750,16 @@ class _CircleColorSwatch extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     this.size = 30.0,
+    this.tooltip,
   });
 
   @override
   Widget build(BuildContext context) {
     final t = SnipTheme.of(context);
-    final hexString = isTransparent
-        ? 'Transparent / Erase Fill'
-        : '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
+    final hexString = tooltip ??
+        (isTransparent
+            ? 'Transparent / Erase Fill'
+            : '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}');
 
     final isLightColor = color == Colors.white || color.computeLuminance() > 0.65;
 

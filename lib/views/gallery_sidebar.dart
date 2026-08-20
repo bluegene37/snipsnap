@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import '../models/capture_item.dart';
 import '../services/storage_service.dart';
+import '../utils/image_eviction.dart';
 import '../utils/snip_theme.dart';
 
 class GallerySidebar extends StatelessWidget {
@@ -17,6 +18,11 @@ class GallerySidebar extends StatelessWidget {
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
 
+  /// Bumped whenever the active capture's file is rewritten in place (crop,
+  /// flatten, flood fill, undo/redo). Keys the active item's thumbnail so it
+  /// re-decodes — the other thumbnails keep their cached bitmaps untouched.
+  final int imageRevision;
+
   const GallerySidebar({
     super.key,
     required this.items,
@@ -28,6 +34,7 @@ class GallerySidebar extends StatelessWidget {
     this.onRevealItemInFolder,
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
+    this.imageRevision = 0,
   });
 
   String _formatTime(DateTime date) {
@@ -311,7 +318,23 @@ class GallerySidebar extends StatelessWidget {
                                               child: fileExists
                                                   ? Image.file(
                                                       File(item.filePath),
+                                                      // Re-key only the active
+                                                      // item when its file is
+                                                      // rewritten in place, so
+                                                      // just that one thumbnail
+                                                      // re-decodes.
+                                                      key: ValueKey(isSelected
+                                                          ? '${item.filePath}#$imageRevision'
+                                                          : item.filePath),
                                                       fit: BoxFit.cover,
+                                                      // Thumbnails are ~170px
+                                                      // wide; decoding the full
+                                                      // Retina capture for each
+                                                      // one wastes memory and
+                                                      // makes cache misses
+                                                      // visibly janky.
+                                                      cacheWidth: kGalleryThumbnailCacheWidth,
+                                                      gaplessPlayback: true,
                                                       errorBuilder: (ctx, err, stack) => Center(
                                                         child: Icon(Icons.broken_image_rounded,
                                                             color: t.inkMuted, size: 20),
