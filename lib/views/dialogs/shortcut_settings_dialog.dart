@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/app_shortcut.dart';
 import '../../services/shortcut_service.dart';
-import '../../utils/constants.dart';
+import '../../utils/snip_theme.dart';
 
 class ShortcutSettingsDialog extends StatefulWidget {
   final Map<AppShortcutAction, CustomShortcut> initialShortcuts;
@@ -148,15 +148,10 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final dialogBg = widget.isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
-    final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
-    final subTextColor = widget.isDarkMode ? Colors.white54 : Colors.black54;
-    final subSubTextColor = widget.isDarkMode ? Colors.white38 : Colors.black38;
-    final dividerColor = widget.isDarkMode ? Colors.white10 : Colors.black12;
-    final editBtnBg = widget.isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant;
+    final t = SnipTheme.of(context);
 
     return Dialog(
-      backgroundColor: dialogBg,
+      backgroundColor: t.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: KeyboardListener(
         focusNode: _focusNode,
@@ -176,10 +171,10 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: AppColors.accent.withValues(alpha: 0.15),
+                      color: t.surfaceRaised,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.keyboard_rounded, color: AppColors.accent, size: 22),
+                    child: Icon(Icons.keyboard_rounded, color: t.ink, size: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -189,26 +184,26 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                         Text(
                           'Keyboard Shortcuts',
                           style: TextStyle(
-                            color: textColor,
+                            color: t.ink,
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         Text(
                           'Click "Edit" on any action, then press your desired hotkey combination.',
-                          style: TextStyle(color: subTextColor, fontSize: 12),
+                          style: TextStyle(color: t.inkMuted, fontSize: 12),
                         ),
                       ],
                     ),
                   ),
                   IconButton(
-                    icon: Icon(Icons.close_rounded, color: subTextColor),
+                    icon: Icon(Icons.close_rounded, color: t.inkMuted),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
-              Divider(color: dividerColor, height: 1),
+              Divider(color: t.border, height: 1),
               const SizedBox(height: 12),
 
               if (_errorMessage != null)
@@ -216,18 +211,22 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                   margin: const EdgeInsets.only(bottom: 12),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.redAccent.withValues(alpha: 0.2),
+                    // A shortcut conflict is an error state — the danger
+                    // token, never an inline red, is this design's one
+                    // sanctioned chromatic exception (see SnipTheme's class
+                    // doc comment).
+                    color: t.danger.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
+                    border: Border.all(color: t.danger.withValues(alpha: 0.4)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 18),
+                      Icon(Icons.warning_amber_rounded, color: t.danger, size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
-                          style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w500),
+                          style: TextStyle(color: t.ink, fontSize: 12, fontWeight: FontWeight.w500),
                         ),
                       ),
                     ],
@@ -238,7 +237,7 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
               Expanded(
                 child: ListView.separated(
                   itemCount: AppShortcutAction.values.length,
-                  separatorBuilder: (ctx, index) => Divider(color: dividerColor, height: 1),
+                  separatorBuilder: (ctx, index) => Divider(color: t.border, height: 1),
                   itemBuilder: (ctx, index) {
                     final action = AppShortcutAction.values[index];
                     final shortcut = _shortcuts[action]!;
@@ -246,14 +245,17 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
 
                     return Container(
                       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                      // The row currently awaiting a hotkey press is a
+                      // highlight, not the app's exclusive-active control
+                      // (controlDecoration's non-exclusive shape gives the
+                      // border the same colour as the fill, i.e. no visible
+                      // outline — too quiet for "this row is now capturing
+                      // keystrokes"), so the outline is hand-strengthened to
+                      // borderStrong on top of the selectedFill highlight.
                       decoration: BoxDecoration(
-                        color: isEditing
-                            ? AppColors.accent.withValues(alpha: 0.15)
-                            : Colors.transparent,
+                        color: isEditing ? t.selectedFill : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
-                        border: isEditing
-                            ? Border.all(color: AppColors.accent, width: 1.5)
-                            : null,
+                        border: isEditing ? Border.all(color: t.borderStrong, width: 1.5) : null,
                       ),
                       child: Row(
                         children: [
@@ -264,16 +266,23 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                                 Text(
                                   action.displayName,
                                   style: TextStyle(
-                                    color: textColor,
+                                    color: t.ink,
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
+                                // Was a third, even-fainter text tier
+                                // (Colors.white38/black38). inkFaint is
+                                // documented for dividers/disabled state
+                                // only, never text a user must read, and
+                                // this caption is read (it explains what the
+                                // action does) — inkMuted is the correct,
+                                // legible secondary tone.
                                 Text(
                                   action.description,
                                   style: TextStyle(
-                                    color: subSubTextColor,
+                                    color: t.inkMuted,
                                     fontSize: 11,
                                   ),
                                 ),
@@ -286,24 +295,27 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                               decoration: BoxDecoration(
-                                color: AppColors.accent,
+                                // The one thing actively happening right
+                                // now (awaiting a keypress) — the exclusive
+                                // active knockout plate.
+                                color: t.activeFill,
                                 borderRadius: BorderRadius.circular(6),
                               ),
-                              child: const Row(
+                              child: Row(
                                 children: [
                                   SizedBox(
                                     width: 12,
                                     height: 12,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      color: Colors.white,
+                                      color: t.onActive,
                                     ),
                                   ),
-                                  SizedBox(width: 8),
+                                  const SizedBox(width: 8),
                                   Text(
                                     'Press hotkey...',
                                     style: TextStyle(
-                                      color: Colors.white,
+                                      color: t.onActive,
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -312,7 +324,7 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                               ),
                             )
                           else
-                            _buildShortcutBadges(shortcut),
+                            _buildShortcutBadges(t, shortcut),
 
                           const SizedBox(width: 12),
 
@@ -320,8 +332,8 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                           if (isEditing)
                             OutlinedButton(
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: subTextColor,
-                                side: BorderSide(color: dividerColor),
+                                foregroundColor: t.inkMuted,
+                                side: BorderSide(color: t.border),
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                 minimumSize: const Size(60, 32),
                               ),
@@ -331,8 +343,8 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                           else
                             ElevatedButton(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: editBtnBg,
-                                foregroundColor: textColor,
+                                backgroundColor: t.surfaceRaised,
+                                foregroundColor: t.ink,
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                 minimumSize: const Size(60, 32),
@@ -351,7 +363,7 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
               ),
 
               const SizedBox(height: 16),
-              Divider(color: dividerColor, height: 1),
+              Divider(color: t.border, height: 1),
               const SizedBox(height: 12),
 
               // Bottom Actions
@@ -360,7 +372,7 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                 children: [
                   TextButton.icon(
                     style: TextButton.styleFrom(
-                      foregroundColor: subTextColor,
+                      foregroundColor: t.inkMuted,
                     ),
                     icon: const Icon(Icons.refresh_rounded, size: 16),
                     label: const Text('Reset Defaults', style: TextStyle(fontSize: 12)),
@@ -370,22 +382,26 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                     children: [
                       OutlinedButton(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: subTextColor,
-                          side: BorderSide(color: dividerColor),
+                          foregroundColor: t.inkMuted,
+                          side: BorderSide(color: t.border),
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                         ),
                         onPressed: () => Navigator.of(context).pop(),
                         child: const Text('Cancel'),
                       ),
                       const SizedBox(width: 8),
+                      // The dialog's one CTA — emphasis is a border/text-only
+                      // token, never a fill (Task 3's corrected precedent).
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.accent,
-                          foregroundColor: Colors.white,
+                          backgroundColor: t.surfaceRaised,
+                          foregroundColor: t.emphasis,
+                          side: BorderSide(color: t.emphasis, width: 1.2),
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
+                          elevation: 0,
                         ),
                         onPressed: _saveAndClose,
                         child: const Text('Save Shortcuts', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -401,7 +417,7 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
     );
   }
 
-  Widget _buildShortcutBadges(CustomShortcut shortcut) {
+  Widget _buildShortcutBadges(SnipTheme t, CustomShortcut shortcut) {
     final isMac = Platform.isMacOS;
     final keys = <String>[];
 
@@ -411,10 +427,6 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
     if (shortcut.shift) keys.add(isMac ? '⇧' : 'Shift');
     keys.add(shortcut.keyLabel.toUpperCase());
 
-    final badgeBg = widget.isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant;
-    final badgeBorder = widget.isDarkMode ? Colors.white12 : Colors.black12;
-    final badgeText = widget.isDarkMode ? Colors.white : Colors.black87;
-
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: keys
@@ -422,21 +434,27 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                 margin: const EdgeInsets.only(left: 4),
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
-                  color: badgeBg,
+                  color: t.surfaceRaised,
                   borderRadius: BorderRadius.circular(5),
-                  border: Border.all(color: badgeBorder),
-                  boxShadow: [
+                  border: Border.all(color: t.border),
+                  // Decorative elevation shadow under a kbd-style badge,
+                  // sitting on this dialog's own t.surface/t.surfaceRaised
+                  // panel chrome (not arbitrary image content) — kept a
+                  // fixed, mode-invariant literal like the app's other
+                  // incidental drop shadows (e.g. OcrResultPanel's own
+                  // boxShadow below).
+                  boxShadow: const [
                     BoxShadow(
-                      color: widget.isDarkMode ? Colors.black26 : Colors.black12,
+                      color: Colors.black26,
                       blurRadius: 2,
-                      offset: const Offset(0, 1),
+                      offset: Offset(0, 1),
                     )
                   ],
                 ),
                 child: Text(
                   k,
                   style: TextStyle(
-                    color: badgeText,
+                    color: t.ink,
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
                     fontFamily: 'monospace',

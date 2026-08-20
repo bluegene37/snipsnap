@@ -374,10 +374,57 @@ class SnipTheme {
     return dim ? inkMuted : ink;
   }
 
+  /// WCAG relative luminance. Shared by [ringOn] and [ringOnGradient] so
+  /// both score contrast the same way `test/snip_theme_test.dart` does.
+  static double _luminance(Color c) {
+    double channel(double v) =>
+        v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+    return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+  }
+
+  /// WCAG contrast ratio between two **opaque** colours. Callers ([ringOn],
+  /// [ringOnGradient]) are responsible for resolving any translucency to an
+  /// opaque, composited colour before calling this — see both methods' own
+  /// doc comments for why that step can't be skipped.
+  static double _contrast(Color a, Color b) {
+    final la = _luminance(a);
+    final lb = _luminance(b);
+    final hi = math.max(la, lb);
+    final lo = math.min(la, lb);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  /// Resolves [c] to the opaque colour that actually reaches the screen.
+  /// Opaque colours pass through untouched. A translucent [c] is composited
+  /// over [backdrop] with [Color.alphaBlend] — [backdrop] itself must be
+  /// opaque (asserted), since compositing over an unresolved backdrop would
+  /// just move the same unresolved-alpha problem one level down.
+  static Color _resolveOpaque(Color c, Color? backdrop, String callerName) {
+    assert(
+      backdrop == null || backdrop.a >= 1.0,
+      '$callerName: backdrop must itself be opaque (a=${backdrop.a}) — '
+      'otherwise compositing against it still leaves an unresolved pixel.',
+    );
+    assert(
+      c.a >= 1.0 || backdrop != null,
+      "$callerName: this colour is translucent (a=${c.a}), so its raw RGB "
+      "is not the colour a viewer actually sees — it blends with whatever "
+      "sits behind it. Pass the opaque `backdrop:` it is actually painted "
+      "over so contrast is scored against the true composited pixel. "
+      "Scoring the raw, unpremultiplied RGB was exactly this method's bug "
+      "before the task-6 fix (see the task-6 report) — silently reusing "
+      "that bug here would reintroduce it.",
+    );
+    return c.a >= 1.0 ? c : Color.alphaBlend(c, backdrop!);
+  }
+
   /// A selection-ring colour guaranteed to stay visible against real,
-  /// arbitrary colour data — an annotation-palette swatch, a framing-gradient
-  /// preview, anything this design deliberately lets stay saturated rather
-  /// than tokenising.
+  /// arbitrary colour data — an annotation-palette swatch, a user-chosen
+  /// text/fill background, anything this design deliberately lets stay
+  /// saturated rather than tokenising. For a multi-stop gradient preview
+  /// (the save-as dialog's framing swatches), use [ringOnGradient] instead
+  /// — a ring picked against one gradient stop is not guaranteed safe
+  /// against the others.
   ///
   /// Monochrome chrome drawn *on* real colour is the one place a fixed token
   /// isn't safe: [ink] alone reads fine against most swatches, but a ring
@@ -390,27 +437,56 @@ class SnipTheme {
   /// whichever of the two actually contrasts better against [swatchColor]
   /// and uses that instead of assuming [ink] is always the right one.
   ///
+  /// [swatchColor] may be translucent (a text/fill background preset with
+  /// `alpha < 1` is a real, live case in this app) — pass the opaque
+  /// [backdrop] it is actually painted over so this composites the true
+  /// rendered pixel before scoring. Omitting [backdrop] for a translucent
+  /// [swatchColor] asserts rather than silently scoring the wrong (raw,
+  /// unpremultiplied) colour — that silent wrongness is precisely the bug
+  /// this parameter exists to close, not a hypothetical one: it was live in
+  /// `style_picker.dart`'s preset swatches and `editor_canvas.dart`'s colour
+  /// readout before the task-6 fix. [backdrop] is unused, and may be
+  /// omitted, when [swatchColor] is already opaque.
+  ///
   /// Any future call site that draws chrome on top of real colour data
   /// should reach for this rather than hardcoding [ink] — that hardcoding is
   /// exactly the bug this method exists to close (see
   /// `test/snip_theme_test.dart`'s full-palette contrast sweep and the
   /// task-4 report).
-  Color ringOn(Color swatchColor) {
-    double luminance(Color c) {
-      double channel(double v) =>
-          v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
-      return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+  Color ringOn(Color swatchColor, {Color? backdrop}) {
+    final resolved = _resolveOpaque(swatchColor, backdrop, 'SnipTheme.ringOn');
+    return _contrast(ink, resolved) >= _contrast(onActive, resolved) ? ink : onActive;
+  }
+
+  /// [ringOn]'s multi-stop counterpart, for chrome drawn over a gradient
+  /// rather than a single flat colour — the save-as dialog's
+  /// framing-gradient previews (`AppColors.framingGradients`) are the live
+  /// case. A ring picked against just one endpoint can clear 3:1 there and
+  /// still fail against the other: [ringOn] takes one colour and can't see
+  /// this by construction, which is exactly the gap this method closes.
+  ///
+  /// Picks whichever of [ink]/[onActive] clears the better **worst-case**
+  /// contrast across every entry in [stops] — so the returned ring is
+  /// guaranteed safe against every stop, not merely the one it happened to
+  /// be checked against.
+  ///
+  /// Every entry in [stops] must be opaque (asserted) — the same
+  /// requirement [ringOn] places on [swatchColor], for the same reason: a
+  /// translucent stop's raw RGB is not the colour a viewer actually sees.
+  /// `AppColors.framingGradients` ships fully opaque stops, so this is not
+  /// a live constraint today, but a future gradient with a translucent stop
+  /// should composite it before calling this rather than have that
+  /// silently under-score here.
+  Color ringOnGradient(List<Color> stops) {
+    assert(stops.isNotEmpty, 'SnipTheme.ringOnGradient: stops must not be empty.');
+    for (final s in stops) {
+      _resolveOpaque(s, null, 'SnipTheme.ringOnGradient');
     }
 
-    double contrast(Color a, Color b) {
-      final la = luminance(a);
-      final lb = luminance(b);
-      final hi = math.max(la, lb);
-      final lo = math.min(la, lb);
-      return (hi + 0.05) / (lo + 0.05);
-    }
+    double worstContrast(Color ring) =>
+        stops.map((s) => _contrast(ring, s)).reduce(math.min);
 
-    return contrast(ink, swatchColor) >= contrast(onActive, swatchColor) ? ink : onActive;
+    return worstContrast(ink) >= worstContrast(onActive) ? ink : onActive;
   }
 
   /// Reads the theme from the nearest [SnipThemeScope].

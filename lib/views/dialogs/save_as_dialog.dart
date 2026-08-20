@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import '../../utils/constants.dart';
+import '../../utils/snip_theme.dart';
 
 enum SaveFormat { png, jpg }
 
@@ -93,14 +94,10 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = widget.isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
-    final textColor = widget.isDarkMode ? Colors.white : Colors.black87;
-    final subColor = widget.isDarkMode ? Colors.white70 : Colors.black54;
-    final fieldBg = widget.isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant;
-    final borderColor = widget.isDarkMode ? Colors.white12 : Colors.black12;
+    final t = SnipTheme.of(context);
 
     return AlertDialog(
-      backgroundColor: bgColor,
+      backgroundColor: t.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       contentPadding: EdgeInsets.zero,
       content: SizedBox(
@@ -115,16 +112,16 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
                 child: Row(
                   children: [
-                    const Icon(Icons.download_rounded, color: AppColors.accent, size: 20),
+                    Icon(Icons.download_rounded, color: t.ink, size: 20),
                     const SizedBox(width: 8),
                     Text(
                       'Save Screenshot As',
-                      style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.bold),
+                      style: TextStyle(color: t.ink, fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
               ),
-              Divider(height: 1, color: borderColor),
+              Divider(height: 1, color: t.border),
 
               // Form Inputs Section: Save As & Where
               Padding(
@@ -135,22 +132,24 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                     // 1. Save As Filename Field
                     _buildFormRow(
                       label: 'Save As:',
-                      textColor: subColor,
+                      textColor: t.inkMuted,
                       child: TextField(
                         controller: _nameController,
-                        style: TextStyle(color: textColor, fontSize: 13),
+                        style: TextStyle(color: t.ink, fontSize: 13),
                         decoration: InputDecoration(
                           isDense: true,
                           filled: true,
-                          fillColor: fieldBg,
+                          fillColor: t.surfaceRaised,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(6),
-                            borderSide: BorderSide(color: borderColor),
+                            borderSide: BorderSide(color: t.border),
                           ),
+                          // Focus is signalled by weight (a thicker hairline)
+                          // and the emphasis token, not a colour swap.
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(6),
-                            borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+                            borderSide: BorderSide(color: t.borderStrong, width: 1.5),
                           ),
                         ),
                       ),
@@ -160,7 +159,7 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                     // 2. Where Location Selector
                     _buildFormRow(
                       label: 'Where:',
-                      textColor: subColor,
+                      textColor: t.inkMuted,
                       child: Row(
                         children: [
                           Expanded(
@@ -168,45 +167,51 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                               height: 34,
                               padding: const EdgeInsets.symmetric(horizontal: 10),
                               decoration: BoxDecoration(
-                                color: fieldBg,
+                                color: t.surfaceRaised,
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: borderColor),
+                                border: Border.all(color: t.border),
                               ),
                               child: DropdownButtonHideUnderline(
                                 child: DropdownButton<String>(
                                   value: _selectedLocationKey,
                                   isExpanded: true,
-                                  icon: Icon(Icons.unfold_more_rounded, size: 16, color: subColor),
-                                  dropdownColor: fieldBg,
-                                  style: TextStyle(color: textColor, fontSize: 13),
+                                  icon: Icon(Icons.unfold_more_rounded, size: 16, color: t.inkMuted),
+                                  dropdownColor: t.surfaceRaised,
+                                  style: TextStyle(color: t.ink, fontSize: 13),
                                   items: [
                                     DropdownMenuItem(
                                       value: 'downloads',
                                       child: Row(
-                                        children: const [
-                                          Icon(Icons.folder_rounded, size: 16, color: Color(0xFFFFC107)),
-                                          SizedBox(width: 8),
-                                          Text('Downloads'),
+                                        children: [
+                                          // Finder/Explorer-style folder-kind
+                                          // icon colours — a real-world
+                                          // convention independent of app
+                                          // theme, not a state signal, and
+                                          // saturated enough to stay legible
+                                          // on both t.surfaceRaised tones.
+                                          const Icon(Icons.folder_rounded, size: 16, color: Color(0xFFFFC107)),
+                                          const SizedBox(width: 8),
+                                          Text('Downloads', style: TextStyle(color: t.ink)),
                                         ],
                                       ),
                                     ),
                                     DropdownMenuItem(
                                       value: 'desktop',
                                       child: Row(
-                                        children: const [
-                                          Icon(Icons.desktop_windows_rounded, size: 16, color: Color(0xFF4CAF50)),
-                                          SizedBox(width: 8),
-                                          Text('Desktop'),
+                                        children: [
+                                          const Icon(Icons.desktop_windows_rounded, size: 16, color: Color(0xFF4CAF50)),
+                                          const SizedBox(width: 8),
+                                          Text('Desktop', style: TextStyle(color: t.ink)),
                                         ],
                                       ),
                                     ),
                                     DropdownMenuItem(
                                       value: 'documents',
                                       child: Row(
-                                        children: const [
-                                          Icon(Icons.description_rounded, size: 16, color: Color(0xFF2196F3)),
-                                          SizedBox(width: 8),
-                                          Text('Documents'),
+                                        children: [
+                                          const Icon(Icons.description_rounded, size: 16, color: Color(0xFF2196F3)),
+                                          const SizedBox(width: 8),
+                                          Text('Documents', style: TextStyle(color: t.ink)),
                                         ],
                                       ),
                                     ),
@@ -215,9 +220,15 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                         value: 'custom',
                                         child: Row(
                                           children: [
-                                            const Icon(Icons.folder_special_rounded, size: 16, color: AppColors.accent),
+                                            Icon(Icons.folder_special_rounded, size: 16, color: t.ink),
                                             const SizedBox(width: 8),
-                                            Expanded(child: Text(_customFolderDisplay, overflow: TextOverflow.ellipsis)),
+                                            Expanded(
+                                              child: Text(
+                                                _customFolderDisplay,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(color: t.ink),
+                                              ),
+                                            ),
                                           ],
                                         ),
                                       ),
@@ -234,15 +245,15 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                           const SizedBox(width: 6),
                           IconButton(
                             style: IconButton.styleFrom(
-                              backgroundColor: fieldBg,
+                              backgroundColor: t.surfaceRaised,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(6),
-                                side: BorderSide(color: borderColor),
+                                side: BorderSide(color: t.border),
                               ),
                               padding: const EdgeInsets.all(8),
                               minimumSize: const Size(34, 34),
                             ),
-                            icon: Icon(Icons.folder_open_rounded, size: 16, color: textColor),
+                            icon: Icon(Icons.folder_open_rounded, size: 16, color: t.ink),
                             tooltip: 'Choose Custom Folder...',
                             onPressed: _pickCustomFolder,
                           ),
@@ -252,7 +263,7 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                   ],
                 ),
               ),
-              Divider(height: 1, color: borderColor),
+              Divider(height: 1, color: t.border),
 
               // Format Selection Tiles (PNG vs JPEG)
               Padding(
@@ -260,7 +271,7 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Image Format:', style: TextStyle(color: subColor, fontSize: 13, fontWeight: FontWeight.w600)),
+                    Text('Image Format:', style: TextStyle(color: t.inkMuted, fontSize: 13, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -269,7 +280,6 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                             label: 'PNG (.png)',
                             subtitle: 'Lossless quality',
                             isSelected: _selectedFormat == SaveFormat.png,
-                            isDarkMode: widget.isDarkMode,
                             onTap: () => setState(() => _selectedFormat = SaveFormat.png),
                           ),
                         ),
@@ -279,7 +289,6 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                             label: 'JPEG (.jpg)',
                             subtitle: 'Smaller file size',
                             isSelected: _selectedFormat == SaveFormat.jpg,
-                            isDarkMode: widget.isDarkMode,
                             onTap: () => setState(() => _selectedFormat = SaveFormat.jpg),
                           ),
                         ),
@@ -292,8 +301,8 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('JPEG Quality:', style: TextStyle(color: subColor, fontSize: 13, fontWeight: FontWeight.w600)),
-                          Text('${_jpgQuality.round()}%', style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold, fontSize: 13)),
+                          Text('JPEG Quality:', style: TextStyle(color: t.inkMuted, fontSize: 13, fontWeight: FontWeight.w600)),
+                          Text('${_jpgQuality.round()}%', style: TextStyle(color: t.ink, fontWeight: FontWeight.bold, fontSize: 13)),
                         ],
                       ),
                       Slider(
@@ -301,14 +310,15 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                         min: 30,
                         max: 100,
                         divisions: 14,
-                        activeColor: AppColors.accent,
+                        activeColor: t.ink,
+                        inactiveColor: t.border,
                         onChanged: (val) => setState(() => _jpgQuality = val),
                       ),
                     ],
                   ],
                 ),
               ),
-              Divider(height: 1, color: borderColor),
+              Divider(height: 1, color: t.border),
 
               // Social Framing / Canvas Padding Options
               Padding(
@@ -320,22 +330,22 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                       onTap: () => setState(() => _isFramingExpanded = !_isFramingExpanded),
                       child: Row(
                         children: [
-                          Icon(Icons.palette_rounded, size: 16, color: AppColors.accent),
+                          Icon(Icons.palette_rounded, size: 16, color: t.ink),
                           const SizedBox(width: 8),
                           Text(
                             'Social Framing & Padding',
-                            style: TextStyle(color: textColor, fontSize: 13, fontWeight: FontWeight.bold),
+                            style: TextStyle(color: t.ink, fontSize: 13, fontWeight: FontWeight.bold),
                           ),
                           const Spacer(),
                           Text(
                             _framingPadding > 0 ? '${_framingPadding.toInt()}px framed' : 'None',
-                            style: TextStyle(color: subColor, fontSize: 11),
+                            style: TextStyle(color: t.inkMuted, fontSize: 11),
                           ),
                           const SizedBox(width: 4),
                           Icon(
                             _isFramingExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
                             size: 18,
-                            color: subColor,
+                            color: t.inkMuted,
                           ),
                         ],
                       ),
@@ -345,15 +355,29 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('Padding:', style: TextStyle(color: subColor, fontSize: 12)),
+                          Text('Padding:', style: TextStyle(color: t.inkMuted, fontSize: 12)),
                           Wrap(
                             spacing: 6,
                             children: [0.0, 32.0, 64.0].map((pVal) {
                               final isSelected = _framingPadding == pVal;
+                              // A genuine "exactly one of N" radio group —
+                              // ChoiceChip can't take a BoxDecoration, so the
+                              // exclusive-active tokens are wired field by
+                              // field instead, same technique Task 4 used
+                              // for FilterChip-based radio groups.
                               return ChoiceChip(
-                                label: Text(pVal == 0 ? 'None' : '${pVal.toInt()}px', style: const TextStyle(fontSize: 11)),
+                                label: Text(
+                                  pVal == 0 ? 'None' : '${pVal.toInt()}px',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: t.controlForeground(active: isSelected, exclusive: true),
+                                  ),
+                                ),
                                 selected: isSelected,
-                                selectedColor: AppColors.accent.withValues(alpha: 0.3),
+                                selectedColor: t.activeFill,
+                                backgroundColor: Colors.transparent,
+                                side: BorderSide(color: isSelected ? t.activeFill : t.border),
+                                showCheckmark: false,
                                 onSelected: (sel) {
                                   if (sel) {
                                     setState(() {
@@ -373,14 +397,24 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Corner Radius:', style: TextStyle(color: subColor, fontSize: 12)),
+                            Text('Corner Radius:', style: TextStyle(color: t.inkMuted, fontSize: 12)),
                             Wrap(
                               spacing: 6,
                               children: [0.0, 12.0, 24.0].map((rVal) {
+                                final isSelected = _cornerRadius == rVal;
                                 return ChoiceChip(
-                                  label: Text(rVal == 0 ? 'Sharp' : '${rVal.toInt()}px', style: const TextStyle(fontSize: 11)),
-                                  selected: _cornerRadius == rVal,
-                                  selectedColor: AppColors.accent.withValues(alpha: 0.3),
+                                  label: Text(
+                                    rVal == 0 ? 'Sharp' : '${rVal.toInt()}px',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: t.controlForeground(active: isSelected, exclusive: true),
+                                    ),
+                                  ),
+                                  selected: isSelected,
+                                  selectedColor: t.activeFill,
+                                  backgroundColor: Colors.transparent,
+                                  side: BorderSide(color: isSelected ? t.activeFill : t.border),
+                                  showCheckmark: false,
                                   onSelected: (sel) {
                                     if (sel) setState(() => _cornerRadius = rVal);
                                   },
@@ -393,22 +427,34 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Drop Shadow:', style: TextStyle(color: subColor, fontSize: 12)),
+                            Text('Drop Shadow:', style: TextStyle(color: t.inkMuted, fontSize: 12)),
                             Switch(
                               value: _enableShadow,
-                              activeTrackColor: AppColors.accent,
+                              activeTrackColor: t.activeFill,
                               onChanged: (v) => setState(() => _enableShadow = v),
                             ),
                           ],
                         ),
                         const SizedBox(height: 8),
-                        Text('Background Gradient:', style: TextStyle(color: subColor, fontSize: 12)),
+                        Text('Background Gradient:', style: TextStyle(color: t.inkMuted, fontSize: 12)),
                         const SizedBox(height: 8),
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
                           children: List.generate(AppColors.framingGradients.length, (idx) {
                             final isSel = _selectedGradientIndex == idx;
+                            // The gradient preview itself keeps its real,
+                            // unconverted colour — same rule as the
+                            // annotation swatches. Only the chrome around it
+                            // (the selected ring, the check glyph) is
+                            // monochrome, and since a gradient has more than
+                            // one stop, a single-colour ringOn isn't enough:
+                            // a ring picked against just one endpoint can
+                            // still vanish against the other, so this uses
+                            // ringOnGradient, which is guaranteed safe
+                            // against every stop.
+                            final stops = (AppColors.framingGradients[idx] as LinearGradient).colors;
+                            final ring = t.ringOnGradient(stops);
                             return GestureDetector(
                               onTap: () => setState(() => _selectedGradientIndex = idx),
                               child: Container(
@@ -418,12 +464,16 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                   gradient: AppColors.framingGradients[idx],
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(
-                                    color: isSel ? Colors.white : Colors.transparent,
+                                    color: isSel ? ring : Colors.transparent,
                                     width: 2.5,
                                   ),
-                                  boxShadow: isSel ? [const BoxShadow(color: Colors.black45, blurRadius: 4)] : null,
+                                  // Elevation shadow on the selected tile —
+                                  // decorative, mode-invariant, matching the
+                                  // other incidental drop shadows in this
+                                  // file's dialogs.
+                                  boxShadow: isSel ? const [BoxShadow(color: Colors.black45, blurRadius: 4)] : null,
                                 ),
-                                child: isSel ? const Icon(Icons.check_rounded, size: 16, color: Colors.white) : null,
+                                child: isSel ? Icon(Icons.check_rounded, size: 16, color: ring) : null,
                               ),
                             );
                           }),
@@ -433,7 +483,7 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                   ],
                 ),
               ),
-              Divider(height: 1, color: borderColor),
+              Divider(height: 1, color: t.border),
 
               // Bottom Actions: Cancel & Save
               Padding(
@@ -443,8 +493,8 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                   children: [
                     OutlinedButton(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: textColor,
-                        side: BorderSide(color: borderColor),
+                        foregroundColor: t.ink,
+                        side: BorderSide(color: t.border),
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
@@ -452,13 +502,16 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                       child: const Text('Cancel', style: TextStyle(fontSize: 13)),
                     ),
                     const SizedBox(width: 10),
+                    // The dialog's one CTA — emphasis is a border/text-only
+                    // token, never a fill (Task 3's corrected precedent).
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.accent,
-                        foregroundColor: Colors.white,
+                        backgroundColor: t.surfaceRaised,
+                        foregroundColor: t.emphasis,
+                        side: BorderSide(color: t.emphasis, width: 1.2),
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        elevation: 2,
+                        elevation: 0,
                       ),
                       onPressed: () {
                         final rawName = _nameController.text.trim();
@@ -510,29 +563,33 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
   }
 }
 
+/// One PNG/JPEG format tile — a genuine "exactly one of two" radio choice,
+/// so it routes through [SnipTheme.controlDecoration]/[controlForeground]'s
+/// exclusive-active shape (the full ink/onActive knockout plate) rather than
+/// a tinted accent background, matching Task 4's Shape Chooser Grid
+/// precedent for the same "radio group" shape.
 class _FormatTile extends StatelessWidget {
   final String label;
   final String subtitle;
   final bool isSelected;
-  final bool isDarkMode;
   final VoidCallback onTap;
 
   const _FormatTile({
     required this.label,
     required this.subtitle,
     required this.isSelected,
-    required this.isDarkMode,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final tileBg = isSelected
-        ? AppColors.accent.withValues(alpha: 0.15)
-        : (isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant);
-    final borderColor = isSelected ? AppColors.accent : (isDarkMode ? Colors.white10 : Colors.black12);
-    final titleColor = isSelected ? AppColors.accent : (isDarkMode ? Colors.white : Colors.black87);
-    final subColor = isDarkMode ? Colors.white54 : Colors.black54;
+    final t = SnipTheme.of(context);
+    final decoration = t.controlDecoration(active: isSelected, exclusive: true, radius: 10);
+    final titleColor = t.controlForeground(active: isSelected, exclusive: true);
+    // dim only changes the resting (unselected) answer to inkMuted — a
+    // knocked-out active tile stays onActive regardless, since that's the
+    // colour guaranteed legible against the activeFill plate.
+    final subColor = t.controlForeground(active: isSelected, exclusive: true, dim: true);
 
     return Material(
       color: Colors.transparent,
@@ -541,11 +598,7 @@ class _FormatTile extends StatelessWidget {
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: tileBg,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: borderColor, width: isSelected ? 1.5 : 1.0),
-          ),
+          decoration: decoration,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

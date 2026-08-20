@@ -2518,6 +2518,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // background in light mode or vice versa, so the border contrasts
     // against whichever background is actually painted.
     final frameBg = showBg ? (widget.textBackgroundColor ?? Colors.black87) : t.surface;
+    // frameBg can be translucent (AppDefaults.textBackgroundColor ships at
+    // alpha 0xCC, and the user can pick any alpha via the colour dialog).
+    // The true backdrop behind this floating editor is arbitrary canvas
+    // content, which ringOn can't know statically — t.surface is the same
+    // documented approximation Task 5 used elsewhere for chrome sitting on
+    // unknowable image content, and is exact whenever showBg is false.
 
     return Positioned(
       left: math.max(10, pos.dx - 8),
@@ -2530,7 +2536,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           decoration: BoxDecoration(
             color: frameBg,
             borderRadius: BorderRadius.circular(widget.borderRadius.clamp(4.0, 16.0)),
-            border: Border.all(color: t.ringOn(frameBg), width: 2.0),
+            border: Border.all(color: t.ringOn(frameBg, backdrop: t.surface), width: 2.0),
             boxShadow: const [
               BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
             ],
@@ -2653,7 +2659,14 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                         decoration: BoxDecoration(
                           color: color,
                           shape: BoxShape.circle,
-                          border: Border.all(color: t.ringOn(color), width: 0.8),
+                          // A sampled pixel from a screenshot with an alpha
+                          // channel (e.g. a cropped/erased region) can be
+                          // translucent — this badge paints it on
+                          // t.surfaceRaised, so that's the real backdrop.
+                          border: Border.all(
+                            color: t.ringOn(color, backdrop: t.surfaceRaised),
+                            width: 0.8,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 4),

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/clipboard_service.dart';
 import '../../services/ocr/ocr_engine.dart';
-import '../../utils/constants.dart';
+import '../../utils/snip_theme.dart';
 
 /// Shows extracted text with copy and insert actions.
 ///
@@ -38,9 +38,7 @@ class OcrResultPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final surface = isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
-    final textColor = isDarkMode ? Colors.white : Colors.black87;
-    final subTextColor = isDarkMode ? Colors.white54 : Colors.black54;
+    final t = SnipTheme.of(context);
 
     return Material(
       color: Colors.transparent,
@@ -48,9 +46,13 @@ class OcrResultPanel extends StatelessWidget {
         width: 320,
         constraints: const BoxConstraints(maxHeight: 420),
         decoration: BoxDecoration(
-          color: surface,
+          color: t.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isDarkMode ? Colors.white12 : Colors.black12),
+          border: Border.all(color: t.border),
+          // Decorative elevation shadow under this floating panel, sitting
+          // on whatever the panel is anchored over — mode-invariant like
+          // the app's other incidental drop shadows (e.g. the shortcut
+          // dialog's kbd badges).
           boxShadow: const [
             BoxShadow(color: Colors.black26, blurRadius: 16, offset: Offset(0, 4)),
           ],
@@ -64,30 +66,32 @@ class OcrResultPanel extends StatelessWidget {
               children: [
                 Text(
                   'Extracted text',
-                  style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
+                  style: TextStyle(color: t.ink, fontWeight: FontWeight.w600),
                 ),
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.close_rounded, size: 18),
-                  color: subTextColor,
+                  color: t.inkMuted,
                   onPressed: onClose,
                   tooltip: 'Close',
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            Flexible(child: _buildBody(textColor, subTextColor)),
+            Flexible(child: _buildBody(t)),
             if (_hasText) ...[
               const SizedBox(height: 12),
               Row(
                 children: [
                   TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: t.ink),
                     icon: const Icon(Icons.copy_rounded, size: 16),
                     label: const Text('Copy'),
                     onPressed: () => ClipboardService.copyText(result.plainText),
                   ),
                   const SizedBox(width: 8),
                   TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: t.ink),
                     icon: const Icon(Icons.text_fields_rounded, size: 16),
                     label: const Text('Insert'),
                     onPressed: () => onInsertAsText(result.plainText),
@@ -101,7 +105,7 @@ class OcrResultPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildBody(Color textColor, Color subTextColor) {
+  Widget _buildBody(SnipTheme t) {
     if (isLoading) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
@@ -117,19 +121,19 @@ class OcrResultPanel extends StatelessWidget {
     if (unavailableReason != null) {
       return Text(
         unavailableReason!,
-        style: TextStyle(color: subTextColor, fontSize: 13),
+        style: TextStyle(color: t.inkMuted, fontSize: 13),
       );
     }
     if (result.isEmpty) {
       return Text(
         'No text found in this area.',
-        style: TextStyle(color: subTextColor, fontSize: 13),
+        style: TextStyle(color: t.inkMuted, fontSize: 13),
       );
     }
     return SingleChildScrollView(
       child: SelectableText(
         result.plainText,
-        style: TextStyle(color: textColor, fontSize: 13, height: 1.5),
+        style: TextStyle(color: t.ink, fontSize: 13, height: 1.5),
       ),
     );
   }

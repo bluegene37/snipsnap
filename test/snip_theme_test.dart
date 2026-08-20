@@ -398,11 +398,140 @@ void main() {
 
     test('ringOn only ever answers one of the theme\'s own two mark tones', () {
       // Never a third, invented colour — stays inside the design's existing
-      // ink/onActive vocabulary.
+      // ink/onActive vocabulary. Colors.transparent is translucent (a == 0),
+      // so it needs an explicit backdrop under the alpha-aware contract —
+      // t.surface stands in as a plausible real one.
       for (final mode in SnipThemeMode.values) {
         final t = SnipTheme.forMode(mode);
-        for (final swatch in [...AppColors.palette, Colors.transparent, const Color(0xFF808080)]) {
+        for (final swatch in [...AppColors.palette, const Color(0xFF808080)]) {
           expect([t.ink, t.onActive], contains(t.ringOn(swatch)), reason: '$mode');
+        }
+        expect(
+          [t.ink, t.onActive],
+          contains(t.ringOn(Colors.transparent, backdrop: t.surface)),
+          reason: '$mode: transparent',
+        );
+      }
+    });
+  });
+
+  group('ringOn — alpha compositing (task-6 Step Zero gap b)', () {
+    test('an opaque swatch never requires a backdrop', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        expect(() => t.ringOn(const Color(0xFF112233)), returnsNormally, reason: '$mode');
+      }
+    });
+
+    test('a translucent swatch without a backdrop asserts', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        expect(() => t.ringOn(Colors.black.withValues(alpha: 0.5)), throwsAssertionError,
+            reason: '$mode');
+      }
+    });
+
+    test('a translucent backdrop itself asserts, even with an opaque swatch', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        expect(
+          () => t.ringOn(const Color(0xFF112233), backdrop: Colors.white.withValues(alpha: 0.5)),
+          throwsAssertionError,
+          reason: '$mode',
+        );
+      }
+    });
+
+    test('scores the true composited pixel, not the raw translucent RGB', () {
+      // A near-black swatch at low alpha, composited over a near-white
+      // backdrop, actually renders close to that white backdrop (luminance
+      // ~0.78) — a *light* pixel, which needs a *dark* ring (ink) to stay
+      // visible, exactly like any other light swatch. The bug this closes:
+      // the old code ignored alpha and scored the raw near-black RGB
+      // directly, which (wrongly) finds ink a poor match (~1.1:1, since
+      // near-black-on-near-black is invisible) and picks onActive instead —
+      // onActive is near-white, and a near-white ring on the true
+      // near-white composited pixel is *also* invisible. Scoring the
+      // composited pixel avoids both failure modes and correctly lands on
+      // ink.
+      final t = SnipTheme.light();
+      const nearBlackTranslucent = Color(0x11000000); // alpha ~6.7%
+      const nearWhiteBackdrop = Color(0xFFF5F5F5);
+      final composited = Color.alphaBlend(nearBlackTranslucent, nearWhiteBackdrop);
+      expect(_luminance(composited), greaterThan(0.7),
+          reason: 'sanity: the composited pixel should be close to the white backdrop');
+      // What the pre-fix, alpha-blind code would have scored: contrast
+      // against the raw (uncomposited) near-black RGB picks onActive —
+      // demonstrably wrong once you know the true rendered pixel is light.
+      expect(_contrast(t.onActive, nearBlackTranslucent) >= _contrast(t.ink, nearBlackTranslucent),
+          isTrue,
+          reason: 'sanity: scoring the raw uncomposited RGB would have picked onActive');
+      // The fixed method scores the composited pixel instead, and correctly
+      // picks the dark tone for what is actually a light pixel.
+      expect(t.ringOn(nearBlackTranslucent, backdrop: nearWhiteBackdrop), t.ink,
+          reason: 'must score against the composited (near-white) pixel, not the raw '
+              '(near-black) swatch RGB, which would wrongly answer onActive');
+    });
+  });
+
+  group('ringOnGradient — a ring safe against every stop, not just one', () {
+    List<Color> stopsOf(Gradient g) => (g as LinearGradient).colors;
+
+    test('every AppColors.framingGradients entry gets a ring that clears 3:1 '
+        'against every one of its stops, in both modes', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        for (final gradient in AppColors.framingGradients) {
+          final stops = stopsOf(gradient);
+          final ring = t.ringOnGradient(stops);
+          for (final stop in stops) {
+            expect(_contrast(ring, stop), greaterThanOrEqualTo(3.0),
+                reason: '$mode: ring for gradient stop '
+                    '#${stop.toARGB32().toRadixString(16)} only clears '
+                    '${_contrast(ring, stop).toStringAsFixed(2)}:1');
+          }
+        }
+      }
+    });
+
+    test('picks the tone with the better worst-case contrast, not just the '
+        'first stop', () {
+      // A synthetic 2-stop gradient where both tones fail one endpoint —
+      // ink (near-black) is ~18.4:1 on white but only ~1.14:1 on black;
+      // onActive (near-white) is ~20.3:1 on black but only ~1.04:1 on
+      // white. Neither stop alone picks a clear winner; the worst-case
+      // comparison does: ink's floor (1.14) beats onActive's floor (1.04),
+      // so ink must win even though it's the *weaker* choice for the first
+      // stop in the list — proving this isn't just "check the first stop".
+      final t = SnipTheme.light();
+      final stops = [const Color(0xFFFFFFFF), const Color(0xFF000000)];
+      expect(t.ringOnGradient(stops), t.ink);
+
+      final ringWorst = stops.map((s) => _contrast(t.ink, s)).reduce(math.min);
+      final otherWorst = stops.map((s) => _contrast(t.onActive, s)).reduce(math.min);
+      expect(ringWorst, greaterThan(otherWorst),
+          reason: 'sanity: ink should actually have the better worst-case here');
+    });
+
+    test('rejects an empty stop list', () {
+      final t = SnipTheme.light();
+      expect(() => t.ringOnGradient(const []), throwsAssertionError);
+    });
+
+    test('a translucent stop asserts, mirroring ringOn\'s own contract', () {
+      final t = SnipTheme.light();
+      expect(
+        () => t.ringOnGradient([Colors.black.withValues(alpha: 0.5), const Color(0xFFFFFFFF)]),
+        throwsAssertionError,
+      );
+    });
+
+    test('only ever answers one of the theme\'s own two mark tones', () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        for (final gradient in AppColors.framingGradients) {
+          expect([t.ink, t.onActive], contains(t.ringOnGradient(stopsOf(gradient))),
+              reason: '$mode');
         }
       }
     });

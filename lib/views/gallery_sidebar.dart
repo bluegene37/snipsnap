@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import '../models/capture_item.dart';
 import '../services/storage_service.dart';
-import '../utils/constants.dart';
+import '../utils/snip_theme.dart';
 
 class GallerySidebar extends StatelessWidget {
   final List<CaptureItem> items;
@@ -41,18 +41,21 @@ class GallerySidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sidebarBg = isDarkMode ? AppColors.sidebarBg : AppColors.sidebarBgLight;
-    final headerBg = isDarkMode ? AppColors.darkSurface : AppColors.lightSurface;
-    final textColor = isDarkMode ? Colors.white : Colors.black87;
-    final subTextColor = isDarkMode ? Colors.white54 : Colors.black54;
-    final borderColor = isDarkMode ? Colors.white10 : Colors.black12;
+    final t = SnipTheme.of(context);
+    final sliderThemeData = SliderThemeData(
+      activeTrackColor: t.ink,
+      inactiveTrackColor: t.border,
+      thumbColor: t.ink,
+      trackHeight: 3,
+      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+    );
 
     return Container(
       height: 145,
       decoration: BoxDecoration(
-        color: sidebarBg,
+        color: t.surface,
         border: Border(
-          top: BorderSide(color: borderColor),
+          top: BorderSide(color: t.border),
         ),
       ),
       child: Column(
@@ -62,17 +65,17 @@ class GallerySidebar extends StatelessWidget {
             height: 32,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              color: headerBg,
-              border: Border(bottom: BorderSide(color: borderColor)),
+              color: t.surfaceRaised,
+              border: Border(bottom: BorderSide(color: t.border)),
             ),
             child: Row(
               children: [
                 // Screenshots Gallery Header
-                const Icon(Icons.photo_library_rounded, color: AppColors.accent, size: 15),
+                Icon(Icons.photo_library_rounded, color: t.ink, size: 15),
                 const SizedBox(width: 6),
                 Text(
                   'Screenshots',
-                  style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: t.ink, fontSize: 12, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(width: 10),
 
@@ -83,6 +86,7 @@ class GallerySidebar extends StatelessWidget {
                     color: Colors.transparent,
                     child: InkWell(
                       borderRadius: BorderRadius.circular(6),
+                      hoverColor: t.hoverFill,
                       onTap: () {
                         if (onOpenLibraryLocation != null) {
                           onOpenLibraryLocation!();
@@ -93,21 +97,19 @@ class GallerySidebar extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: isDarkMode
-                              ? Colors.white.withValues(alpha: 0.08)
-                              : Colors.black.withValues(alpha: 0.05),
+                          color: t.surfaceRaised,
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: borderColor),
+                          border: Border.all(color: t.border),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.folder_open_rounded, size: 13, color: AppColors.accent),
+                            Icon(Icons.folder_open_rounded, size: 13, color: t.ink),
                             const SizedBox(width: 4),
                             Text(
                               'Open Folder',
                               style: TextStyle(
-                                color: textColor,
+                                color: t.ink,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -125,7 +127,10 @@ class GallerySidebar extends StatelessWidget {
                 if (onZoomScaleChanged != null) ...[
                   IconButton(
                     icon: const Icon(Icons.remove_rounded, size: 14),
-                    color: zoomScale > 0.2 ? textColor : subTextColor,
+                    // Weight, not hue, signals the disabled edge — inkMuted
+                    // is a genuinely different token from ink, not the
+                    // ink/emphasis collision this design warns against.
+                    color: zoomScale > 0.2 ? t.ink : t.inkMuted,
                     tooltip: 'Zoom Out',
                     onPressed: zoomScale > 0.2
                         ? () => onZoomScaleChanged!((zoomScale - 0.25).clamp(0.2, 4.0))
@@ -136,13 +141,7 @@ class GallerySidebar extends StatelessWidget {
                   SizedBox(
                     width: 240,
                     child: SliderTheme(
-                      data: SliderThemeData(
-                        activeTrackColor: AppColors.accent,
-                        inactiveTrackColor: isDarkMode ? Colors.white24 : Colors.black12,
-                        thumbColor: AppColors.accent,
-                        trackHeight: 3,
-                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                      ),
+                      data: sliderThemeData,
                       child: Slider(
                         value: zoomScale.clamp(0.2, 4.0),
                         min: 0.2,
@@ -153,7 +152,7 @@ class GallerySidebar extends StatelessWidget {
                   ),
                   IconButton(
                     icon: const Icon(Icons.add_rounded, size: 14),
-                    color: zoomScale < 4.0 ? textColor : subTextColor,
+                    color: zoomScale < 4.0 ? t.ink : t.inkMuted,
                     tooltip: 'Zoom In',
                     onPressed: zoomScale < 4.0
                         ? () => onZoomScaleChanged!((zoomScale + 0.25).clamp(0.2, 4.0))
@@ -169,19 +168,19 @@ class GallerySidebar extends StatelessWidget {
                       onTap: () => onZoomScaleChanged!(1.0),
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: zoomScale == 1.0
-                              ? AppColors.accent.withValues(alpha: 0.2)
-                              : (isDarkMode ? Colors.white10 : Colors.black12),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: zoomScale == 1.0 ? AppColors.accent : borderColor,
-                          ),
+                        // A non-exclusive "selected" readout, not the app's
+                        // one exclusive-active control — controlDecoration's
+                        // non-exclusive shape (selectedFill highlight, not
+                        // an activeFill knockout plate).
+                        decoration: t.controlDecoration(
+                          active: zoomScale == 1.0,
+                          exclusive: false,
+                          radius: 6,
                         ),
                         child: Text(
                           '${(zoomScale * 100).round()}%',
                           style: TextStyle(
-                            color: zoomScale == 1.0 ? AppColors.accent : textColor,
+                            color: t.controlForeground(active: zoomScale == 1.0, exclusive: false),
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                             fontFamily: 'monospace',
@@ -193,7 +192,7 @@ class GallerySidebar extends StatelessWidget {
                   const SizedBox(width: 2),
                   IconButton(
                     icon: const Icon(Icons.center_focus_strong_rounded, size: 14),
-                    color: zoomScale == 1.0 ? AppColors.accent : subTextColor,
+                    color: zoomScale == 1.0 ? t.ink : t.inkMuted,
                     tooltip: 'Reset Zoom (100%)',
                     onPressed: () => onZoomScaleChanged!(1.0),
                     constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
@@ -208,12 +207,13 @@ class GallerySidebar extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.black26,
+                      color: t.surfaceRaised,
                       borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: t.border),
                     ),
                     child: Text(
                       '${activeItem!.width} x ${activeItem!.height}',
-                      style: const TextStyle(color: Colors.white54, fontSize: 11, fontFamily: 'monospace'),
+                      style: TextStyle(color: t.inkMuted, fontSize: 11, fontFamily: 'monospace'),
                     ),
                   ),
                 const SizedBox(width: 8),
@@ -221,7 +221,10 @@ class GallerySidebar extends StatelessWidget {
                 // Right: Controls & Hide Button
 
                 IconButton(
-                  icon: const Icon(Icons.close_rounded, color: Colors.white54, size: 16),
+                  // Was a fixed Colors.white54 regardless of mode — already
+                  // a pre-existing legibility bug in light mode (white54 on
+                  // a near-white sub-header bar is nearly invisible).
+                  icon: Icon(Icons.close_rounded, color: t.inkMuted, size: 16),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
                   tooltip: 'Hide Screenshots Tray',
@@ -234,11 +237,14 @@ class GallerySidebar extends StatelessWidget {
           // Horizontal Captures List
           Expanded(
             child: items.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
                       'No captures yet. Click "Snip" to start!',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white38, fontSize: 13),
+                      // Was a fixed Colors.white38 regardless of mode — same
+                      // pre-existing light-mode legibility bug as the close
+                      // button above (white38 on near-white is unreadable).
+                      style: TextStyle(color: t.inkMuted, fontSize: 13),
                     ),
                   )
                 : ListView.builder(
@@ -250,12 +256,14 @@ class GallerySidebar extends StatelessWidget {
                       final isSelected = activeItem?.id == item.id;
                       final fileExists = File(item.filePath).existsSync();
 
-                      final cardBg = isSelected
-                          ? (isDarkMode ? AppColors.darkSurfaceVariant : AppColors.lightSurfaceVariant)
-                          : (isDarkMode ? AppColors.darkSurface.withValues(alpha: 0.5) : AppColors.lightSurface);
-                      final cardBorder = isSelected
-                          ? AppColors.accent
-                          : (isDarkMode ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.08));
+                      // The selected capture is a non-exclusive highlight
+                      // (selectedFill, ink foreground) — not the exclusive
+                      // ink/onActive knockout plate, which stays reserved
+                      // for the tool sidebar's single active tool. Rows are
+                      // borderless: no separate hairline strengthens on
+                      // selection or hover, only the fill changes (hover is
+                      // wired below via InkWell's own hoverColor).
+                      final cardBg = isSelected ? t.selectedFill : t.surfaceRaised;
 
                       return Container(
                         width: 150,
@@ -263,13 +271,10 @@ class GallerySidebar extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: cardBg,
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: cardBorder,
-                            width: isSelected ? 2.0 : 1,
-                          ),
                         ),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(6),
+                          hoverColor: t.hoverFill,
                           onTap: () => onSelectItem(item),
                           child: Padding(
                             padding: const EdgeInsets.all(5),
@@ -284,19 +289,19 @@ class GallerySidebar extends StatelessWidget {
                                         child: ClipRRect(
                                           borderRadius: BorderRadius.circular(4),
                                           child: Container(
-                                            color: isDarkMode ? Colors.black26 : Colors.black12,
+                                            color: t.canvas,
                                             child: fileExists
                                                 ? Image.file(
                                                     File(item.filePath),
                                                     fit: BoxFit.cover,
                                                     errorBuilder: (ctx, err, stack) => Center(
                                                       child: Icon(Icons.broken_image_rounded,
-                                                          color: subTextColor, size: 20),
+                                                          color: t.inkMuted, size: 20),
                                                     ),
                                                   )
                                                 : Center(
                                                     child: Icon(Icons.image_not_supported_rounded,
-                                                        color: subTextColor, size: 20),
+                                                        color: t.inkMuted, size: 20),
                                                   ),
                                           ),
                                         ),
@@ -308,13 +313,21 @@ class GallerySidebar extends StatelessWidget {
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                           decoration: BoxDecoration(
-                                            color: Colors.black.withValues(alpha: 0.75),
+                                            // This badge sits directly on top
+                                            // of the thumbnail — arbitrary
+                                            // screenshot content, same as
+                                            // editor_canvas.dart's dimension
+                                            // badges — so it uses the same
+                                            // "ink mark plate, onActive
+                                            // knockout text" pattern rather
+                                            // than a fixed black/white pair.
+                                            color: t.ink,
                                             borderRadius: BorderRadius.circular(3),
                                           ),
                                           child: Text(
                                             p.extension(item.filePath).replaceAll('.', ''),
-                                            style: const TextStyle(
-                                              color: Colors.white,
+                                            style: TextStyle(
+                                              color: t.onActive,
                                               fontSize: 9,
                                               fontWeight: FontWeight.bold,
                                             ),
@@ -337,7 +350,7 @@ class GallerySidebar extends StatelessWidget {
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: TextStyle(
-                                              color: textColor,
+                                              color: t.ink,
                                               fontSize: 10,
                                               fontWeight: FontWeight.w600,
                                             ),
@@ -345,7 +358,7 @@ class GallerySidebar extends StatelessWidget {
                                           Text(
                                             _formatTime(item.createdAt),
                                             style: TextStyle(
-                                              color: subTextColor,
+                                              color: t.inkMuted,
                                               fontSize: 9,
                                             ),
                                           ),
@@ -354,8 +367,8 @@ class GallerySidebar extends StatelessWidget {
                                     ),
                                      IconButton(
                                        icon: const Icon(Icons.folder_open_rounded, size: 14),
-                                       color: subTextColor,
-                                       hoverColor: AppColors.accent.withValues(alpha: 0.2),
+                                       color: t.inkMuted,
+                                       hoverColor: t.hoverFill,
                                        tooltip: 'Reveal in Finder / Explorer',
                                        onPressed: () {
                                          if (onRevealItemInFolder != null) {
@@ -370,8 +383,13 @@ class GallerySidebar extends StatelessWidget {
                                      ),
                                      IconButton(
                                        icon: const Icon(Icons.delete_outline_rounded, size: 14),
-                                       color: subTextColor,
-                                       hoverColor: Colors.redAccent.withValues(alpha: 0.2),
+                                       // The one sanctioned chromatic
+                                       // exception — never an inline red.
+                                       color: t.controlForeground(
+                                         active: false,
+                                         tone: SnipControlTone.danger,
+                                       ),
+                                       hoverColor: t.danger.withValues(alpha: 0.15),
                                        tooltip: 'Delete Capture',
                                        onPressed: () => onDeleteItem(item),
                                        padding: EdgeInsets.zero,

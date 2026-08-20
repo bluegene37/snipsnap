@@ -1419,7 +1419,12 @@ class StylePicker extends StatelessWidget {
                             color: bgC,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: isSelected ? t.ringOn(bgC) : t.border,
+                              // bgC includes translucent presets (black/white
+                              // @ 0.75/0.9 alpha) — this swatch paints directly
+                              // on the panel's own bgColor (t.surface, no
+                              // intervening background), which is the true
+                              // backdrop for the composite.
+                              color: isSelected ? t.ringOn(bgC, backdrop: t.surface) : t.border,
                               width: isSelected ? 2.5 : 1,
                             ),
                           ),
@@ -1504,7 +1509,12 @@ class StylePicker extends StatelessWidget {
                             color: c,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: isSelected ? t.ringOn(c) : t.border,
+                              // c includes translucent presets (white/black @
+                              // 0.85/0.55 alpha, and four 0x66-alpha tints) —
+                              // this swatch also paints directly on the
+                              // panel's t.surface, same as the text-background
+                              // palette above.
+                              color: isSelected ? t.ringOn(c, backdrop: t.surface) : t.border,
                               width: isSelected ? 2.5 : 1,
                             ),
                           ),
