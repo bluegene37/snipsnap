@@ -1925,6 +1925,16 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
 
+    // When typing in the inline text editor, do NOT let character keys, navigation keys,
+    // or tool shortcut chords bubble up and switch tools or mutate canvas objects.
+    if (_inlineTextPos != null || _inlineTextFocusNode.hasFocus) {
+      if (key == LogicalKeyboardKey.escape) {
+        _commitInlineText();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
     if (key == LogicalKeyboardKey.delete || key == LogicalKeyboardKey.backspace) {
       if (_floatingSelectionRect != null) {
         _deleteFloatingSelection();

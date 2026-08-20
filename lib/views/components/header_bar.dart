@@ -91,11 +91,12 @@ class HeaderBar extends StatelessWidget {
         builder: (context, constraints) {
           final showLabels = constraints.maxWidth >= _compactBreakpoint;
           final showCentre = constraints.maxWidth >= _iconOnlyBreakpoint;
+          final showBrandText = constraints.maxWidth >= 760;
 
           return Row(
             children: [
-              _buildBrand(t),
-              const SizedBox(width: 14),
+              _buildBrand(t, showText: showBrandText),
+              SizedBox(width: showBrandText ? 14 : 8),
               _buildCaptureGroup(t, showLabels),
 
               // Centre: editing controls, kept optically centred by the two
@@ -130,7 +131,7 @@ class HeaderBar extends StatelessWidget {
   // Zones
   // ---------------------------------------------------------------------------
 
-  Widget _buildBrand(SnipTheme t) {
+  Widget _buildBrand(SnipTheme t, {bool showText = true}) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -160,16 +161,18 @@ class HeaderBar extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 9),
-        Text(
-          'SnipSnap',
-          style: TextStyle(
-            color: t.ink,
-            fontSize: 17,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.4,
+        if (showText) ...[
+          const SizedBox(width: 9),
+          Text(
+            'SnipSnap',
+            style: TextStyle(
+              color: t.ink,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.4,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -465,6 +468,13 @@ class HeaderBar extends StatelessWidget {
             onPressed: onToggleProperties,
           ),
         ],
+        const SizedBox(width: 6),
+        _ToggleIconButton(
+          icon: t.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+          active: false,
+          tooltip: t.isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+          onPressed: onToggleThemeMode,
+        ),
       ],
     );
   }

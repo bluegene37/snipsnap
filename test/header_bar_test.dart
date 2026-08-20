@@ -193,4 +193,44 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('direct theme mode button toggles theme on tap', (tester) async {
+    tester.view.physicalSize = const Size(1440, 700);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    bool toggled = false;
+    await tester.pumpWidget(SnipThemeScope(
+      theme: SnipTheme.forMode(SnipThemeMode.dark),
+      child: MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1440,
+            child: HeaderBar(
+              onSnipInteractive: () {},
+              onImportImage: () {},
+              onUndo: () {},
+              onRedo: () {},
+              onClear: () {},
+              onCopyToClipboard: () {},
+              onSaveAs: () {},
+              onToggleSidebar: () {},
+              onToggleThemeMode: () => toggled = true,
+              onOpenShortcutSettings: () {},
+              onOpenAboutDialog: () {},
+              canUndo: false,
+              canRedo: false,
+              isSidebarOpen: true,
+            ),
+          ),
+        ),
+      ),
+    ));
+
+    final themeButtonFinder = find.byIcon(Icons.light_mode_rounded);
+    expect(themeButtonFinder, findsOneWidget);
+
+    await tester.tap(themeButtonFinder);
+    expect(toggled, isTrue);
+  });
 }

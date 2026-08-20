@@ -111,7 +111,7 @@ class StylePicker extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: t.surfaceRaised,
-        title: Text('Pick Text/Stroke Color', style: TextStyle(color: t.ink)),
+        title: Text('Pick Color', style: TextStyle(color: t.ink)),
         content: SingleChildScrollView(
           child: ColorPicker(
             pickerColor: selectedColor,
@@ -192,15 +192,37 @@ class StylePicker extends StatelessWidget {
         (effectiveTool == CanvasTool.text && isFilled) ||
         (effectiveTool == CanvasTool.blur);
 
+    final showColor = [
+      CanvasTool.pen,
+      CanvasTool.arrow,
+      CanvasTool.line,
+      CanvasTool.shape,
+      CanvasTool.highlight,
+      CanvasTool.text,
+      CanvasTool.stepMarker,
+      CanvasTool.ruler,
+    ].contains(effectiveTool) || (selectedAnnotation != null && effectiveTool != CanvasTool.blur && effectiveTool != CanvasTool.crop);
+
+    final showOpacity = [
+      CanvasTool.pen,
+      CanvasTool.arrow,
+      CanvasTool.line,
+      CanvasTool.shape,
+      CanvasTool.highlight,
+      CanvasTool.text,
+      CanvasTool.stepMarker,
+      CanvasTool.blur,
+      CanvasTool.ruler,
+    ].contains(effectiveTool) || (selectedAnnotation != null && effectiveTool != CanvasTool.crop);
+
+    final showRotation = selectedAnnotation != null && onRotationChanged != null;
+
     final bgColor = t.surface;
     final textColor = t.ink;
     final subTextColor = t.inkMuted;
     final borderColor = t.border;
     final cardBg = t.surfaceRaised;
 
-    // Every Slider in this panel shares one hairline-track/ink-thumb theme —
-    // resting track in t.border, the active portion and thumb knocked out
-    // in t.ink, per the skeleton state table.
     final sliderThemeData = SliderThemeData(
       activeTrackColor: t.ink,
       inactiveTrackColor: t.border,
@@ -230,10 +252,14 @@ class StylePicker extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.palette_rounded, color: t.ink, size: 18),
+                    Icon(
+                      selectedAnnotation != null ? Icons.layers_rounded : Icons.tune_rounded,
+                      color: t.ink,
+                      size: 18,
+                    ),
                     const SizedBox(width: 8),
                     Text(
-                      'Styles & Properties',
+                      selectedAnnotation != null ? 'Item Properties' : 'Tool Properties',
                       style: TextStyle(
                         color: textColor,
                         fontSize: 15,
@@ -256,179 +282,67 @@ class StylePicker extends StatelessWidget {
             Divider(color: borderColor, height: 1),
             const SizedBox(height: 14),
 
-            // 1. QUICK STYLES HEADER (Snagit Style)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Quick Styles',
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  ),
+            // Selected Item Quick Actions Row
+            if (selectedAnnotation != null) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: borderColor),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: cardBg,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: borderColor),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Theme: ',
-                        style: TextStyle(color: subTextColor, fontSize: 11),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    if (onBringToFront != null)
+                      Tooltip(
+                        message: 'Bring to Front',
+                        child: IconButton(
+                          icon: const Icon(Icons.flip_to_front_rounded, size: 16),
+                          color: textColor,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+                          onPressed: onBringToFront,
+                        ),
                       ),
-                      Text(
-                        'Basic',
-                        style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                    if (onSendToBack != null)
+                      Tooltip(
+                        message: 'Send to Back',
+                        child: IconButton(
+                          icon: const Icon(Icons.flip_to_back_rounded, size: 16),
+                          color: textColor,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+                          onPressed: onSendToBack,
+                        ),
                       ),
-                      const SizedBox(width: 2),
-                      Icon(Icons.arrow_drop_down_rounded, size: 14, color: subTextColor),
-                    ],
-                  ),
+                    if (onDeleteSelected != null)
+                      Tooltip(
+                        message: 'Delete Selected (Del)',
+                        child: IconButton(
+                          icon: Icon(Icons.delete_outline_rounded, size: 16, color: t.danger),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+                          onPressed: onDeleteSelected,
+                        ),
+                      ),
+                    if (onDeselect != null)
+                      Tooltip(
+                        message: 'Deselect (Esc)',
+                        child: IconButton(
+                          icon: Icon(Icons.close_rounded, size: 16, color: subTextColor),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+                          onPressed: onDeselect,
+                        ),
+                      ),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-
-            // Quick Styles Grid for Fill Tool
-            if (activeTool == CanvasTool.fill) ...[
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  _CircleColorSwatch(
-                    color: Colors.transparent, // Transparent Fill
-                    isTransparent: true,
-                    isSelected: opacity <= 0.05 || selectedColor.a == 0,
-                    onTap: () {
-                      onColorChanged(Colors.transparent);
-                      onOpacityChanged(0.0);
-                    },
-                    size: 32,
-                  ),
-                  _CircleColorSwatch(
-                    color: const Color(0xFFEF4444), // Crimson Red
-                    isSelected: selectedColor.toARGB32() == 0xFFEF4444 && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFFEF4444));
-                      onOpacityChanged(1.0);
-                    },
-                    size: 32,
-                  ),
-                  _CircleColorSwatch(
-                    color: const Color(0xFFF97316), // Orange
-                    isSelected: selectedColor.toARGB32() == 0xFFF97316 && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFFF97316));
-                      onOpacityChanged(1.0);
-                    },
-                    size: 32,
-                  ),
-                  _CircleColorSwatch(
-                    color: const Color(0xFFF59E0B), // Amber
-                    isSelected: selectedColor.toARGB32() == 0xFFF59E0B && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFFF59E0B));
-                      onOpacityChanged(1.0);
-                    },
-                    size: 32,
-                  ),
-                  _CircleColorSwatch(
-                    color: const Color(0xFF10B981), // Emerald Green
-                    isSelected: selectedColor.toARGB32() == 0xFF10B981 && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFF10B981));
-                      onOpacityChanged(1.0);
-                    },
-                    size: 32,
-                  ),
-                  _CircleColorSwatch(
-                    color: const Color(0xFF06B6D4), // Cyan
-                    isSelected: selectedColor.toARGB32() == 0xFF06B6D4 && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFF06B6D4));
-                      onOpacityChanged(1.0);
-                    },
-                    size: 32,
-                  ),
-                  _CircleColorSwatch(
-                    color: const Color(0xFF8B5CF6), // Purple
-                    isSelected: selectedColor.toARGB32() == 0xFF8B5CF6 && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFF8B5CF6));
-                      onOpacityChanged(1.0);
-                    },
-                    size: 32,
-                  ),
-                  _CircleColorSwatch(
-                    color: const Color(0xFFEC4899), // Pink
-                    isSelected: selectedColor.toARGB32() == 0xFFEC4899 && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFFEC4899));
-                      onOpacityChanged(1.0);
-                    },
-                    size: 32,
-                  ),
-                  _CircleColorSwatch(
-                    color: const Color(0xFFFFFFFF), // Pure White
-                    isSelected: selectedColor.toARGB32() == 0xFFFFFFFF && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFFFFFFFF));
-                      onOpacityChanged(1.0);
-                    },
-                    size: 32,
-                  ),
-                  _CircleColorSwatch(
-                    color: const Color(0xFF64748B), // Slate Gray
-                    isSelected: selectedColor.toARGB32() == 0xFF64748B && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFF64748B));
-                      onOpacityChanged(1.0);
-                    },
-                    size: 32,
-                  ),
-                  _CircleColorSwatch(
-                    color: const Color(0xFF000000), // Pure Black
-                    isSelected: selectedColor.toARGB32() == 0xFF000000 && opacity > 0.05,
-                    onTap: () {
-                      onColorChanged(const Color(0xFF000000));
-                      onOpacityChanged(1.0);
-                    },
-                    size: 32,
-                  ),
-                ],
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 16),
             ],
 
-            // 2. TOOL PROPERTIES HEADER
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  selectedAnnotation != null ? 'Item Properties' : 'Tool Properties',
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Tooltip(
-                  message: 'Tool options & settings',
-                  child: Icon(Icons.help_outline_rounded, size: 16, color: subTextColor),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Divider(color: borderColor, height: 1),
-            const SizedBox(height: 14),
-
-            // Selection Tool Info Card
+            // Context Card: Selection Tool (when no item selected)
             if (activeTool == CanvasTool.select && selectedAnnotation == null) ...[
               Container(
                 padding: const EdgeInsets.all(12),
@@ -445,14 +359,14 @@ class StylePicker extends StatelessWidget {
                         Icon(Icons.crop_free_rounded, color: t.ink, size: 18),
                         const SizedBox(width: 8),
                         Text(
-                          'Selection (Cut & Move)',
+                          'Selection & Cut',
                           style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '• Drag over the image to create a selection.\n• Drag inside the selection to cut and move it (leaves transparency behind).\n• Press Delete to erase selection to transparent.\n• Press Esc to deselect/commit.',
+                      '• Drag over the image to create a selection.\n• Drag inside to cut & move.\n• Press Delete to erase to transparent.\n• Click any annotation on canvas to edit its properties.',
                       style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
                     ),
                   ],
@@ -461,7 +375,7 @@ class StylePicker extends StatelessWidget {
               const SizedBox(height: 16),
             ],
 
-            // Crop Tool Info Card
+            // Context Card: Crop Tool
             if (activeTool == CanvasTool.crop) ...[
               Container(
                 padding: const EdgeInsets.all(12),
@@ -485,7 +399,7 @@ class StylePicker extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '• Drag handles inward to crop image.\n• Drag handles outward to expand canvas with transparent space.\n• Click "Apply Crop" to commit changes.',
+                      '• Drag handles inward to crop image.\n• Drag handles outward to expand canvas with transparent space.\n• Press Enter to commit changes.',
                       style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
                     ),
                   ],
@@ -494,78 +408,143 @@ class StylePicker extends StatelessWidget {
               const SizedBox(height: 16),
             ],
 
-            // Dedicated Fill Tool Properties Card
+            // Context Card: OCR Tool
+            if (activeTool == CanvasTool.ocr) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: t.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.text_fields_rounded, color: t.ink, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          'OCR Text Extraction',
+                          style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '• Drag a rectangle over any text in the screenshot to extract it.\n• Click canvas to extract text from the entire screenshot.\n• Extracted text is copied directly to clipboard.',
+                      style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Context Card: Eyedropper Color Picker Tool
+            if (activeTool == CanvasTool.colorPicker) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: t.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.colorize_rounded, color: t.ink, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Color Eyedropper',
+                          style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '• Hover and click anywhere on the screenshot to sample the pixel color into your active tool.',
+                      style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Dedicated Fill Tool Section
             if (activeTool == CanvasTool.fill) ...[
-              // Eyedropper and Fill Color Buttons
-              Row(
+              Text(
+                'FILL COLOR',
+                style: TextStyle(
+                  color: subTextColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
                 children: [
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Text('Eyedropper', style: TextStyle(color: subTextColor, fontSize: 11, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 6),
-                        InkWell(
-                          onTap: onActivateEyedropper,
-                          borderRadius: BorderRadius.circular(8),
-                          child: Container(
-                            height: 42,
-                            decoration: BoxDecoration(
-                              color: cardBg,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: borderColor),
-                            ),
-                            child: Center(
-                              child: Icon(Icons.colorize_rounded, color: textColor, size: 20),
-                            ),
-                          ),
+                  _CircleColorSwatch(
+                    color: Colors.transparent,
+                    isTransparent: true,
+                    isSelected: opacity <= 0.05 || selectedColor.a == 0,
+                    onTap: () {
+                      onColorChanged(Colors.transparent);
+                      onOpacityChanged(0.0);
+                    },
+                    size: 30,
+                  ),
+                  ...AppColors.palette.map((color) {
+                    final isSelected = selectedColor.toARGB32() == color.toARGB32() && opacity > 0.05;
+                    return _CircleColorSwatch(
+                      color: color,
+                      isSelected: isSelected,
+                      onTap: () {
+                        onColorChanged(color);
+                        if (opacity <= 0.05) onOpacityChanged(1.0);
+                      },
+                      size: 30,
+                    );
+                  }),
+                  Tooltip(
+                    message: 'Custom Color Picker',
+                    child: GestureDetector(
+                      onTap: () => _showColorPickerDialog(context),
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: cardBg,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: borderColor),
                         ),
-                      ],
+                        child: Icon(Icons.color_lens_rounded, size: 16, color: textColor),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Text('Fill', style: TextStyle(color: subTextColor, fontSize: 11, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 6),
-                        InkWell(
-                          onTap: () => _showColorPickerDialog(context),
-                          borderRadius: BorderRadius.circular(8),
-                          child: Container(
-                            height: 42,
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            decoration: BoxDecoration(
-                              color: cardBg,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: borderColor),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Container(
-                                  width: 22,
-                                  height: 22,
-                                  decoration: BoxDecoration(
-                                    color: opacity > 0.05 ? selectedColor : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: t.border),
-                                  ),
-                                  child: opacity <= 0.05
-                                      ? const ClipRRect(
-                                          borderRadius: BorderRadius.all(Radius.circular(3)),
-                                          child: _MiniCheckerboard(),
-                                        )
-                                      : null,
-                                ),
-                                const SizedBox(width: 4),
-                                Icon(Icons.arrow_drop_down_rounded, color: subTextColor, size: 18),
-                              ],
-                            ),
+                  if (onActivateEyedropper != null)
+                    Tooltip(
+                      message: 'Sample color from screen',
+                      child: GestureDetector(
+                        onTap: onActivateEyedropper,
+                        child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: cardBg,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: borderColor),
                           ),
+                          child: Icon(Icons.colorize_rounded, size: 16, color: textColor),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
                 ],
               ),
               const SizedBox(height: 16),
@@ -598,7 +577,7 @@ class StylePicker extends StatelessWidget {
               ),
               const SizedBox(height: 12),
 
-              // Opacity Slider
+              // Opacity Slider for Fill
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -647,7 +626,7 @@ class StylePicker extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'Global Fill',
+                        'Global Fill (All matching pixels)',
                         style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w500),
                       ),
                     ],
@@ -657,8 +636,50 @@ class StylePicker extends StatelessWidget {
               const SizedBox(height: 16),
             ],
 
-            // Dedicated Step Marker Info Card
-            if (activeTool == CanvasTool.stepMarker) ...[
+            // Shape Chooser Grid (when Shape tool is active or shape is selected)
+            if (effectiveTool == CanvasTool.shape && onShapeKindChanged != null) ...[
+              Text(
+                'SHAPE',
+                style: TextStyle(
+                  color: subTextColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: ShapeKind.values.map((kind) {
+                  final isSelected = effectiveShapeKind == kind;
+                  return Tooltip(
+                    message: kind.label,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => onShapeKindChanged!(kind),
+                        child: Container(
+                          width: 46,
+                          height: 42,
+                          decoration: t.controlDecoration(active: isSelected, radius: 8),
+                          child: Icon(
+                            kind.icon,
+                            size: 20,
+                            color: t.controlForeground(active: isSelected),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 20),
+            ],
+
+            // Step Marker Info Card (when Step Marker tool is active or selected)
+            if (effectiveTool == CanvasTool.stepMarker) ...[
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -745,10 +766,14 @@ class StylePicker extends StatelessWidget {
               const SizedBox(height: 16),
             ],
 
-            // Shape Chooser Grid (all outlines available to the Shape tool)
-            if (effectiveTool == CanvasTool.shape && onShapeKindChanged != null) ...[
+            // Primary Color Swatches Grid (for tools that use color)
+            if (showColor) ...[
               Text(
-                'SHAPE',
+                effectiveTool == CanvasTool.text
+                    ? 'TEXT COLOR'
+                    : (effectiveTool == CanvasTool.highlight
+                        ? 'HIGHLIGHTER TINT'
+                        : (effectiveTool == CanvasTool.stepMarker ? 'BADGE COLOR' : 'COLOR')),
                 style: TextStyle(
                   color: subTextColor,
                   fontSize: 11,
@@ -758,113 +783,33 @@ class StylePicker extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: ShapeKind.values.map((kind) {
-                  final isSelected = effectiveShapeKind == kind;
-                  return Tooltip(
-                    message: kind.label,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(8),
-                        onTap: () => onShapeKindChanged!(kind),
-                        child: Container(
-                          width: 46,
-                          height: 42,
-                          decoration: t.controlDecoration(active: isSelected, radius: 8),
-                          child: Icon(
-                            kind.icon,
-                            size: 20,
-                            color: t.controlForeground(active: isSelected),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 20),
-            ],
-
-            // Selection Color Swatches Grid
-            Text(
-              activeTool == CanvasTool.text
-                  ? 'TEXT COLOR'
-                  : (activeTool == CanvasTool.highlight
-                      ? 'HIGHLIGHTER TINT'
-                      : (activeTool == CanvasTool.fill ? 'FILL COLOR' : 'SELECTION COLOR')),
-              style: TextStyle(
-                color: subTextColor,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.8,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                if (activeTool == CanvasTool.fill)
-                  _CircleColorSwatch(
-                    color: Colors.transparent,
-                    isTransparent: true,
-                    isSelected: opacity <= 0.05 || selectedColor.a == 0,
-                    onTap: () {
-                      onColorChanged(Colors.transparent);
-                      onOpacityChanged(0.0);
-                    },
-                    size: 30,
-                  ),
-                ...(activeTool == CanvasTool.highlight
-                        ? const [
-                            Color(0xFFFDE047),
-                            Color(0xFF34D399),
-                            Color(0xFF22D3EE),
-                            Color(0xFFF472B6),
-                            Color(0xFFFB923C),
-                            Color(0xFFC084FC),
-                          ]
-                        : AppColors.palette)
-                    .map((color) {
-                  final isSelected = selectedColor.toARGB32() == color.toARGB32() &&
-                      (activeTool != CanvasTool.fill || opacity > 0.05);
-                  return _CircleColorSwatch(
-                    color: color,
-                    isSelected: isSelected,
-                    onTap: () {
-                      onColorChanged(color);
-                      if (activeTool == CanvasTool.fill && opacity <= 0.05) {
-                        onOpacityChanged(1.0);
-                      }
-                    },
-                    size: 30,
-                  );
-                }),
-                // Custom Color Button
-                Tooltip(
-                  message: 'Custom Color Picker',
-                  child: GestureDetector(
-                    onTap: () => _showColorPickerDialog(context),
-                    child: Container(
-                      width: 30,
-                      height: 30,
-                      decoration: BoxDecoration(
-                        color: cardBg,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: borderColor),
-                      ),
-                      child: Icon(Icons.color_lens_rounded, size: 16, color: textColor),
-                    ),
-                  ),
-                ),
-                // Eyedropper Color Picker Tool (ONLY visible for Fill tool)
-                if (activeTool == CanvasTool.fill && onActivateEyedropper != null)
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  ...(effectiveTool == CanvasTool.highlight
+                          ? const [
+                              Color(0xFFFDE047),
+                              Color(0xFF34D399),
+                              Color(0xFF22D3EE),
+                              Color(0xFFF472B6),
+                              Color(0xFFFB923C),
+                              Color(0xFFC084FC),
+                            ]
+                          : AppColors.palette)
+                      .map((color) {
+                    final isSelected = selectedColor.toARGB32() == color.toARGB32();
+                    return _CircleColorSwatch(
+                      color: color,
+                      isSelected: isSelected,
+                      onTap: () => onColorChanged(color),
+                      size: 30,
+                    );
+                  }),
+                  // Custom Color Button
                   Tooltip(
-                    message: 'Pick color from screen/image',
+                    message: 'Custom Color Picker',
                     child: GestureDetector(
-                      onTap: onActivateEyedropper,
+                      onTap: () => _showColorPickerDialog(context),
                       child: Container(
                         width: 30,
                         height: 30,
@@ -873,16 +818,33 @@ class StylePicker extends StatelessWidget {
                           shape: BoxShape.circle,
                           border: Border.all(color: borderColor),
                         ),
-                        child: Icon(Icons.colorize_rounded, size: 16, color: textColor),
+                        child: Icon(Icons.color_lens_rounded, size: 16, color: textColor),
                       ),
                     ),
                   ),
-              ],
-            ),
+                  if (onActivateEyedropper != null)
+                    Tooltip(
+                      message: 'Sample color from screen',
+                      child: GestureDetector(
+                        onTap: onActivateEyedropper,
+                        child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: cardBg,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: borderColor),
+                          ),
+                          child: Icon(Icons.colorize_rounded, size: 16, color: textColor),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 20),
+            ],
 
-            const SizedBox(height: 24),
-
-            // Stroke Width Controls (Presets + Slider + Live Line Preview)
+            // Line Thickness Controls (Presets + Slider)
             if (showStroke) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -911,39 +873,48 @@ class StylePicker extends StatelessWidget {
               ),
               const SizedBox(height: 8),
 
-              // Quick Preset Chips for Stroke Width
+              // Presets with Row + Expanded so they adapt smoothly without overflow
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _StrokePresetChip(
-                    label: '2px',
-                    width: AppDefaults.strokeWidthThin,
-                    isSelected: (strokeWidth - AppDefaults.strokeWidthThin).abs() < 0.5,
-                    onSelect: onStrokeWidthChanged,
+                  Expanded(
+                    child: _StrokePresetChip(
+                      label: '2px',
+                      width: AppDefaults.strokeWidthThin,
+                      isSelected: (strokeWidth - AppDefaults.strokeWidthThin).abs() < 0.5,
+                      onSelect: onStrokeWidthChanged,
+                    ),
                   ),
-                  _StrokePresetChip(
-                    label: '4px',
-                    width: AppDefaults.strokeWidthMedium,
-                    isSelected: (strokeWidth - AppDefaults.strokeWidthMedium).abs() < 0.5,
-                    onSelect: onStrokeWidthChanged,
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _StrokePresetChip(
+                      label: '4px',
+                      width: AppDefaults.strokeWidthMedium,
+                      isSelected: (strokeWidth - AppDefaults.strokeWidthMedium).abs() < 0.5,
+                      onSelect: onStrokeWidthChanged,
+                    ),
                   ),
-                  _StrokePresetChip(
-                    label: '8px',
-                    width: AppDefaults.strokeWidthThick,
-                    isSelected: (strokeWidth - AppDefaults.strokeWidthThick).abs() < 0.5,
-                    onSelect: onStrokeWidthChanged,
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _StrokePresetChip(
+                      label: '8px',
+                      width: AppDefaults.strokeWidthThick,
+                      isSelected: (strokeWidth - AppDefaults.strokeWidthThick).abs() < 0.5,
+                      onSelect: onStrokeWidthChanged,
+                    ),
                   ),
-                  _StrokePresetChip(
-                    label: '14px',
-                    width: AppDefaults.strokeWidthHeavy,
-                    isSelected: (strokeWidth - AppDefaults.strokeWidthHeavy).abs() < 0.5,
-                    onSelect: onStrokeWidthChanged,
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _StrokePresetChip(
+                      label: '14px',
+                      width: AppDefaults.strokeWidthHeavy,
+                      isSelected: (strokeWidth - AppDefaults.strokeWidthHeavy).abs() < 0.5,
+                      onSelect: onStrokeWidthChanged,
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 4),
 
-              // Continuous Slider
               SliderTheme(
                 data: sliderThemeData,
                 child: Slider(
@@ -953,51 +924,50 @@ class StylePicker extends StatelessWidget {
                   onChanged: onStrokeWidthChanged,
                 ),
               ),
-
               const SizedBox(height: 16),
             ],
 
-            // Opacity Slider
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'OPACITY',
-                  style: TextStyle(
-                    color: subTextColor,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.8,
+            // Opacity Slider (for tools that support opacity)
+            if (showOpacity) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'OPACITY',
+                    style: TextStyle(
+                      color: subTextColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8,
+                    ),
                   ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: cardBg,
-                    borderRadius: BorderRadius.circular(4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${(opacity * 100).toInt()}%',
+                      style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
                   ),
-                  child: Text(
-                    '${(opacity * 100).toInt()}%',
-                    style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            SliderTheme(
-              data: sliderThemeData,
-              child: Slider(
-                // Clamped like every other slider here: a stored value can sit
-                // outside the range (an annotation saved by an older build, or
-                // a scalar projected back from image pixels) and Slider asserts
-                // rather than coercing.
-                value: opacity.clamp(0.1, 1.0),
-                min: 0.1,
-                max: 1.0,
-                onChanged: onOpacityChanged,
+                ],
               ),
-            ),
-            // Corner Radius (rectangles & speech bubbles)
+              const SizedBox(height: 4),
+              SliderTheme(
+                data: sliderThemeData,
+                child: Slider(
+                  value: opacity.clamp(0.1, 1.0),
+                  min: 0.1,
+                  max: 1.0,
+                  onChanged: onOpacityChanged,
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Corner Radius (rectangles, speech bubbles, text boxes, blur boxes)
             if (showCornerRadius) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1026,31 +996,41 @@ class StylePicker extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _RadiusPresetChip(
-                    label: '0px',
-                    radius: 0.0,
-                    isSelected: borderRadius == 0.0,
-                    onSelect: (r) => onBorderRadiusChanged?.call(r),
+                  Expanded(
+                    child: _RadiusPresetChip(
+                      label: '0px',
+                      radius: 0.0,
+                      isSelected: borderRadius == 0.0,
+                      onSelect: (r) => onBorderRadiusChanged?.call(r),
+                    ),
                   ),
-                  _RadiusPresetChip(
-                    label: '8px',
-                    radius: 8.0,
-                    isSelected: borderRadius == 8.0,
-                    onSelect: (r) => onBorderRadiusChanged?.call(r),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _RadiusPresetChip(
+                      label: '8px',
+                      radius: 8.0,
+                      isSelected: borderRadius == 8.0,
+                      onSelect: (r) => onBorderRadiusChanged?.call(r),
+                    ),
                   ),
-                  _RadiusPresetChip(
-                    label: '16px',
-                    radius: 16.0,
-                    isSelected: borderRadius == 16.0,
-                    onSelect: (r) => onBorderRadiusChanged?.call(r),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _RadiusPresetChip(
+                      label: '16px',
+                      radius: 16.0,
+                      isSelected: borderRadius == 16.0,
+                      onSelect: (r) => onBorderRadiusChanged?.call(r),
+                    ),
                   ),
-                  _RadiusPresetChip(
-                    label: '24px',
-                    radius: 24.0,
-                    isSelected: borderRadius == 24.0,
-                    onSelect: (r) => onBorderRadiusChanged?.call(r),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _RadiusPresetChip(
+                      label: '24px',
+                      radius: 24.0,
+                      isSelected: borderRadius == 24.0,
+                      onSelect: (r) => onBorderRadiusChanged?.call(r),
+                    ),
                   ),
                 ],
               ),
@@ -1146,7 +1126,7 @@ class StylePicker extends StatelessWidget {
               const SizedBox(height: 16),
             ],
 
-            // Blur Mode (Gaussian Blur vs Pixelate Mosaic vs Solid Blackout)
+            // Blur Mode & Strength
             if (effectiveTool == CanvasTool.blur) ...[
               Text(
                 'REDACTION MODE',
@@ -1221,7 +1201,6 @@ class StylePicker extends StatelessWidget {
               const SizedBox(height: 12),
 
               if (blurType != BlurType.solid) ...[
-                // Obscuration strength: gaussian sigma, or mosaic block size.
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -1268,31 +1247,7 @@ class StylePicker extends StatelessWidget {
               const SizedBox(height: 16),
             ],
 
-            // Drop Shadow Toggle
-            if (showShadow && onShadowChanged != null) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'DROP SHADOW',
-                    style: TextStyle(
-                      color: subTextColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.8,
-                    ),
-                  ),
-                  Switch(
-                    value: hasShadow,
-                    activeTrackColor: t.activeFill,
-                    onChanged: (val) => onShadowChanged!(val),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // Font Size Slider
+            // Font Size Slider (for text and step markers)
             if (showFont) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1323,10 +1278,6 @@ class StylePicker extends StatelessWidget {
               SliderTheme(
                 data: sliderThemeData,
                 child: Slider(
-                  // Canvas-space font size is `stored / scale`, so shrinking
-                  // the window and selecting a text annotation can land below
-                  // 10 — which is a Slider assertion (red screen in debug),
-                  // not a clamp. Same treatment as stroke width and radius.
                   value: fontSize.clamp(10.0, 60.0),
                   min: 10.0,
                   max: 60.0,
@@ -1364,14 +1315,13 @@ class StylePicker extends StatelessWidget {
               ),
               const SizedBox(height: 12),
 
-              // Text Background Color Palette Swatches (when effectiveTool is Text)
+              // Text Background Color Palette Swatches
               if (effectiveTool == CanvasTool.text) ...[
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    // Transparent (Text-Only) Tile
                     Tooltip(
                       message: 'Transparent (Text Only)',
                       child: GestureDetector(
@@ -1394,7 +1344,6 @@ class StylePicker extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Preset Background Color Swatches
                     ...[
                       Colors.black.withValues(alpha: 0.75),
                       Colors.white.withValues(alpha: 0.9),
@@ -1405,13 +1354,6 @@ class StylePicker extends StatelessWidget {
                       const Color(0xFF34C759),
                     ].map((bgC) {
                       final isSelected = isFilled && textBackgroundColor?.toARGB32() == bgC.toARGB32();
-                      // One ringOn result drives BOTH the ring and the
-                      // checkmark inside it. The glyph sits directly on the
-                      // composited swatch, so a hardcoded white one hit
-                      // 1.00:1 on `white@0.9` in light mode — literally
-                      // invisible. ringOn bottoms out at 4.59:1 across this
-                      // palette in both modes (see
-                      // `test/style_picker_test.dart`'s checkmark sweep).
                       final ring = isSelected ? t.ringOn(bgC, backdrop: t.surface) : null;
                       return GestureDetector(
                         onTap: () {
@@ -1425,11 +1367,6 @@ class StylePicker extends StatelessWidget {
                             color: bgC,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              // bgC includes translucent presets (black/white
-                              // @ 0.75/0.9 alpha) — this swatch paints directly
-                              // on the panel's own bgColor (t.surface, no
-                              // intervening background), which is the true
-                              // backdrop for the composite.
                               color: ring ?? t.border,
                               width: isSelected ? 2.5 : 1,
                             ),
@@ -1440,7 +1377,6 @@ class StylePicker extends StatelessWidget {
                         ),
                       );
                     }),
-                    // Custom Text Background Color Picker
                     Tooltip(
                       message: 'Custom Text Background Color',
                       child: GestureDetector(
@@ -1461,8 +1397,7 @@ class StylePicker extends StatelessWidget {
                 ),
               ],
 
-              // Independent shape fill colour — the outline keeps using the
-              // selection colour above, as in Snagit's shape styles.
+              // Shape Fill Color Palette
               if (isFilled && onFillColorChanged != null && effectiveTool == CanvasTool.shape) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -1480,7 +1415,7 @@ class StylePicker extends StatelessWidget {
                   runSpacing: 8,
                   children: [
                     Tooltip(
-                      message: 'Auto — 25% tint of the outline colour',
+                      message: 'Auto — 25% tint of outline colour',
                       child: GestureDetector(
                         onTap: () => onFillColorChanged!(null),
                         child: Container(
@@ -1508,11 +1443,6 @@ class StylePicker extends StatelessWidget {
                       const Color(0x668B5CF6),
                     ].map((c) {
                       final isSelected = fillColor?.toARGB32() == c.toARGB32();
-                      // Same pairing as the text-background palette above:
-                      // one ringOn result for the ring AND the checkmark
-                      // drawn inside it. Hardcoded white measured 1.01:1 on
-                      // `white@0.85` and 1.15:1 on `0x66FDE047` in light
-                      // mode; ringOn's worst case here is 5.08:1.
                       final ring = isSelected ? t.ringOn(c, backdrop: t.surface) : null;
                       return GestureDetector(
                         onTap: () => onFillColorChanged!(c),
@@ -1523,11 +1453,6 @@ class StylePicker extends StatelessWidget {
                             color: c,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              // c includes translucent presets (white/black @
-                              // 0.85/0.55 alpha, and four 0x66-alpha tints) —
-                              // this swatch also paints directly on the
-                              // panel's t.surface, same as the text-background
-                              // palette above.
                               color: ring ?? t.border,
                               width: isSelected ? 2.5 : 1,
                             ),
@@ -1544,8 +1469,32 @@ class StylePicker extends StatelessWidget {
               const SizedBox(height: 16),
             ],
 
-            // Item Rotation Section (Angle Presets + Continuous Slider)
-            if (onRotationChanged != null) ...[
+            // Drop Shadow Toggle
+            if (showShadow && onShadowChanged != null) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'DROP SHADOW',
+                    style: TextStyle(
+                      color: subTextColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  Switch(
+                    value: hasShadow,
+                    activeTrackColor: t.activeFill,
+                    onChanged: (val) => onShadowChanged!(val),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Item Rotation Section (Only when an item is selected)
+            if (showRotation) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -1565,7 +1514,7 @@ class StylePicker extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      '${(rotation * 180 / 3.141592653589793).round()}°',
+                      '${(rotation * 180 / math.pi).round()}°',
                       style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
                     ),
                   ),
@@ -1575,35 +1524,33 @@ class StylePicker extends StatelessWidget {
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
-                children: [
-                  ...[-90, -45, 0, 45, 90, 180].map((deg) {
-                    final rad = deg * 3.141592653589793 / 180;
-                    final isSelected = ((rotation - rad).abs() < 0.05);
-                    return GestureDetector(
-                      onTap: () => onRotationChanged!(rad),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: t.controlDecoration(active: isSelected, radius: 6),
-                        child: Text(
-                          '$deg°',
-                          style: TextStyle(
-                            color: t.controlForeground(active: isSelected),
-                            fontSize: 10,
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                          ),
+                children: [-90, -45, 0, 45, 90, 180].map((deg) {
+                  final rad = deg * math.pi / 180;
+                  final isSelected = ((rotation - rad).abs() < 0.05);
+                  return GestureDetector(
+                    onTap: () => onRotationChanged!(rad),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: t.controlDecoration(active: isSelected, radius: 6),
+                      child: Text(
+                        '$deg°',
+                        style: TextStyle(
+                          color: t.controlForeground(active: isSelected),
+                          fontSize: 10,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                         ),
                       ),
-                    );
-                  }),
-                ],
+                    ),
+                  );
+                }).toList(),
               ),
               const SizedBox(height: 4),
               SliderTheme(
                 data: sliderThemeData,
                 child: Slider(
-                  value: rotation.clamp(-3.141592653589793, 3.141592653589793),
-                  min: -3.141592653589793,
-                  max: 3.141592653589793,
+                  value: rotation.clamp(-math.pi, math.pi),
+                  min: -math.pi,
+                  max: math.pi,
                   onChanged: onRotationChanged,
                 ),
               ),
@@ -1665,7 +1612,8 @@ class _StrokePresetChip extends StatelessWidget {
       onTap: () => onSelect(width),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        alignment: Alignment.center,
         decoration: t.controlDecoration(active: isSelected, radius: 6),
         child: Text(
           label,
@@ -1700,7 +1648,8 @@ class _RadiusPresetChip extends StatelessWidget {
       onTap: () => onSelect(radius),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        alignment: Alignment.center,
         decoration: t.controlDecoration(active: isSelected, radius: 6),
         child: Text(
           label,

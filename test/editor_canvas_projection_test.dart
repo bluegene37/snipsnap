@@ -322,5 +322,20 @@ void main() {
             'converted before it reaches the parent',
       );
     });
+
+    test('_handleKeyEvent suppresses single-letter tool shortcuts during inline text editing', () {
+      final handleKeyBody = _bodyOf(source, 'KeyEventResult _handleKeyEvent(');
+      expect(
+        handleKeyBody,
+        contains('_inlineTextPos != null || _inlineTextFocusNode.hasFocus'),
+        reason: 'Typing text containing letters like P, A, R, K, S must never '
+            'bubble to canvas shortcuts and jump tools while the user is typing in inline text.',
+      );
+      expect(
+        handleKeyBody,
+        contains('_commitInlineText()'),
+        reason: 'Escape key while editing inline text should commit the text cleanly.',
+      );
+    });
   });
 }
