@@ -115,6 +115,100 @@ ColorScheme snipColorScheme(SnipTheme t) {
   );
 }
 
+/// The root [ThemeData] for the app's one and only [MaterialApp].
+///
+/// A top-level function for the same reason [snipColorScheme] is: `MainScreen`
+/// cannot be pumped (it builds an `EditorCanvas`, which emits `Image.file`,
+/// which hangs `flutter_tester`), so anything that needs testing has to live
+/// outside its `State`. `test/dialog_route_theme_test.dart` builds the real
+/// app shell out of this plus [SnipThemeScope], and
+/// `test/switch_contrast_test.dart` reads [ThemeData.switchTheme] straight
+/// out of it.
+ThemeData snipThemeData(SnipTheme t) {
+  return ThemeData(
+    useMaterial3: true,
+    brightness: t.isDark ? Brightness.dark : Brightness.light,
+    scaffoldBackgroundColor: t.canvas,
+    colorScheme: snipColorScheme(t),
+    textTheme: GoogleFonts.interTextTheme(
+      t.isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme,
+    ).apply(bodyColor: t.ink, displayColor: t.ink),
+    dividerColor: t.border,
+    switchTheme: snipSwitchTheme(t),
+  );
+}
+
+/// The [Switch] treatment, applied at the root so all four switches in the app
+/// (three in `style_picker.dart`, one in `save_as_dialog.dart`) get it — those
+/// call sites set only `activeTrackColor`, and everything about the **off**
+/// state fell through to `_SwitchDefaultsM3`.
+///
+/// Those defaults are hostile to this palette. M3 draws the unselected thumb
+/// and the track outline in `colorScheme.outline`, and the unselected track in
+/// `surfaceContainerHighest` — which [snipColorScheme] maps to [SnipTheme.border]
+/// and [SnipTheme.surfaceRaised] respectively. Both are near-invisible hairline
+/// tones by design, so the off switch effectively disappeared:
+///
+/// ```text
+///                              light   dark
+///   outline vs panel            1.38    1.45   <- the whole control's outline
+///   thumb vs track              1.43    1.34   <- the state indicator itself
+///   track vs panel              1.04    1.09
+/// ```
+///
+/// This is a regression this branch caused, not a pre-existing wart: before
+/// the hand-built 46-role scheme, `outline` was never specified, so it fell
+/// back to `onBackground` (`Colors.black`) and the off thumb sat at 4.58:1.
+///
+/// The replacement follows the skeleton language rather than reaching for a
+/// grey plate: **off is a hairline outline with a solid ink thumb; on is the
+/// [SnipTheme.activeFill] plate with the thumb knocked out to
+/// [SnipTheme.onActive]** — the same inversion every other control in this
+/// design uses. The off track is [SnipTheme.surface], i.e. deliberately no
+/// fill against the panels these switches actually sit on (the style picker
+/// body and the save-as dialog are both `t.surface`); the outline and thumb
+/// carry the shape, exactly as with every other resting control here.
+///
+/// Measured with the same WCAG maths as [SnipTheme.ringOn]
+/// (`test/switch_contrast_test.dart` recomputes all of these):
+///
+/// ```text
+///                                        light    dark
+///   OFF thumb (ink) vs track             17.79    16.14
+///   OFF outline (inkMuted) vs panel       6.46     6.92
+///   ON  thumb (onActive) vs track        17.79    16.44
+///   ON  track (activeFill) vs panel      17.79    16.14
+/// ```
+SwitchThemeData snipSwitchTheme(SnipTheme t) {
+  return SwitchThemeData(
+    thumbColor: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.disabled)) return t.inkFaint;
+      // The inversion: knocked out on the active plate, full ink off it.
+      return states.contains(WidgetState.selected) ? t.onActive : t.ink;
+    }),
+    trackColor: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.selected)) {
+        return states.contains(WidgetState.disabled) ? t.selectedFill : t.activeFill;
+      }
+      // No fill when off — the outline is the control, per the resting-state
+      // convention in SnipTheme.controlDecoration.
+      return t.surface;
+    }),
+    trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+      if (states.contains(WidgetState.selected)) {
+        return states.contains(WidgetState.disabled) ? t.selectedFill : t.activeFill;
+      }
+      if (states.contains(WidgetState.disabled)) return t.border;
+      // Hover strengthens the hairline, matching controlDecoration's
+      // border -> borderStrong hover step.
+      return states.contains(WidgetState.hovered) || states.contains(WidgetState.pressed)
+          ? t.borderStrong
+          : t.inkMuted;
+    }),
+    trackOutlineWidth: WidgetStatePropertyAll(t.hairline),
+  );
+}
+
 /// Sentinel mirroring the one in the models so "leave unchanged" stays
 /// distinguishable from "clear this colour".
 const Object _unsetProperty = Object();
@@ -190,9 +284,10 @@ class _MainScreenState extends State<MainScreen> {
   /// `build()` constructs and returns it (see below). That means this
   /// State's own [context] sits above, not below, that scope:
   /// `SnipTheme.of(context)` walks context's ancestors, and there is no
-  /// SnipThemeScope among them (`lib/main.dart` wraps `MainScreen` directly
-  /// in a plain `MaterialApp`, nothing more) — it would never see the scope
-  /// this same build() call mounts beneath it. So every chrome read that
+  /// SnipThemeScope among them (`lib/main.dart` hands `MainScreen` straight
+  /// to `runApp`, so this State's context has no ancestors worth speaking
+  /// of) — it would never see the scope this same build() call mounts
+  /// beneath it. So every chrome read that
   /// belongs to main_screen.dart itself is forced through [SnipTheme.forMode],
   /// hoisted here once rather than repeating the ternary at each call site.
   ///
@@ -322,6 +417,30 @@ class _MainScreenState extends State<MainScreen> {
 
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
+  /// Handed to the [MaterialApp] below, and the **only** context this State
+  /// may pass to `showDialog`.
+  ///
+  /// This State's own `context` is above the MaterialApp that `build()`
+  /// mounts (same reason [_theme] exists), so it has neither a Navigator nor
+  /// MaterialLocalizations among its ancestors — `showDialog(context:
+  /// context)` asserts `No MaterialLocalizations found` before it ever
+  /// reaches the navigator lookup. The navigator's own context sits *inside*
+  /// the MaterialApp and *inside* [SnipThemeScope], which is exactly what a
+  /// dialog route needs: `showDialog` pushes onto
+  /// `Navigator.of(context, rootNavigator: true)`, and now that `main.dart`
+  /// no longer stacks a second MaterialApp above this one, that root
+  /// navigator *is* this one — below the scope, so every dialog's
+  /// `SnipTheme.of(context)` resolves and every dialog's `Theme.of(context)`
+  /// is [snipThemeData] rather than a stock M3 baseline.
+  ///
+  /// Both halves are load-bearing; `test/dialog_route_theme_test.dart` pins
+  /// each one failing on its own.
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  /// The dialog-safe context — see [_navigatorKey]. Null only before the
+  /// first frame, which no dialog trigger can precede.
+  BuildContext? get _dialogContext => _navigatorKey.currentContext;
+
   Map<AppShortcutAction, CustomShortcut> _shortcuts = ShortcutService.getDefaultShortcuts();
 
   @override
@@ -367,7 +486,7 @@ class _MainScreenState extends State<MainScreen> {
 
   void _openAboutDialog() {
     showDialog(
-      context: context,
+      context: _dialogContext!,
       builder: (ctx) => const AboutSnipSnapDialog(),
     );
   }
@@ -535,7 +654,7 @@ class _MainScreenState extends State<MainScreen> {
 
   void _openShortcutSettingsDialog() {
     showDialog(
-      context: context,
+      context: _dialogContext!,
       builder: (ctx) => ShortcutSettingsDialog(
         initialShortcuts: _shortcuts,
         onShortcutsSaved: (updatedShortcuts) {
@@ -1179,7 +1298,7 @@ class _MainScreenState extends State<MainScreen> {
     if (!mounted) return;
 
     showDialog(
-      context: context,
+      context: _dialogContext!,
       builder: (ctx) => SaveAsDialog(
         initialName: _activeCapture!.title,
         onConfirm: (options) async {
@@ -1400,22 +1519,23 @@ class _MainScreenState extends State<MainScreen> {
     // here too — see `_theme`'s doc comment for why.
     final theme = _theme;
 
+    // The MaterialApp below is the app's ONLY one, and SnipThemeScope must
+    // stay above it: `showDialog` defaults to `useRootNavigator: true`, so
+    // every dialog route is pushed onto this app's navigator. Put another
+    // MaterialApp above this widget (as `main.dart` once did) and that root
+    // navigator moves above the scope — SnipThemeScope is an InheritedWidget,
+    // not an InheritedTheme, so `InheritedTheme.capture` will not carry it
+    // across the route either, and every dialog that calls
+    // `SnipTheme.of(context)` throws on open. See `main.dart`'s doc comment
+    // and `test/dialog_route_theme_test.dart`.
     return SnipThemeScope(
       theme: theme,
       child: MaterialApp(
+      navigatorKey: _navigatorKey,
       scaffoldMessengerKey: _scaffoldMessengerKey,
       title: 'SnipSnap - Screen Capture & Markup',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: theme.isDark ? Brightness.dark : Brightness.light,
-        scaffoldBackgroundColor: theme.canvas,
-        colorScheme: snipColorScheme(theme),
-        textTheme: GoogleFonts.interTextTheme(
-          theme.isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme,
-        ).apply(bodyColor: theme.ink, displayColor: theme.ink),
-        dividerColor: theme.border,
-      ),
+      theme: snipThemeData(theme),
       home: Scaffold(
         backgroundColor: theme.canvas,
         body: CallbackShortcuts(

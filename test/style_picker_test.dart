@@ -36,12 +36,20 @@ Future<void> _pump(
   required SnipThemeMode mode,
   required CanvasTool tool,
   Color selectedColor = const Color(0xFFEF4444),
+  bool isFilled = false,
+  Color? textBackgroundColor,
+  Color? fillColor,
+  bool wireFillColour = false,
 }) async {
   await tester.pumpWidget(SnipThemeScope(
     theme: SnipTheme.forMode(mode),
     child: MaterialApp(
       home: Scaffold(
         body: StylePicker(
+          textBackgroundColor: textBackgroundColor,
+          onTextBackgroundColorChanged: (_) {},
+          fillColor: fillColor,
+          onFillColorChanged: wireFillColour ? (_) {} : null,
           selectedColor: selectedColor,
           onColorChanged: (_) {},
           strokeWidth: 4.0,
@@ -50,7 +58,7 @@ Future<void> _pump(
           onOpacityChanged: (_) {},
           fontSize: 18.0,
           onFontSizeChanged: (_) {},
-          isFilled: false,
+          isFilled: isFilled,
           onFillChanged: (_) {},
           borderRadius: 8.0,
           onBorderRadiusChanged: (_) {},
@@ -187,6 +195,128 @@ void main() {
             .where((d) => d.color?.toARGB32() == t.activeFill.toARGB32())
             .toList();
         expect(activePlates, isNotEmpty, reason: '$mode: expected an activeFill-plated shape tile');
+      });
+    }
+  });
+
+  group('the checkmark inside a selected swatch is legible on its own swatch', () {
+    // Both palettes below carry translucent entries, which is what made the
+    // old hardcoded `Colors.white` glyph fail: composited over the panel,
+    // `white@0.9` put a white checkmark on a near-white pixel at 1.00:1 in
+    // light mode, and `white@0.85` / `0x66FDE047` were 1.01:1 and 1.15:1.
+    // The ring two lines above already routed through `t.ringOn`; the glyph
+    // now reuses that same result, which bottoms out at 4.59:1 across every
+    // entry here in both modes.
+    //
+    // The swatch paints directly on the panel's own `t.surface` with no
+    // intervening background, so `t.surface` is the true backdrop for the
+    // composite — the same backdrop `style_picker.dart` passes to ringOn.
+
+    const textBackgrounds = <Color>[
+      Color(0xBF000000), // Colors.black  @ 0.75
+      Color(0xE6FFFFFF), // Colors.white  @ 0.9
+      Color(0xFFFFD700),
+      Color(0xFFFF3B30),
+      Color(0xFF8A2BE2),
+      Color(0xFF007AFF),
+      Color(0xFF34C759),
+    ];
+
+    const shapeFills = <Color>[
+      Color(0xD9FFFFFF), // Colors.white @ 0.85
+      Color(0x8C000000), // Colors.black @ 0.55
+      Color(0x66FDE047),
+      Color(0x66EF4444),
+      Color(0x6610B981),
+      Color(0x660EA5E9),
+      Color(0x668B5CF6),
+    ];
+
+    /// The check glyph inside the one swatch whose fill is [swatch] — found
+    /// by walking down from that swatch's own Container so a check somewhere
+    /// else in the panel cannot be mistaken for it.
+    Color checkColourFor(WidgetTester tester, Color swatch) {
+      final container = find.byWidgetPredicate((w) =>
+          w is Container &&
+          w.decoration is BoxDecoration &&
+          (w.decoration! as BoxDecoration).shape == BoxShape.circle &&
+          (w.decoration! as BoxDecoration).color?.toARGB32() == swatch.toARGB32());
+      expect(container, findsOneWidget, reason: 'no swatch painted $swatch');
+
+      final icon = tester.widget<Icon>(find.descendant(
+        of: container,
+        matching: find.byIcon(Icons.check_rounded),
+      ));
+      return icon.color!;
+    }
+
+    for (final mode in SnipThemeMode.values) {
+      final t = SnipTheme.forMode(mode);
+
+      for (final swatch in textBackgrounds) {
+        testWidgets(
+            '$mode: text-background ${swatch.toARGB32().toRadixString(16)} '
+            'checkmark clears 3:1', (tester) async {
+          await _pump(
+            tester,
+            mode: mode,
+            tool: CanvasTool.text,
+            isFilled: true,
+            textBackgroundColor: swatch,
+          );
+
+          final check = checkColourFor(tester, swatch);
+          // Score against the pixel a viewer actually sees, not the raw
+          // unpremultiplied RGB — the distinction SnipTheme.ringOn's
+          // `backdrop:` parameter exists to enforce.
+          final composited = Color.alphaBlend(swatch, t.surface);
+          final ratio = _contrast(check, composited);
+          expect(ratio, greaterThanOrEqualTo(3.0),
+              reason: '$mode: check $check on $swatch (composited $composited) '
+                  'only clears ${ratio.toStringAsFixed(2)}:1');
+          expect(check, t.ringOn(swatch, backdrop: t.surface),
+              reason: '$mode: the glyph must reuse the ring colour, not pick its own');
+        });
+      }
+
+      for (final swatch in shapeFills) {
+        testWidgets(
+            '$mode: shape-fill ${swatch.toARGB32().toRadixString(16)} '
+            'checkmark clears 3:1', (tester) async {
+          await _pump(
+            tester,
+            mode: mode,
+            tool: CanvasTool.shape,
+            isFilled: true,
+            wireFillColour: true,
+            fillColor: swatch,
+          );
+
+          final check = checkColourFor(tester, swatch);
+          final composited = Color.alphaBlend(swatch, t.surface);
+          final ratio = _contrast(check, composited);
+          expect(ratio, greaterThanOrEqualTo(3.0),
+              reason: '$mode: check $check on $swatch (composited $composited) '
+                  'only clears ${ratio.toStringAsFixed(2)}:1');
+          expect(check, t.ringOn(swatch, backdrop: t.surface),
+              reason: '$mode: the glyph must reuse the ring colour, not pick its own');
+        });
+      }
+    }
+
+    for (final mode in SnipThemeMode.values) {
+      testWidgets('$mode: a plain white checkmark would have failed this sweep',
+          (tester) async {
+        // The other half of the assertion: proves the sweep above is capable
+        // of catching the bug it was written for, rather than passing because
+        // every entry happens to be dark.
+        final t = SnipTheme.forMode(mode);
+        final worst = [...textBackgrounds, ...shapeFills]
+            .map((c) => _contrast(Colors.white, Color.alphaBlend(c, t.surface)))
+            .reduce(math.min);
+        expect(worst, lessThan(3.0),
+            reason: '$mode: hardcoded white bottoms out at '
+                '${worst.toStringAsFixed(2)}:1 across these presets');
       });
     }
   });

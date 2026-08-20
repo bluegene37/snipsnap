@@ -1405,6 +1405,14 @@ class StylePicker extends StatelessWidget {
                       const Color(0xFF34C759),
                     ].map((bgC) {
                       final isSelected = isFilled && textBackgroundColor?.toARGB32() == bgC.toARGB32();
+                      // One ringOn result drives BOTH the ring and the
+                      // checkmark inside it. The glyph sits directly on the
+                      // composited swatch, so a hardcoded white one hit
+                      // 1.00:1 on `white@0.9` in light mode — literally
+                      // invisible. ringOn bottoms out at 4.59:1 across this
+                      // palette in both modes (see
+                      // `test/style_picker_test.dart`'s checkmark sweep).
+                      final ring = isSelected ? t.ringOn(bgC, backdrop: t.surface) : null;
                       return GestureDetector(
                         onTap: () {
                           onTextBackgroundColorChanged?.call(bgC);
@@ -1422,11 +1430,13 @@ class StylePicker extends StatelessWidget {
                               // on the panel's own bgColor (t.surface, no
                               // intervening background), which is the true
                               // backdrop for the composite.
-                              color: isSelected ? t.ringOn(bgC, backdrop: t.surface) : t.border,
+                              color: ring ?? t.border,
                               width: isSelected ? 2.5 : 1,
                             ),
                           ),
-                          child: isSelected ? const Icon(Icons.check_rounded, size: 14, color: Colors.white) : null,
+                          child: ring == null
+                              ? null
+                              : Icon(Icons.check_rounded, size: 14, color: ring),
                         ),
                       );
                     }),
@@ -1498,6 +1508,12 @@ class StylePicker extends StatelessWidget {
                       const Color(0x668B5CF6),
                     ].map((c) {
                       final isSelected = fillColor?.toARGB32() == c.toARGB32();
+                      // Same pairing as the text-background palette above:
+                      // one ringOn result for the ring AND the checkmark
+                      // drawn inside it. Hardcoded white measured 1.01:1 on
+                      // `white@0.85` and 1.15:1 on `0x66FDE047` in light
+                      // mode; ringOn's worst case here is 5.08:1.
+                      final ring = isSelected ? t.ringOn(c, backdrop: t.surface) : null;
                       return GestureDetector(
                         onTap: () => onFillColorChanged!(c),
                         child: Container(
@@ -1512,13 +1528,13 @@ class StylePicker extends StatelessWidget {
                               // this swatch also paints directly on the
                               // panel's t.surface, same as the text-background
                               // palette above.
-                              color: isSelected ? t.ringOn(c, backdrop: t.surface) : t.border,
+                              color: ring ?? t.border,
                               width: isSelected ? 2.5 : 1,
                             ),
                           ),
-                          child: isSelected
-                              ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
-                              : null,
+                          child: ring == null
+                              ? null
+                              : Icon(Icons.check_rounded, size: 14, color: ring),
                         ),
                       );
                     }),
