@@ -86,13 +86,13 @@ class ToolProperties {
 
   static Map<CanvasTool, ToolProperties> createDefaults() {
     return {
-      CanvasTool.select: const ToolProperties(activeColor: AppColors.accent),
+      CanvasTool.select: const ToolProperties(activeColor: AppDefaults.defaultColor),
       CanvasTool.pen: const ToolProperties(
           activeColor: Color(0xFFEF4444), strokeWidth: 3.0, opacity: 1.0, hasShadow: true),
       CanvasTool.arrow: const ToolProperties(
-          activeColor: AppColors.accent, strokeWidth: 3.5, opacity: 1.0, hasShadow: true),
+          activeColor: AppDefaults.defaultColor, strokeWidth: 3.5, opacity: 1.0, hasShadow: true),
       CanvasTool.line: const ToolProperties(
-          activeColor: AppColors.accent, strokeWidth: 3.0, opacity: 1.0, hasShadow: true),
+          activeColor: AppDefaults.defaultColor, strokeWidth: 3.0, opacity: 1.0, hasShadow: true),
       CanvasTool.shape: const ToolProperties(
           activeColor: Color(0xFF0EA5E9),
           strokeWidth: 3.0,
@@ -106,7 +106,7 @@ class ToolProperties {
           textBackgroundColor: Color(0xCC000000),
           opacity: 1.0),
       CanvasTool.stepMarker: const ToolProperties(
-          activeColor: AppColors.accent, fontSize: 16.0, stepCounter: 1, opacity: 1.0),
+          activeColor: AppDefaults.defaultColor, fontSize: 16.0, stepCounter: 1, opacity: 1.0),
       CanvasTool.highlight: const ToolProperties(
           activeColor: Color(0xFFFDE047), strokeWidth: 18.0, opacity: 1.0),
       CanvasTool.blur: const ToolProperties(
@@ -119,9 +119,9 @@ class ToolProperties {
           fillTolerance: 15.0,
           opacity: 1.0,
           isGlobalFill: false),
-      CanvasTool.colorPicker: const ToolProperties(activeColor: AppColors.accent),
-      CanvasTool.ocr: const ToolProperties(activeColor: AppColors.accent),
-      CanvasTool.crop: const ToolProperties(activeColor: AppColors.accent),
+      CanvasTool.colorPicker: const ToolProperties(activeColor: AppDefaults.defaultColor),
+      CanvasTool.ocr: const ToolProperties(activeColor: AppDefaults.defaultColor),
+      CanvasTool.crop: const ToolProperties(activeColor: AppDefaults.defaultColor),
     };
   }
 }

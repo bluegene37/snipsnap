@@ -22,14 +22,12 @@ class OcrResultPanel extends StatelessWidget {
   final String? unavailableReason;
   final VoidCallback onClose;
   final ValueChanged<String> onInsertAsText;
-  final bool isDarkMode;
 
   const OcrResultPanel({
     super.key,
     required this.result,
     required this.onClose,
     required this.onInsertAsText,
-    required this.isDarkMode,
     this.isLoading = false,
     this.unavailableReason,
   });

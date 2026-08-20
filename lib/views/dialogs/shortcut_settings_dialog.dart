@@ -8,13 +8,11 @@ import '../../utils/snip_theme.dart';
 class ShortcutSettingsDialog extends StatefulWidget {
   final Map<AppShortcutAction, CustomShortcut> initialShortcuts;
   final ValueChanged<Map<AppShortcutAction, CustomShortcut>> onShortcutsSaved;
-  final bool isDarkMode;
 
   const ShortcutSettingsDialog({
     super.key,
     required this.initialShortcuts,
     required this.onShortcutsSaved,
-    this.isDarkMode = true,
   });
 
   @override

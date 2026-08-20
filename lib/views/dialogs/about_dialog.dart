@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import '../../utils/snip_theme.dart';
 
 class AboutSnipSnapDialog extends StatelessWidget {
-  final bool isDarkMode;
-
-  const AboutSnipSnapDialog({super.key, this.isDarkMode = true});
+  const AboutSnipSnapDialog({super.key});
 
   @override
   Widget build(BuildContext context) {

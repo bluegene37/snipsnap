@@ -13,7 +13,6 @@ class GallerySidebar extends StatelessWidget {
   final VoidCallback onClose;
   final VoidCallback? onOpenLibraryLocation;
   final ValueChanged<CaptureItem>? onRevealItemInFolder;
-  final bool isDarkMode;
 
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
@@ -27,7 +26,6 @@ class GallerySidebar extends StatelessWidget {
     required this.onClose,
     this.onOpenLibraryLocation,
     this.onRevealItemInFolder,
-    this.isDarkMode = true,
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
   });

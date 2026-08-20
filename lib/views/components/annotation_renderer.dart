@@ -866,7 +866,7 @@ class AnnotationRenderer {
     canvas.drawRRect(
       rrect,
       Paint()
-        ..color = AppColors.accent.withValues(alpha: 0.45)
+        ..color = AppDefaults.defaultColor.withValues(alpha: 0.45)
         ..strokeWidth = 1.2
         ..style = PaintingStyle.stroke,
     );
@@ -1044,14 +1044,14 @@ class AnnotationRenderer {
     canvas.drawRRect(
       RRect.fromRectAndRadius(bounds, const Radius.circular(6)),
       Paint()
-        ..color = AppColors.accent
+        ..color = AppDefaults.defaultColor
         ..strokeWidth = 1.5
         ..style = PaintingStyle.stroke,
     );
 
     final handleFill = Paint()..color = Colors.white..style = PaintingStyle.fill;
     final handleBorder = Paint()
-      ..color = AppColors.accent
+      ..color = AppDefaults.defaultColor
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke;
 
@@ -1062,7 +1062,7 @@ class AnnotationRenderer {
 
     final topCenter = bounds.topCenter;
     final rotHandle = topCenter - const Offset(0, rotationHandleGap);
-    canvas.drawLine(topCenter, rotHandle, Paint()..color = AppColors.accent..strokeWidth = 1.5);
+    canvas.drawLine(topCenter, rotHandle, Paint()..color = AppDefaults.defaultColor..strokeWidth = 1.5);
     canvas.drawCircle(rotHandle, 5.5, handleFill);
     canvas.drawCircle(rotHandle, 5.5, handleBorder);
 
@@ -1114,7 +1114,7 @@ class AnnotationRenderer {
       canvas,
       center: Offset(bounds.center.dx, bounds.top - 16),
       text: label,
-      background: AppColors.accent,
+      background: AppDefaults.defaultColor,
     );
   }
 }

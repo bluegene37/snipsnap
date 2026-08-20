@@ -182,9 +182,9 @@ class _MainScreenState extends State<MainScreen> {
   bool _isSidebarOpen = true;
   bool _isPropertiesOpen = true;
   bool _isCapturing = false;
-  bool _isDarkMode = true;
+  bool _darkMode = true;
 
-  /// The resolved theme for the current [_isDarkMode] state.
+  /// The resolved theme for the current [_darkMode] state.
   ///
   /// `MainScreen` is the widget that *establishes* [SnipThemeScope] — its
   /// `build()` constructs and returns it (see below). That means this
@@ -201,7 +201,7 @@ class _MainScreenState extends State<MainScreen> {
   /// mounted with its own BuildContext genuinely inside the scope this
   /// build() constructs, and should read via `SnipTheme.of(context)` instead.
   SnipTheme get _theme =>
-      SnipTheme.forMode(_isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light);
+      SnipTheme.forMode(_darkMode ? SnipThemeMode.dark : SnipThemeMode.light);
 
   String? _selectedAnnotationId;
 
@@ -353,22 +353,22 @@ class _MainScreenState extends State<MainScreen> {
     final pref = await DatabaseService.getSetting('theme_mode');
     if (pref != null && mounted) {
       setState(() {
-        _isDarkMode = pref == 'dark';
+        _darkMode = pref == 'dark';
       });
     }
   }
 
   void _toggleThemeMode() {
     setState(() {
-      _isDarkMode = !_isDarkMode;
+      _darkMode = !_darkMode;
     });
-    DatabaseService.setSetting('theme_mode', _isDarkMode ? 'dark' : 'light');
+    DatabaseService.setSetting('theme_mode', _darkMode ? 'dark' : 'light');
   }
 
   void _openAboutDialog() {
     showDialog(
       context: context,
-      builder: (ctx) => AboutSnipSnapDialog(isDarkMode: _isDarkMode),
+      builder: (ctx) => const AboutSnipSnapDialog(),
     );
   }
 
@@ -538,7 +538,6 @@ class _MainScreenState extends State<MainScreen> {
       context: context,
       builder: (ctx) => ShortcutSettingsDialog(
         initialShortcuts: _shortcuts,
-        isDarkMode: _isDarkMode,
         onShortcutsSaved: (updatedShortcuts) {
           setState(() {
             _shortcuts = updatedShortcuts;
@@ -1183,7 +1182,6 @@ class _MainScreenState extends State<MainScreen> {
       context: context,
       builder: (ctx) => SaveAsDialog(
         initialName: _activeCapture!.title,
-        isDarkMode: _isDarkMode,
         onConfirm: (options) async {
           await Future.delayed(const Duration(milliseconds: 150));
           final gradient = (options.gradientIndex != null &&
@@ -1449,7 +1447,6 @@ class _MainScreenState extends State<MainScreen> {
                 canClear: _annotations.isNotEmpty,
                 hasCapture: _activeCapture != null,
                 isSidebarOpen: _isSidebarOpen,
-                isDarkMode: _isDarkMode,
                 shortcuts: _shortcuts,
                 zoomScale: _zoomScale,
                 onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
@@ -1470,7 +1467,6 @@ class _MainScreenState extends State<MainScreen> {
                           onShapeKindSelected: (kind) => _updateActiveToolProperty(shapeKind: kind),
                           isSidebarOpen: _isSidebarOpen,
                           onToggleSidebar: () => setState(() => _isSidebarOpen = !_isSidebarOpen),
-                          isDarkMode: _isDarkMode,
                         ),
 
                         // Editor Canvas
@@ -1565,7 +1561,6 @@ class _MainScreenState extends State<MainScreen> {
                               'loaded. Try reselecting this capture.',
                             ),
                             repaintBoundaryKey: _repaintKey,
-                            isDarkMode: _isDarkMode,
                             zoomScale: _zoomScale,
                             onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
                             imageRevision: _imageRevision,
@@ -1621,7 +1616,6 @@ class _MainScreenState extends State<MainScreen> {
                                   isGlobalFill: _currentToolProperties.isGlobalFill,
                                   onGlobalFillChanged: (g) => _updateActiveToolProperty(isGlobalFill: g),
                                   activeTool: _activeTool,
-                                  isDarkMode: _isDarkMode,
                                   stepCounter: _stepCounter,
                                   onResetStepCounter: () => setState(() => _stepCounter = 1),
                                   onRenumberSteps: _renumberStepMarkers,
@@ -1691,7 +1685,6 @@ class _MainScreenState extends State<MainScreen> {
                           result: _ocrResult!,
                           isLoading: _isOcrRunning,
                           unavailableReason: _ocrUnavailableReason,
-                          isDarkMode: _isDarkMode,
                           onClose: () => setState(() {
                             _ocrRequestToken++;
                             _ocrResult = null;
@@ -1739,7 +1732,6 @@ class _MainScreenState extends State<MainScreen> {
                 GallerySidebar(
                   items: _captures,
                   activeItem: _activeCapture,
-                  isDarkMode: _isDarkMode,
                   zoomScale: _zoomScale,
                   onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
                   onSelectItem: (item) {

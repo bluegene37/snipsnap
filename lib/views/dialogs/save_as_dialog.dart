@@ -30,13 +30,11 @@ class SaveOptions {
 
 class SaveAsDialog extends StatefulWidget {
   final String initialName;
-  final bool isDarkMode;
   final ValueChanged<SaveOptions> onConfirm;
 
   const SaveAsDialog({
     super.key,
     required this.initialName,
-    this.isDarkMode = true,
     required this.onConfirm,
   });
 

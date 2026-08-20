@@ -20,7 +20,6 @@ Future<void> _pump(WidgetTester tester, {required SnipThemeMode mode}) async {
             onCropRectChanged: (_) {},
             onApplyCrop: () {},
             onCancelCrop: () {},
-            isDarkMode: mode == SnipThemeMode.dark,
           ),
         ),
       ),

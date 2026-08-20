@@ -7,7 +7,6 @@ class CropOverlayWidget extends StatefulWidget {
   final ValueChanged<Rect> onCropRectChanged;
   final VoidCallback onApplyCrop;
   final VoidCallback onCancelCrop;
-  final bool isDarkMode;
 
   const CropOverlayWidget({
     super.key,
@@ -15,7 +14,6 @@ class CropOverlayWidget extends StatefulWidget {
     required this.onCropRectChanged,
     required this.onApplyCrop,
     required this.onCancelCrop,
-    required this.isDarkMode,
   });
 
   @override

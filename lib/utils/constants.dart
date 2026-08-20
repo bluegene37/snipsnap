@@ -69,27 +69,8 @@ enum BlurType {
 }
 
 class AppColors {
-  // Electric Violet Theme (Shottr-style Pro Theme)
-  static const Color accent = Color(0xFF8B5CF6);
-  static const Color accentHover = Color(0xFFA78BFA);
-  static const Color blueAccent = Color(0xFF0EA5E9);
-  static const Color greenAccent = Color(0xFF10B981);
-
-  // Dark Sleek Slate-Violet Theme Colors
-  static const Color darkBg = Color(0xFF13111C);
-  static const Color darkSurface = Color(0xFF1E1B2E);
-  static const Color darkSurfaceVariant = Color(0xFF2D2942);
-  static const Color sidebarBg = Color(0xFF161424);
-  static const Color canvasBg = Color(0xFF101014);
-
-  // Light Ivory-Violet Theme Colors
-  static const Color lightBg = Color(0xFFFBFBFE);
-  static const Color lightSurface = Color(0xFFFFFFFF);
-  static const Color lightSurfaceVariant = Color(0xFFF3F0FA);
-  static const Color sidebarBgLight = Color(0xFFF7F5FC);
-  static const Color canvasBgLight = Color(0xFFEFEBF7);
-
-  // Electric Violet & Complementary Annotation Palette
+  // Annotation swatch palette — user data, rendered in real colour. Not
+  // chrome, and not part of the skeleton token system in lib/utils/snip_theme.dart.
   static const List<Color> palette = [
     Color(0xFFEF4444), // Crimson Red
     Color(0xFFF97316), // Vibrant Orange

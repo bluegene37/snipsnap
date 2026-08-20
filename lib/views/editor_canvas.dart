@@ -72,7 +72,6 @@ class EditorCanvas extends StatefulWidget {
   /// emits hundreds of live updates and must not become hundreds of toasts.
   final VoidCallback? onEditUnplaceable;
   final GlobalKey repaintBoundaryKey;
-  final bool isDarkMode;
   final double opacity;
   final double rotation;
   final Color? textBackgroundColor;
@@ -117,7 +116,6 @@ class EditorCanvas extends StatefulWidget {
     this.onImageBytesChanged,
     this.onEditUnplaceable,
     required this.repaintBoundaryKey,
-    this.isDarkMode = false,
     this.opacity = 1.0,
     this.rotation = 0.0,
     this.zoomScale = 1.0,

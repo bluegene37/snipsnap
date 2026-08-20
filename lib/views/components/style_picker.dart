@@ -29,7 +29,6 @@ class StylePicker extends StatelessWidget {
   final double rotation;
   final ValueChanged<double>? onRotationChanged;
   final CanvasTool activeTool;
-  final bool isDarkMode;
   final VoidCallback? onFlattenCanvas;
   final VoidCallback? onCloseDrawer;
   final int stepCounter;
@@ -80,7 +79,6 @@ class StylePicker extends StatelessWidget {
     this.rotation = 0.0,
     this.onRotationChanged,
     required this.activeTool,
-    this.isDarkMode = true,
     this.onFlattenCanvas,
     this.onCloseDrawer,
     this.stepCounter = 1,

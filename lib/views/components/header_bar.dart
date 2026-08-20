@@ -37,7 +37,6 @@ class HeaderBar extends StatelessWidget {
   final VoidCallback? onToggleProperties;
   final bool isPropertiesOpen;
   final bool isSidebarOpen;
-  final bool isDarkMode;
   final bool hasCapture;
   final Map<AppShortcutAction, CustomShortcut>? shortcuts;
   final double zoomScale;
@@ -65,7 +64,6 @@ class HeaderBar extends StatelessWidget {
     required this.canRedo,
     this.canClear = false,
     required this.isSidebarOpen,
-    this.isDarkMode = true,
     this.hasCapture = false,
     this.shortcuts,
     this.zoomScale = 1.0,
@@ -495,8 +493,8 @@ class HeaderBar extends StatelessWidget {
           _overflowItem(
             t,
             'theme',
-            isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-            isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+            t.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+            t.isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
           ),
           _overflowItem(t, 'about', Icons.info_outline_rounded, 'About SnipSnap'),
         ],

@@ -75,7 +75,6 @@ class ToolSidebar extends StatelessWidget {
   final ValueChanged<ShapeKind>? onShapeKindSelected;
   final bool isSidebarOpen;
   final VoidCallback? onToggleSidebar;
-  final bool isDarkMode;
 
   const ToolSidebar({
     super.key,
@@ -85,7 +84,6 @@ class ToolSidebar extends StatelessWidget {
     this.onShapeKindSelected,
     this.isSidebarOpen = true,
     this.onToggleSidebar,
-    this.isDarkMode = true,
   });
 
   static const tools = [

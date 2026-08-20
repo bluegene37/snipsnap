@@ -42,7 +42,6 @@ Future<void> _pump(
             result: result,
             isLoading: isLoading,
             unavailableReason: unavailableReason,
-            isDarkMode: true,
             onClose: onClose ?? () {},
             onInsertAsText: onInsertAsText ?? (_) {},
           ),

@@ -39,7 +39,6 @@ Widget _harness({
             canClear: canClear,
             hasCapture: hasCapture,
             isSidebarOpen: true,
-            isDarkMode: isDarkMode,
           ),
         ),
       ),
