@@ -1112,21 +1112,37 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   // Crop geometry
   // ---------------------------------------------------------------------------
 
+  /// Which part of [cropRect] sits under [pos] — a corner, an edge, its body,
+  /// or nothing.
+  ///
+  /// The grab bands shrink with the rect instead of staying a flat 18px. At
+  /// that fixed size anything under about 72px square was *entirely* edge:
+  /// marquee a short word to cut it and there was no interior left to grab, so
+  /// the one thing you could not do with the selection was move it. Each band
+  /// is capped at a quarter of the side it runs along, which leaves at least
+  /// half the rect draggable at every size, and the cap only binds on small
+  /// rects — a comfortable selection keeps the full 18px.
   _CropHandle _hitTestCropRect(Offset pos, Rect cropRect) {
-    const handleRadius = 18.0;
+    const maxHandleRadius = 18.0;
+    final bandX = math.min(maxHandleRadius, cropRect.width / 4);
+    final bandY = math.min(maxHandleRadius, cropRect.height / 4);
+    // Corners are round, so they answer to the tighter of the two.
+    final cornerRadius = math.min(bandX, bandY);
 
-    if ((pos - cropRect.topLeft).distance <= handleRadius) return _CropHandle.topLeft;
-    if ((pos - cropRect.topRight).distance <= handleRadius) return _CropHandle.topRight;
-    if ((pos - cropRect.bottomLeft).distance <= handleRadius) return _CropHandle.bottomLeft;
-    if ((pos - cropRect.bottomRight).distance <= handleRadius) return _CropHandle.bottomRight;
+    if ((pos - cropRect.topLeft).distance <= cornerRadius) return _CropHandle.topLeft;
+    if ((pos - cropRect.topRight).distance <= cornerRadius) return _CropHandle.topRight;
+    if ((pos - cropRect.bottomLeft).distance <= cornerRadius) return _CropHandle.bottomLeft;
+    if ((pos - cropRect.bottomRight).distance <= cornerRadius) {
+      return _CropHandle.bottomRight;
+    }
 
-    final withinX = pos.dx >= cropRect.left - handleRadius && pos.dx <= cropRect.right + handleRadius;
-    final withinY = pos.dy >= cropRect.top - handleRadius && pos.dy <= cropRect.bottom + handleRadius;
+    final withinX = pos.dx >= cropRect.left - bandX && pos.dx <= cropRect.right + bandX;
+    final withinY = pos.dy >= cropRect.top - bandY && pos.dy <= cropRect.bottom + bandY;
 
-    if ((pos.dy - cropRect.top).abs() <= handleRadius && withinX) return _CropHandle.top;
-    if ((pos.dy - cropRect.bottom).abs() <= handleRadius && withinX) return _CropHandle.bottom;
-    if ((pos.dx - cropRect.left).abs() <= handleRadius && withinY) return _CropHandle.left;
-    if ((pos.dx - cropRect.right).abs() <= handleRadius && withinY) return _CropHandle.right;
+    if ((pos.dy - cropRect.top).abs() <= bandY && withinX) return _CropHandle.top;
+    if ((pos.dy - cropRect.bottom).abs() <= bandY && withinX) return _CropHandle.bottom;
+    if ((pos.dx - cropRect.left).abs() <= bandX && withinY) return _CropHandle.left;
+    if ((pos.dx - cropRect.right).abs() <= bandX && withinY) return _CropHandle.right;
 
     if (cropRect.contains(pos)) return _CropHandle.move;
     return _CropHandle.none;
