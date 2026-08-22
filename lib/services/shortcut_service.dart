@@ -23,10 +23,13 @@ class ShortcutService {
       ctrl: !Platform.isMacOS,
       shift: true,
     ),
+    // Digit 5 would be the obvious third slot, but Cmd+Shift+3/4/5 are the
+    // macOS system screenshot chords — the OS wins, our registration is
+    // shadowed, and pressing it appears to do nothing. Digit 6 is free.
     AppShortcutAction.timerSnip: CustomShortcut(
       action: AppShortcutAction.timerSnip,
-      keyId: LogicalKeyboardKey.digit5.keyId,
-      keyLabel: '5',
+      keyId: LogicalKeyboardKey.digit6.keyId,
+      keyLabel: '6',
       meta: Platform.isMacOS,
       ctrl: !Platform.isMacOS,
       shift: true,
@@ -114,10 +117,33 @@ class ShortcutService {
     await DatabaseService.saveShortcutsToDb(shortcuts);
   }
 
-  static Future<void> registerGlobalHotKeys({
+  /// Chords the OS claims for itself. Registering one of these succeeds
+  /// silently and then never fires, so the settings UI rejects them up front
+  /// rather than letting the user configure a dead shortcut.
+  static bool isReservedBySystem(CustomShortcut shortcut) {
+    if (!Platform.isMacOS) return false;
+    // Compared by keyId rather than as a const Set of LogicalKeyboardKey,
+    // which the analyzer rejects: the type overrides `==`.
+    const systemScreenshotKeyIds = {0x33, 0x34, 0x35}; // digits 3, 4, 5
+    return shortcut.meta &&
+        shortcut.shift &&
+        !shortcut.ctrl &&
+        !shortcut.alt &&
+        systemScreenshotKeyIds.contains(shortcut.keyId);
+  }
+
+  /// Registers the OS-wide capture hotkeys, returning the actions whose chord
+  /// the system refused.
+  ///
+  /// Returning them rather than only logging is the point: a refused chord used
+  /// to abort the rest of the loop from inside one shared `try`, so a single
+  /// conflict silently cost the user every hotkey after it — and they were
+  /// never told about any of it.
+  static Future<Set<AppShortcutAction>> registerGlobalHotKeys({
     required Map<AppShortcutAction, CustomShortcut> shortcuts,
     required Function(AppShortcutAction action) onHotKeyTriggered,
   }) async {
+    final failed = <AppShortcutAction>{};
     try {
       await hotKeyManager.unregisterAll();
 
@@ -145,15 +171,34 @@ class ShortcutService {
           scope: HotKeyScope.system,
         );
 
-        await hotKeyManager.register(
-          hotKey,
-          keyDownHandler: (hotKey) {
-            onHotKeyTriggered(action);
-          },
-        );
+        try {
+          await hotKeyManager.register(
+            hotKey,
+            keyDownHandler: (hotKey) {
+              onHotKeyTriggered(action);
+            },
+          );
+          if (isReservedBySystem(custom)) failed.add(action);
+        } catch (e) {
+          // Scoped per hotkey so one refusal cannot abandon the others.
+          debugPrint('SnipSnap could not register ${action.name}: $e');
+          failed.add(action);
+        }
       }
     } catch (e) {
       debugPrint('SnipSnap shortcut error: $e');
+    }
+    return failed;
+  }
+
+  /// Releases every global hotkey. Called on app exit so nothing outlives the
+  /// process — today the OS reclaims them anyway, but that stops being true the
+  /// moment this app grows a background or menu-bar mode.
+  static Future<void> unregisterGlobalHotKeys() async {
+    try {
+      await hotKeyManager.unregisterAll();
+    } catch (e) {
+      debugPrint('SnipSnap shortcut teardown error: $e');
     }
   }
 }

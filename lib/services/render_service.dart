@@ -163,8 +163,14 @@ class RenderService {
       canvas.restore();
 
       final picture = recorder.endRecording();
-      final rendered = await picture.toImage(outWidth, outHeight);
-      picture.dispose();
+      // `finally`, not a trailing call: a very large framed export can throw
+      // out of `toImage`, and the Picture's native handle would leak with it.
+      final ui.Image rendered;
+      try {
+        rendered = await picture.toImage(outWidth, outHeight);
+      } finally {
+        picture.dispose();
+      }
 
       try {
         final byteData = await rendered.toByteData(format: ui.ImageByteFormat.png);

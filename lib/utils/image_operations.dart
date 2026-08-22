@@ -3,6 +3,44 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
+/// Arguments for [floodFillPng]. `compute` passes exactly one argument and its
+/// entry point must be top-level or static, so the parameters travel as a
+/// record and the bitmap crosses the isolate boundary as encoded bytes rather
+/// than as a decoded [img.Image] — a 5K capture is ~59 MB decoded and a small
+/// fraction of that as PNG.
+typedef FloodFillRequest = ({
+  Uint8List pngBytes,
+  int startX,
+  int startY,
+  int fillArgb,
+  double tolerancePercent,
+  double opacity,
+  bool isGlobal,
+});
+
+/// Runs [ImageOperations.floodFill] off the UI isolate, returning the re-encoded
+/// PNG, or null when nothing matched (or the bytes could not be decoded).
+///
+/// Top-level rather than a static method so it is a valid `compute` entry
+/// point. A global fill on a 5K capture is 14.7 M pixel visits through the
+/// `image` package's accessor objects; on the UI isolate that is seconds of a
+/// frozen window.
+Uint8List? floodFillPng(FloodFillRequest req) {
+  final image = img.decodeImage(req.pngBytes);
+  if (image == null) return null;
+  final changed = ImageOperations.floodFill(
+    image: image,
+    startX: req.startX,
+    startY: req.startY,
+    fillColor: Color(req.fillArgb),
+    tolerancePercent: req.tolerancePercent,
+    opacity: req.opacity,
+    isGlobal: req.isGlobal,
+  );
+  if (!changed) return null;
+  return Uint8List.fromList(img.encodePng(image));
+}
+
 /// Clean, high-performance bitmap operations for Snipsnap (Fill, Selection, Crop/Expand).
 class ImageOperations {
   const ImageOperations._();

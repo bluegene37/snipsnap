@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import FlutterMacOS
 
 /// Native macOS Screen Capture Plugin.
@@ -44,6 +45,23 @@ class CapturePlugin: NSObject {
         return
       }
       captureFullScreen(targetPath: targetPath, result: result)
+
+    case "screenCaptureAuthorized":
+      // Preflight first: it never prompts, so a granted app pays nothing.
+      // Only request when it comes back false, which puts the system dialog at
+      // the moment the user actually asked to capture.
+      //
+      // Without this, a missing grant is invisible: CGWindowListCreateImage
+      // quietly returns desktop wallpaper with no windows in it, and
+      // `screencapture` exits 0 having written a file — so every guard on the
+      // Dart side passes and the user just gets a blank-looking capture.
+      if CGPreflightScreenCaptureAccess() {
+        result(true)
+      } else {
+        // Returns false on first call; the grant only takes effect after a
+        // relaunch, which is why the Dart side words its message that way.
+        result(CGRequestScreenCaptureAccess())
+      }
 
     default:
       result(FlutterMethodNotImplemented)
@@ -252,6 +270,17 @@ private class CaptureOverlayView: NSView {
   private var currentPoint: NSPoint?
   private var isDragging: Bool = false
 
+  /// Whether this overlay has already handed back a result.
+  ///
+  /// The Flutter call is awaiting exactly one answer, and there is more than
+  /// one way for a second one to arrive: cancelling mid-drag (a key press or a
+  /// right-click) leaves the drag state intact, so the mouse-up that follows
+  /// still ran the whole capture path and wrote a PNG to the target path — a
+  /// screenshot the user had just cancelled, which the library scan then
+  /// adopted on next launch. Teardown usually deallocates this view first, but
+  /// nothing orders those two, so the latch is what actually guarantees it.
+  private var hasSettled = false
+
   init(
     frame: NSRect,
     screenImage: CGImage?,
@@ -294,24 +323,43 @@ private class CaptureOverlayView: NSView {
     needsDisplay = true
   }
 
+  /// Hands back a captured image, once.
+  private func settle(with image: CGImage?) {
+    guard !hasSettled else { return }
+    hasSettled = true
+    isDragging = false
+    onCapture(image)
+  }
+
+  /// Cancels the capture, once.
+  private func settleCancelled() {
+    guard !hasSettled else { return }
+    hasSettled = true
+    isDragging = false
+    onCancel()
+  }
+
   override func mouseUp(with event: NSEvent) {
     guard isDragging, let start = startPoint, let end = currentPoint else {
-      isDragging = false
+      // An unpaired mouse-up still has to settle the capture. The Flutter side
+      // is awaiting this call and nothing else resolves it, so returning
+      // silently left the app behind its "Waiting for screen capture..." scrim
+      // with no way out but a restart.
+      settleCancelled()
       return
     }
-    isDragging = false
 
     let rect = normalizedRect(from: start, to: end)
 
     // Single click (drag distance < 5px): Capture whole screen!
     if rect.width < 5.0 && rect.height < 5.0 {
-      onCapture(screenImage)
+      settle(with: screenImage)
       return
     }
 
     // Dragged area: Crop to selected rectangle
     guard let screenImage = screenImage else {
-      onCapture(nil)
+      settle(with: nil)
       return
     }
 
@@ -335,19 +383,19 @@ private class CaptureOverlayView: NSView {
 
     if cropRect.width > 0 && cropRect.height > 0,
        let cropped = screenImage.cropping(to: cropRect) {
-      onCapture(cropped)
+      settle(with: cropped)
     } else {
-      onCapture(screenImage)
+      settle(with: screenImage)
     }
   }
 
   override func rightMouseDown(with event: NSEvent) {
-    onCancel()
+    settleCancelled()
   }
 
   override func keyDown(with event: NSEvent) {
     // Any key press escapes and cancels screenshot
-    onCancel()
+    settleCancelled()
   }
 
   // MARK: - Drawing
@@ -387,7 +435,7 @@ private class CaptureOverlayView: NSView {
       if selRect.width > 40 && selRect.height > 25 {
         let pixelW = Int(selRect.width * scaleFactor)
         let pixelH = Int(selRect.height * scaleFactor)
-        let text = "\(pixelW) × \(pixelH)"
+        let text = "\(pixelW) × \(pixelH) px"
 
         let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
         let attrs: [NSAttributedString.Key: Any] = [

@@ -101,6 +101,16 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
         alt: alt,
       );
 
+      // Chords the OS keeps for itself register without error and then never
+      // fire, so they have to be refused here — otherwise the user configures a
+      // shortcut that silently does nothing and blames the app.
+      if (ShortcutService.isReservedBySystem(newShortcut)) {
+        setState(() {
+          _errorMessage = 'The system already uses this shortcut. Pick another.';
+        });
+        return;
+      }
+
       // Check collision
       AppShortcutAction? conflictingAction;
       for (final entry in _shortcuts.entries) {

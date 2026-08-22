@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show AppExitResponse;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -248,6 +249,17 @@ class _MainScreenState extends State<MainScreen> {
   final List<CanvasSnapshot> _undoStack = [];
   final List<CanvasSnapshot> _redoStack = [];
   static const int _maxUndoSteps = 80;
+
+  /// Ceiling on the bitmap pixels the history is allowed to retain.
+  ///
+  /// The step count alone is not a bound. A snapshot that reversed a crop,
+  /// flatten, flood fill or cut carries a full PNG of the capture, so 80 steps
+  /// on a 5K screenshot approaches a gigabyte — and `_applyHistorySnapshot`
+  /// pushes the *current* bytes onto the opposite stack, so an undo/redo
+  /// ping-pong holds two copies. Past this budget the oldest snapshots give up
+  /// their pixels but keep their annotation list: the vector history stays
+  /// complete, only the bitmap restore for those steps is lost.
+  static const int _maxUndoBytes = 256 * 1024 * 1024;
   int _imageRevision = 0;
 
   // Text extraction (OCR)
@@ -283,7 +295,6 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   final Map<CanvasTool, ToolProperties> _toolPropertiesMap = ToolProperties.createDefaults();
-  double _rotation = 0.0;
   double _zoomScale = 1.0;
   int _stepCounter = 1;
   bool _isSidebarOpen = true;
@@ -461,9 +472,20 @@ class _MainScreenState extends State<MainScreen> {
   List<Color> _savedColors = [];
   static const int _maxSavedColors = 18;
 
+  /// Releases the OS-wide hotkeys on quit. They die with the process today, so
+  /// this is insurance rather than a fix — it stops being insurance the moment
+  /// the app grows a background or menu-bar mode.
+  late final AppLifecycleListener _lifecycleListener;
+
   @override
   void initState() {
     super.initState();
+    _lifecycleListener = AppLifecycleListener(
+      onExitRequested: () async {
+        await ShortcutService.unregisterGlobalHotKeys();
+        return AppExitResponse.exit;
+      },
+    );
     _loadShortcuts();
     _loadHistory();
     _loadThemePreference();
@@ -514,6 +536,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    _lifecycleListener.dispose();
     // Flush any annotation edit still waiting on the debounce timer.
     _persistDebounce?.cancel();
     final pending = _activeCapture;
@@ -698,12 +721,14 @@ class _MainScreenState extends State<MainScreen> {
       setState(() {
         _shortcuts = loaded;
       });
-      _registerGlobalHotKeys();
+      // Deliberately not awaited: registration talks to the OS and the UI is
+      // usable without it. Failures surface through its own toast.
+      unawaited(_registerGlobalHotKeys());
     }
   }
 
   Future<void> _registerGlobalHotKeys() async {
-    await ShortcutService.registerGlobalHotKeys(
+    final failed = await ShortcutService.registerGlobalHotKeys(
       shortcuts: _shortcuts,
       onHotKeyTriggered: (action) {
         final handler = _getHandlerForAction(action);
@@ -712,6 +737,12 @@ class _MainScreenState extends State<MainScreen> {
         }
       },
     );
+    // A hotkey the OS refuses is indistinguishable from a broken app: the user
+    // presses it and nothing happens, forever. Say so once, when it is set.
+    if (!mounted || failed.isEmpty) return;
+    final names = failed.map((a) => a.displayName).join(', ');
+    _showToast('The system already owns the shortcut for $names. '
+        'Pick another in Keyboard Shortcuts.');
   }
 
   void _openShortcutSettingsDialog() {
@@ -756,14 +787,58 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  /// True when a text field currently owns the keyboard.
+  ///
+  /// App-level chords are registered on a [CallbackShortcuts] *inside* the
+  /// MaterialApp, which puts them below `DefaultTextEditingShortcuts` in the
+  /// tree — and a key event travels up from the focused node, so an unguarded
+  /// binding wins before the focused field can act on it. Cmd+C while typing
+  /// an on-canvas text annotation copied the whole screenshot instead of the
+  /// selected characters; Cmd+Z undid the last annotation instead of the last
+  /// keystroke. Editing intent beats app intent whenever a field is focused.
+  ///
+  /// Dialog fields (Save As, the colour picker's hex input, shortcut settings)
+  /// were never affected — they live on a separate route, outside this
+  /// subtree — but this covers them harmlessly too.
+  bool get _isTextFieldFocused {
+    final ctx = FocusManager.instance.primaryFocus?.context;
+    if (ctx == null) return false;
+    return ctx.widget is EditableText ||
+        ctx.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
+  /// Cached so a rebuild does not reallocate the map and a closure per action.
+  /// [build] runs on every pointer move of a live annotation drag, and
+  /// `CallbackShortcuts` only needs a new map when the bindings really change.
+  Map<ShortcutActivator, VoidCallback>? _shortcutBindingsCache;
+  Object? _shortcutBindingsKey;
+
   Map<ShortcutActivator, VoidCallback> _buildShortcutBindings() {
+    // Which actions resolve to a handler depends on these four, and nothing
+    // else — see `_getHandlerForAction`.
+    final key = Object.hash(
+      _shortcuts,
+      _undoStack.isEmpty,
+      _redoStack.isEmpty,
+      _annotations.isEmpty,
+    );
+    final cached = _shortcutBindingsCache;
+    if (cached != null && _shortcutBindingsKey == key) return cached;
+
     final bindings = <ShortcutActivator, VoidCallback>{};
     for (final entry in _shortcuts.entries) {
       final handler = _getHandlerForAction(entry.key);
       if (handler != null) {
-        bindings[entry.value.toSingleActivator()] = handler;
+        bindings[entry.value.toSingleActivator()] = () {
+          // Checked at invoke time rather than at registration: focus moves
+          // without rebuilding this map.
+          if (_isTextFieldFocused) return;
+          handler();
+        };
       }
     }
+    _shortcutBindingsCache = bindings;
+    _shortcutBindingsKey = key;
     return bindings;
   }
 
@@ -793,8 +868,30 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _trimUndoStack() {
-    while (_undoStack.length > _maxUndoSteps) {
-      _undoStack.removeAt(0);
+    _trimStack(_undoStack);
+    // The redo stack grows through the same push in `_applyHistorySnapshot`
+    // and needs the same ceiling, or an undo/redo ping-pong defeats the budget.
+    _trimStack(_redoStack);
+  }
+
+  static void _trimStack(List<CanvasSnapshot> stack) {
+    while (stack.length > _maxUndoSteps) {
+      stack.removeAt(0);
+    }
+
+    var bytes = 0;
+    for (final snapshot in stack) {
+      bytes += snapshot.imageBytes?.lengthInBytes ?? 0;
+    }
+    if (bytes <= _maxUndoBytes) return;
+
+    // Oldest first: the further back a step is, the less likely the user is to
+    // walk all the way to it, and dropping pixels there costs the least.
+    for (var i = 0; i < stack.length && bytes > _maxUndoBytes; i++) {
+      final size = stack[i].imageBytes?.lengthInBytes ?? 0;
+      if (size == 0) continue;
+      stack[i] = CanvasSnapshot(annotations: stack[i].annotations);
+      bytes -= size;
     }
   }
 
@@ -1066,22 +1163,32 @@ class _MainScreenState extends State<MainScreen> {
     CanvasSnapshot snapshot,
     List<CanvasSnapshot> pushTo,
   ) async {
+    final capture = _activeCapture;
+
     // Only carry bitmap pixels into the opposite stack when the step being
     // reversed actually changed them.
     Uint8List? currentBytes;
     if (snapshot.imageBytes != null &&
-        _activeCapture != null &&
-        File(_activeCapture!.filePath).existsSync()) {
-      currentBytes = await File(_activeCapture!.filePath).readAsBytes();
+        capture != null &&
+        File(capture.filePath).existsSync()) {
+      currentBytes = await File(capture.filePath).readAsBytes();
     }
     pushTo.add(CanvasSnapshot(
       imageBytes: currentBytes,
       annotations: List.from(_annotations),
     ));
+    // This is the one push that does not go through `_pushUndoState`, so it is
+    // also the one that could grow a stack past the budget unchecked.
+    _trimUndoStack();
 
-    if (snapshot.imageBytes != null && _activeCapture != null) {
-      await _replaceActiveImageBytes(snapshot.imageBytes!);
+    if (snapshot.imageBytes != null && capture != null) {
+      await _replaceActiveImageBytes(snapshot.imageBytes!, targetPath: capture.filePath);
     }
+
+    // The selection can move during the file read and write above; applying
+    // this snapshot's annotations to a capture it did not come from would
+    // silently transplant one capture's markup onto another.
+    if (!mounted || _activeCapture?.id != capture?.id) return;
 
     setState(() {
       _bumpImageRevision();
@@ -1114,8 +1221,22 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  /// Gate every capture trigger on the OS grant.
+  ///
+  /// Returns false and explains once when the grant is missing. macOS only
+  /// applies a newly granted Screen Recording permission after a relaunch, so
+  /// the message says that rather than inviting the user to retry immediately.
+  Future<bool> _ensureCapturePermission() async {
+    if (await _captureService.hasScreenCapturePermission()) return true;
+    if (!mounted) return false;
+    _showToast('SnipSnap needs Screen Recording access. Grant it in System '
+        'Settings > Privacy & Security, then relaunch the app.');
+    return false;
+  }
+
   // Capture Triggers
   Future<void> _handleInteractiveCapture() async {
+    if (!await _ensureCapturePermission()) return;
     setState(() => _isCapturing = true);
     final path = await _captureService.captureInteractive();
     setState(() => _isCapturing = false);
@@ -1125,6 +1246,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _handleFullScreenCapture() async {
+    if (!await _ensureCapturePermission()) return;
     setState(() => _isCapturing = true);
     final path = await _captureService.captureFullScreen();
     setState(() => _isCapturing = false);
@@ -1134,6 +1256,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _handleTimerCapture() async {
+    if (!await _ensureCapturePermission()) return;
     setState(() => _isCapturing = true);
     final t = _theme;
     _scaffoldMessengerKey.currentState?.showSnackBar(
@@ -1205,8 +1328,10 @@ class _MainScreenState extends State<MainScreen> {
       _redoStack.clear();
       _stepCounter = 1;
     });
-    StorageService.saveHistory(_captures);
-    DatabaseService.setSetting('active_capture_id', newItem.id);
+    // Persisted in the background: the capture is already on screen and usable,
+    // and blocking on SQLite here would stall the frame that shows it.
+    unawaited(StorageService.saveHistory(_captures));
+    unawaited(DatabaseService.setSetting('active_capture_id', newItem.id));
   }
 
   /// Size of the editor canvas the annotations were laid out against, or
@@ -1346,7 +1471,13 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _handleSaveAs() async {
-    if (_activeCapture == null) {
+    // Bound once, up front. The dialog opened below can outlive the selection
+    // by minutes: deleting the last capture while it sits open used to make
+    // every `_activeCapture!` inside the confirm callback throw a null-check
+    // error from an async callback, which is an unhandled crash rather than a
+    // caught failure.
+    final capture = _activeCapture;
+    if (capture == null) {
       _showToast('No screenshot to save!');
       return;
     }
@@ -1359,10 +1490,11 @@ class _MainScreenState extends State<MainScreen> {
 
     if (!mounted) return;
 
-    showDialog(
+    // Not awaited: the confirm callback owns everything that happens next.
+    unawaited(showDialog(
       context: _dialogContext!,
       builder: (ctx) => SaveAsDialog(
-        initialName: _activeCapture!.title,
+        initialName: capture.title,
         onConfirm: (options) async {
           await Future.delayed(const Duration(milliseconds: 150));
           final gradient = (options.gradientIndex != null &&
@@ -1384,7 +1516,7 @@ class _MainScreenState extends State<MainScreen> {
             // the one in _renderAnnotatedBytes.
             try {
               exportBytes = await RenderService.renderFlattenedPng(
-                    imagePath: _activeCapture!.filePath,
+                    imagePath: capture.filePath,
                     annotations: _annotations,
                     canvasSize: _canvasSize,
                     framingPadding: options.framingPadding,
@@ -1414,7 +1546,7 @@ class _MainScreenState extends State<MainScreen> {
           }
         },
       ),
-    );
+    ));
   }
 
   /// Writes [bytes] over the active capture's file and evicts that file's
@@ -1425,14 +1557,18 @@ class _MainScreenState extends State<MainScreen> {
   /// flatten, fill and undo — the app-wide flicker. The editor canvas itself
   /// no longer reads through the image cache at all (it decodes and swaps its
   /// own `ui.Image`), so the targeted evict is all that is needed.
-  Future<void> _replaceActiveImageBytes(Uint8List bytes) async {
-    final targetPath = _activeCapture!.filePath;
+  /// [targetPath] is passed in rather than read from `_activeCapture` because
+  /// every caller reaches this after several awaits, by which point the
+  /// selection may have moved on — writing into whatever is selected *now*
+  /// would rewrite the wrong capture's file.
+  Future<void> _replaceActiveImageBytes(Uint8List bytes, {required String targetPath}) async {
     await File(targetPath).writeAsBytes(bytes);
     await evictImageFileFromCaches(targetPath);
   }
 
   Future<void> _handleFlattenCanvas() async {
-    if (_activeCapture == null) {
+    final capture = _activeCapture;
+    if (capture == null) {
       _showToast('No screenshot to flatten!');
       return;
     }
@@ -1454,9 +1590,14 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
 
-    await _pushUndoState(captureImage: true);
-    await _replaceActiveImageBytes(bytes);
+    // The render above can take seconds on a large capture. Anything that
+    // changed the selection in the meantime makes this flatten meaningless.
+    if (!mounted || _activeCapture?.id != capture.id) return;
 
+    await _pushUndoState(captureImage: true);
+    await _replaceActiveImageBytes(bytes, targetPath: capture.filePath);
+
+    if (!mounted || _activeCapture?.id != capture.id) return;
     setState(() {
       _bumpImageRevision();
       _annotations = [];
@@ -1505,7 +1646,8 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _handleApplyCrop(Rect cropRect) async {
-    if (_activeCapture == null || !File(_activeCapture!.filePath).existsSync()) return;
+    final capture = _activeCapture;
+    if (capture == null || !File(capture.filePath).existsSync()) return;
     // Crop bakes the markup in before cutting, and rewrites the file. Checked
     // here rather than relying on _renderAnnotatedBytes returning null, because
     // this path falls back to the un-annotated original on a null render — so
@@ -1515,7 +1657,7 @@ class _MainScreenState extends State<MainScreen> {
 
     try {
       final canvasSize = _canvasSize;
-      final originalBytes = await File(_activeCapture!.filePath).readAsBytes();
+      final originalBytes = await File(capture.filePath).readAsBytes();
 
       // Push the pre-crop image *and* annotations so a single undo restores
       // both.
@@ -1565,7 +1707,14 @@ class _MainScreenState extends State<MainScreen> {
         targetHeight: targetHeight,
       );
 
-      await _replaceActiveImageBytes(await compute(img.encodePng, result));
+      final encoded = await compute(img.encodePng, result);
+
+      // The render, decode and encode above are seconds of work on a large
+      // capture. Writing the result now, without re-checking, would crop
+      // whichever capture the user has since selected.
+      if (!mounted || _activeCapture?.id != capture.id) return;
+      await _replaceActiveImageBytes(encoded, targetPath: capture.filePath);
+      if (!mounted || _activeCapture?.id != capture.id) return;
 
       setState(() {
         _bumpImageRevision();
@@ -1576,7 +1725,7 @@ class _MainScreenState extends State<MainScreen> {
         // feed every projection built from this capture — the toolbar's
         // canvas -> image conversion and the legacy annotation migration — so
         // leaving them stale silently rescales everything drawn after a crop.
-        _activeCapture = _activeCapture!.copyWith(
+        _activeCapture = capture.copyWith(
           width: result.width,
           height: result.height,
         );
@@ -1729,9 +1878,6 @@ class _MainScreenState extends State<MainScreen> {
                                   hasShadow: ann.hasShadow,
                                   isDoubleArrow: ann.isDoubleArrow,
                                 );
-                                setState(() {
-                                  _rotation = ann.rotation;
-                                });
                               }
                             },
                             activeColor: _currentToolProperties.activeColor,
@@ -1739,7 +1885,6 @@ class _MainScreenState extends State<MainScreen> {
                             fillColor: _currentToolProperties.fillColor,
                             strokeWidth: _currentToolProperties.strokeWidth,
                             opacity: _currentToolProperties.opacity,
-                            rotation: _rotation,
                             fontSize: _currentToolProperties.fontSize,
                             isFilled: _currentToolProperties.isFilled,
                             borderRadius: _currentToolProperties.borderRadius,
@@ -1825,8 +1970,6 @@ class _MainScreenState extends State<MainScreen> {
                                   onFontSizeChanged: (val) => _updateActiveToolProperty(fontSize: val),
                                   isFilled: _currentToolProperties.isFilled,
                                   onFillChanged: (val) => _updateActiveToolProperty(isFilled: val),
-                                  rotation: _rotation,
-                                  onRotationChanged: (r) => setState(() => _rotation = r),
                                   borderRadius: _currentToolProperties.borderRadius,
                                   onBorderRadiusChanged: (r) => _updateActiveToolProperty(borderRadius: r),
                                   lineStyle: _currentToolProperties.lineStyle,
@@ -1997,7 +2140,8 @@ class _MainScreenState extends State<MainScreen> {
                       }
                     });
                     if (_activeCapture != null) {
-                      DatabaseService.setSetting('active_capture_id', _activeCapture!.id);
+                      unawaited(DatabaseService.setSetting(
+                          'active_capture_id', _activeCapture!.id));
                     }
                     // Deleting the active capture *promotes* the next one, which
                     // is a selection change by any other name — so it owes the
@@ -2031,7 +2175,7 @@ class _MainScreenState extends State<MainScreen> {
                     // above failed (it is deliberately swallowed) the whole
                     // capture reappeared, annotations and all, on next launch.
                     await StorageService.deleteCaptureItem(item.id);
-                    StorageService.saveHistory(_captures);
+                    unawaited(StorageService.saveHistory(_captures));
                   },
                   onOpenLibraryLocation: () async {
                     final opened = await StorageService.openLibraryFolder();

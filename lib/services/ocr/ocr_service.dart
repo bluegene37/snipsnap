@@ -82,7 +82,7 @@ class OcrService {
         return result;
       }
 
-      final decoded = img.decodeImage(sourceBytes);
+      final decoded = await compute(img.decodeImage, sourceBytes);
       if (decoded == null) return OcrResult.empty;
 
       // Intersect the requested region with the image bounds: clamp the
@@ -102,7 +102,7 @@ class OcrService {
 
       final cropped = img.copyCrop(decoded, x: x, y: y, width: w, height: h);
       final result = await engine.recognize(
-        Uint8List.fromList(img.encodePng(cropped)),
+        Uint8List.fromList(await compute(img.encodePng, cropped)),
       );
       final fullImageSize =
           Size(decoded.width.toDouble(), decoded.height.toDouble());

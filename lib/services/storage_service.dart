@@ -8,6 +8,16 @@ import '../models/capture_item.dart';
 
 import 'database_service.dart';
 
+/// `compute` entry point for the JPEG export transcode. Top-level because a
+/// closure or instance method cannot cross an isolate boundary. Falls back to
+/// the original bytes when the source will not decode, so a save never fails
+/// outright on a format the `image` package cannot read.
+Uint8List _transcodeToJpg(({Uint8List bytes, int quality}) req) {
+  final decoded = img.decodeImage(req.bytes);
+  if (decoded == null) return req.bytes;
+  return Uint8List.fromList(img.encodeJpg(decoded, quality: req.quality));
+}
+
 class StorageService {
   /// Save image bytes with specific format (.png or .jpg) to user selected location
   static Future<String?> exportImageDialogWithFormat({
@@ -29,10 +39,13 @@ class StorageService {
 
     if (isJpg) {
       try {
-        final decoded = img.decodeImage(Uint8List.fromList(bytes));
-        if (decoded != null) {
-          bytesToSave = img.encodeJpg(decoded, quality: jpgQuality);
-        }
+        // Decode + re-encode of a full-resolution capture, so it runs on a
+        // worker isolate: on the UI isolate this blocked the frame that opened
+        // the save dialog.
+        bytesToSave = await compute(
+          _transcodeToJpg,
+          (bytes: Uint8List.fromList(bytes), quality: jpgQuality),
+        );
       } catch (e) {
         debugPrint('SnipSnap JPG encode error: $e');
       }

@@ -26,8 +26,6 @@ class StylePicker extends StatelessWidget {
   final ValueChanged<double> onFontSizeChanged;
   final bool isFilled;
   final ValueChanged<bool> onFillChanged;
-  final double rotation;
-  final ValueChanged<double>? onRotationChanged;
   final CanvasTool activeTool;
   final VoidCallback? onFlattenCanvas;
   final VoidCallback? onCloseDrawer;
@@ -83,8 +81,6 @@ class StylePicker extends StatelessWidget {
     required this.onFontSizeChanged,
     required this.isFilled,
     required this.onFillChanged,
-    this.rotation = 0.0,
-    this.onRotationChanged,
     required this.activeTool,
     this.onFlattenCanvas,
     this.onCloseDrawer,
@@ -222,7 +218,6 @@ class StylePicker extends StatelessWidget {
       CanvasTool.ruler,
     ].contains(effectiveTool) || (selectedAnnotation != null && effectiveTool != CanvasTool.crop);
 
-    final showRotation = selectedAnnotation != null && onRotationChanged != null;
 
     final bgColor = t.surface;
     final textColor = t.ink;
@@ -1528,70 +1523,6 @@ class StylePicker extends StatelessWidget {
                     onChanged: (val) => onShadowChanged!(val),
                   ),
                 ],
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // Item Rotation Section (Only when an item is selected)
-            if (showRotation) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'ROTATION',
-                    style: TextStyle(
-                      color: subTextColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.8,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: cardBg,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      '${(rotation * 180 / math.pi).round()}°',
-                      style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [-90, -45, 0, 45, 90, 180].map((deg) {
-                  final rad = deg * math.pi / 180;
-                  final isSelected = ((rotation - rad).abs() < 0.05);
-                  return GestureDetector(
-                    onTap: () => onRotationChanged!(rad),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: t.controlDecoration(active: isSelected, radius: 6),
-                      child: Text(
-                        '$deg°',
-                        style: TextStyle(
-                          color: t.controlForeground(active: isSelected),
-                          fontSize: 10,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 4),
-              SliderTheme(
-                data: sliderThemeData,
-                child: Slider(
-                  value: rotation.clamp(-math.pi, math.pi),
-                  min: -math.pi,
-                  max: math.pi,
-                  onChanged: onRotationChanged,
-                ),
               ),
               const SizedBox(height: 16),
             ],

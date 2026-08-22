@@ -74,7 +74,6 @@ class EditorCanvas extends StatefulWidget {
   final VoidCallback? onEditUnplaceable;
   final GlobalKey repaintBoundaryKey;
   final double opacity;
-  final double rotation;
   final Color? textBackgroundColor;
   final Color? fillColor;
   final double zoomScale;
@@ -118,7 +117,6 @@ class EditorCanvas extends StatefulWidget {
     this.onEditUnplaceable,
     required this.repaintBoundaryKey,
     this.opacity = 1.0,
-    this.rotation = 0.0,
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
     this.imageRevision = 0,
@@ -208,7 +206,6 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   // Selection / transform state
   String? _selectedAnnotationId;
-  String? _prevSelectedAnnotationId;
   bool _isDraggingAnnotation = false;
   bool _isResizingAnnotation = false;
   bool _isRotatingAnnotation = false;
@@ -382,17 +379,6 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       }
     }
 
-    // Property panel edits are applied to the selected annotation by the parent
-    // (`_updateActiveToolProperty`); rotation is the only control the canvas
-    // still owns, so it is the only one mirrored back here.
-    final isSameSelection = _prevSelectedAnnotationId == _selectedAnnotationId;
-    _prevSelectedAnnotationId = _selectedAnnotationId;
-    if (widget.activeTool == CanvasTool.select &&
-        _selectedAnnotationId != null &&
-        isSameSelection &&
-        oldWidget.rotation != widget.rotation) {
-      _applyRotationToSelection(widget.rotation);
-    }
   }
 
   /// Drops every piece of canvas state that describes the capture the editor
@@ -803,14 +789,6 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// undo step.
   void _pushHistoryCheckpoint() {
     widget.onAnnotationsUpdated?.call(List<Annotation>.from(widget.annotations));
-  }
-
-  void _applyRotationToSelection(double radians) {
-    final ann = _selectedAnnotation;
-    if (ann == null) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _replaceAnnotation(ann.copyWith(rotation: radians), live: true);
-    });
   }
 
   void _deleteSelectedAnnotation() {
@@ -1808,7 +1786,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       final path = widget.imagePath;
       if (path == null || !File(path).existsSync()) return;
       try {
-        decoded = img.decodeImage(await File(path).readAsBytes());
+        decoded = await compute(img.decodeImage, await File(path).readAsBytes());
+        if (!mounted) return;
         _cachedSourceImage = decoded;
       } catch (e) {
         debugPrint('Error loading image for sample: $e');
@@ -1834,8 +1813,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   Future<ui.Image?> _imageToUiImage(img.Image image) async {
     try {
-      final pngBytes = Uint8List.fromList(img.encodePng(image));
-      final codec = await ui.instantiateImageCodec(pngBytes);
+      final pngBytes = await compute(img.encodePng, image);
+      final codec = await ui.instantiateImageCodec(Uint8List.fromList(pngBytes));
       final frame = await codec.getNextFrame();
       codec.dispose();
       return frame.image;
@@ -1854,7 +1833,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     try {
       img.Image? decoded = _cachedSourceImage;
       if (decoded == null) {
-        decoded = img.decodeImage(await File(path).readAsBytes());
+        decoded = await compute(img.decodeImage, await File(path).readAsBytes());
+        if (!mounted) return;
         _cachedSourceImage = decoded;
       }
       if (decoded == null) return;
@@ -1893,7 +1873,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         return;
       }
 
-      await File(path).writeAsBytes(Uint8List.fromList(img.encodePng(decoded)));
+      final cutBytes = await compute(img.encodePng, decoded);
+      if (!mounted || widget.imagePath != path) return;
+      await File(path).writeAsBytes(Uint8List.fromList(cutBytes));
       // Targeted eviction only: the gallery thumbnail for this path must
       // refresh, but a global imageCache.clear() would force every other
       // thumbnail to re-decode too — the visible "everything flashes" bug.
@@ -1957,7 +1939,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       // away from — decode that file fresh instead, and leave the cache alone.
       img.Image? decoded = isForeignTarget ? null : _cachedSourceImage;
       if (decoded == null && path != null && File(path).existsSync()) {
-        decoded = img.decodeImage(await File(path).readAsBytes());
+        decoded = await compute(img.decodeImage, await File(path).readAsBytes());
         if (!isForeignTarget) _cachedSourceImage = decoded;
       }
       if (decoded != null && path != null) {
@@ -1984,7 +1966,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           dstHeight: dstH,
         );
 
-        await File(path).writeAsBytes(Uint8List.fromList(img.encodePng(decoded)));
+        final pasted = await compute(img.encodePng, decoded);
+        await File(path).writeAsBytes(Uint8List.fromList(pasted));
         await evictImageFileFromCaches(path);
         wroteBitmap = true;
       }
@@ -2038,7 +2021,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (_cutSelectionImage == null) return;
 
     try {
-      final pngBytes = Uint8List.fromList(img.encodePng(_cutSelectionImage!));
+      final pngBytes = Uint8List.fromList(await compute(img.encodePng, _cutSelectionImage!));
       final tempDir = Directory.systemTemp;
       final tempFile = File('${tempDir.path}/snipsnap_sel_${DateTime.now().millisecondsSinceEpoch}.png');
       await tempFile.writeAsBytes(pngBytes);
@@ -2056,9 +2039,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final path = widget.imagePath;
     if (path == null || !File(path).existsSync()) return;
     try {
+      final bytes = await File(path).readAsBytes();
+      if (!mounted) return;
+
       img.Image? decoded = _cachedSourceImage;
       if (decoded == null) {
-        decoded = img.decodeImage(await File(path).readAsBytes());
+        decoded = await compute(img.decodeImage, bytes);
+        if (!mounted) return;
         _cachedSourceImage = decoded;
       }
       if (decoded == null) return;
@@ -2069,25 +2056,31 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       // Snapshot the pre-fill bitmap *before* it is overwritten for undo.
       final beforeFill = widget.onBeforeCanvasFill;
       if (beforeFill != null) await beforeFill();
+      if (!mounted) return;
 
-      final modified = ImageOperations.floodFill(
-        image: decoded,
+      // The fill itself runs on a worker isolate: it is a per-pixel walk of the
+      // whole bitmap, plus a full PNG re-encode. Both on the UI isolate froze
+      // the window for seconds on a large capture.
+      final filled = await compute(floodFillPng, (
+        pngBytes: bytes,
         startX: pixelPos.x,
         startY: pixelPos.y,
-        fillColor: widget.activeColor,
+        fillArgb: widget.activeColor.toARGB32(),
         tolerancePercent: widget.fillTolerance,
         opacity: widget.opacity,
         isGlobal: widget.isGlobalFill,
-      );
+      ));
+      // Null means nothing matched the click, so there is nothing to write.
+      if (filled == null) return;
+      // The capture can be switched while the fill runs; writing now would put
+      // one capture's pixels into another capture's file.
+      if (!mounted || widget.imagePath != path) return;
 
-      if (!modified) return;
-
-      final pngBytes = Uint8List.fromList(img.encodePng(decoded));
-      await File(path).writeAsBytes(pngBytes);
+      await File(path).writeAsBytes(filled);
       await evictImageFileFromCaches(path);
 
       await _loadBaseImage();
-      if (widget.onPerformCanvasFill != null) {
+      if (mounted && widget.onPerformCanvasFill != null) {
         _suppressNextRevisionReload = true;
         widget.onPerformCanvasFill!.call(localPos);
       }
@@ -3393,7 +3386,13 @@ class _FloatingSelectionPainter extends CustomPainter {
   @override
   // Already unconditional, so a theme change (like every other change) is
   // covered without inspecting `oldDelegate.theme` explicitly.
-  bool shouldRepaint(covariant _FloatingSelectionPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _FloatingSelectionPainter oldDelegate) =>
+      oldDelegate.marqueeRect != marqueeRect ||
+      oldDelegate.floatingRect != floatingRect ||
+      oldDelegate.floatingImage != floatingImage ||
+      oldDelegate.nativeImageSize != nativeImageSize ||
+      oldDelegate.imageRect != imageRect ||
+      oldDelegate.theme != theme;
 }
 
 class _AnnotationPainter extends CustomPainter {

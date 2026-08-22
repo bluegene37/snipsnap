@@ -126,8 +126,6 @@ void main() {
             onBorderRadiusChanged: (_) {},
             blurStrength: 14.0,
             onBlurStrengthChanged: (_) {},
-            rotation: 0.0,
-            onRotationChanged: (_) {},
             activeTool: CanvasTool.pen,
             shapeKind: ShapeKind.rectangle,
             onShapeKindChanged: (_) {},

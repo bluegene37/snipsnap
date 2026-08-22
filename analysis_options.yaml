@@ -31,3 +31,8 @@ linter:
     - prefer_final_locals
     - sized_box_for_whitespace
     - use_build_context_synchronously
+    # Fire-and-forget async work is how a failed write goes unnoticed.
+    - unawaited_futures
+    # NOT avoid_slow_async_io: its fix is to swap async dart:io for the
+    # synchronous variants, which would put blocking file reads back on the UI
+    # isolate — the exact thing the capture and export paths were moved off.

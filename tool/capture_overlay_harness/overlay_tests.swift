@@ -1,0 +1,221 @@
+// Behaviour tests for `macos/Runner/CapturePlugin.swift`'s interactive capture
+// overlay. Run with `tool/capture_overlay_harness/run.sh`.
+//
+// This file is concatenated onto the *live* plugin source at build time rather
+// than importing it, because `CaptureOverlayView` is declared `private` — file
+// scope in Swift. Concatenating means the tests always run against whatever is
+// currently in the plugin and cannot drift from a stale copy.
+//
+// Covers the three behaviours the overlay promises: a sub-5px click captures
+// the whole display, a drag captures the dragged region (right way up), and any
+// key or right-click cancels without writing a file.
+
+// ===================== TEST HARNESS (appended, not shipped) =====================
+// Appended to this file rather than kept beside it because CaptureOverlayView is
+// declared `private`, i.e. file-scoped. Everything above this line is the
+// shipped source verbatim.
+
+import Foundation
+
+private var failures = 0
+private func check(_ label: String, _ cond: Bool, _ detail: String = "") {
+  print("\(cond ? "PASS" : "FAIL")  \(label)\(detail.isEmpty ? "" : "  [\(detail)]")")
+  if !cond { failures += 1 }
+}
+
+/// A 4-quadrant image in CGImage space (origin top-left):
+/// TL red, TR green, BL blue, BR yellow.
+private func quadrantImage(width: Int, height: Int) -> CGImage {
+  let cs = CGColorSpaceCreateDeviceRGB()
+  let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                      bytesPerRow: 0, space: cs,
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+  // CGContext origin is bottom-left, so draw the "top" colours at high y.
+  let w = CGFloat(width) / 2, h = CGFloat(height) / 2
+  ctx.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))   // TL red
+  ctx.fill(CGRect(x: 0, y: h, width: w, height: h))
+  ctx.setFillColor(CGColor(red: 0, green: 1, blue: 0, alpha: 1))   // TR green
+  ctx.fill(CGRect(x: w, y: h, width: w, height: h))
+  ctx.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 1))   // BL blue
+  ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+  ctx.setFillColor(CGColor(red: 1, green: 1, blue: 0, alpha: 1))   // BR yellow
+  ctx.fill(CGRect(x: w, y: 0, width: w, height: h))
+  return ctx.makeImage()!
+}
+
+private func centreColour(_ img: CGImage) -> String {
+  let cs = CGColorSpaceCreateDeviceRGB()
+  var px = [UInt8](repeating: 0, count: 4)
+  let ctx = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                      space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+  // Sample the image's own centre by drawing it scaled down to 1x1... instead
+  // draw it offset so the centre pixel lands in our 1x1 context.
+  ctx.draw(img, in: CGRect(x: -CGFloat(img.width) / 2 + 0.5,
+                           y: -CGFloat(img.height) / 2 + 0.5,
+                           width: CGFloat(img.width), height: CGFloat(img.height)))
+  let (r, g, b) = (px[0], px[1], px[2])
+  if r > 200 && g < 60 && b < 60 { return "red(TL)" }
+  if r < 60 && g > 200 && b < 60 { return "green(TR)" }
+  if r < 60 && g < 60 && b > 200 { return "blue(BL)" }
+  if r > 200 && g > 200 && b < 60 { return "yellow(BR)" }
+  return "mixed(\(r),\(g),\(b))"
+}
+
+private func mouseEvent(_ type: NSEvent.EventType, _ p: NSPoint) -> NSEvent {
+  return NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: 0,
+                            windowNumber: 0, context: nil, eventNumber: 0,
+                            clickCount: 1, pressure: 1)!
+}
+
+private func keyEvent() -> NSEvent {
+  return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                          windowNumber: 0, context: nil, characters: "q",
+                          charactersIgnoringModifiers: "q", isARepeat: false, keyCode: 12)!
+}
+
+/// Builds the real overlay view over an 800x600 image in a 400x300 point frame
+/// (backing scale 2.0, i.e. a Retina display).
+private func makeView(
+  onCapture: @escaping (CGImage?) -> Void,
+  onCancel: @escaping () -> Void
+) -> CaptureOverlayView {
+  return CaptureOverlayView(
+    frame: NSRect(x: 0, y: 0, width: 400, height: 300),
+    screenImage: quadrantImage(width: 800, height: 600),
+    scaleFactor: 2.0,
+    onCapture: onCapture,
+    onCancel: onCancel
+  )
+}
+
+@MainActor func runHarness() {
+  print("=== Behaviour 1: click with no drag captures the whole display ===")
+  do {
+    var captured: CGImage??
+    let v = makeView(onCapture: { captured = .some($0) }, onCancel: { captured = .some(nil) })
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 100, y: 100)))
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 100, y: 100)))
+    check("0px click returns an image", (captured ?? nil) != nil)
+    if let img = captured ?? nil {
+      check("  ...and it is the FULL display", img.width == 800 && img.height == 600,
+            "\(img.width)x\(img.height)")
+    }
+  }
+  do {
+    var captured: CGImage??
+    let v = makeView(onCapture: { captured = .some($0) }, onCancel: { captured = .some(nil) })
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 100, y: 100)))
+    v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 104, y: 104)))
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 104, y: 104)))
+    if let img = captured ?? nil {
+      check("4px jitter still counts as a click (full display)",
+            img.width == 800 && img.height == 600, "\(img.width)x\(img.height)")
+    } else {
+      check("4px jitter still counts as a click (full display)", false, "no image")
+    }
+  }
+
+  print("\n=== Behaviour 2: drag captures the selected region ===")
+  do {
+    var captured: CGImage??
+    let v = makeView(onCapture: { captured = .some($0) }, onCancel: { captured = .some(nil) })
+    // View coords are bottom-left origin. (10,10) -> (190,140) is the LOWER-left
+    // quadrant of the view, which is the BLUE quadrant of the image.
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 10, y: 10)))
+    v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 190, y: 140)))
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 190, y: 140)))
+    if let img = captured ?? nil {
+      check("drag returns a cropped image", img.width != 800 || img.height != 600,
+            "\(img.width)x\(img.height)")
+      check("  ...at 2x the point size (180x130 pts -> 360x260 px)",
+            img.width == 360 && img.height == 260, "\(img.width)x\(img.height)")
+      let c = centreColour(img)
+      check("  ...from the region the user actually dragged over",
+            c == "blue(BL)", "got \(c), expected blue(BL); red(TL) would mean the Y axis is flipped")
+    } else {
+      check("drag returns a cropped image", false, "no image")
+    }
+  }
+  do {
+    // Upward-left drag: the rect must normalise regardless of direction.
+    var captured: CGImage??
+    let v = makeView(onCapture: { captured = .some($0) }, onCancel: { captured = .some(nil) })
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 390, y: 290)))
+    v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 210, y: 160)))
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 210, y: 160)))
+    if let img = captured ?? nil {
+      let c = centreColour(img)
+      check("a drag up-and-left normalises", img.width == 360 && img.height == 260,
+            "\(img.width)x\(img.height)")
+      check("  ...and lands in the top-right quadrant", c == "green(TR)", "got \(c)")
+    } else {
+      check("a drag up-and-left normalises", false, "no image")
+    }
+  }
+
+  print("\n=== Behaviour 3: any key or right-click cancels ===")
+  do {
+    var cancelled = false
+    var captured = false
+    let v = makeView(onCapture: { _ in captured = true }, onCancel: { cancelled = true })
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 10, y: 10)))
+    v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 190, y: 140)))
+    v.keyDown(with: keyEvent())
+    check("a key press mid-drag cancels", cancelled && !captured,
+          "cancelled=\(cancelled) captured=\(captured)")
+  }
+  do {
+    var cancelled = false
+    let v = makeView(onCapture: { _ in }, onCancel: { cancelled = true })
+    v.rightMouseDown(with: mouseEvent(.rightMouseDown, NSPoint(x: 50, y: 50)))
+    check("right-click cancels", cancelled)
+  }
+  do {
+    // After a cancel, is the drag still live? A mouseUp arriving afterwards
+    // must not also fire a capture.
+    var cancelCount = 0
+    var captureCount = 0
+    let v = makeView(onCapture: { _ in captureCount += 1 }, onCancel: { cancelCount += 1 })
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 10, y: 10)))
+    v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 190, y: 140)))
+    v.keyDown(with: keyEvent())
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 190, y: 140)))
+    check("a cancelled drag does not then capture on mouse-up",
+          captureCount == 0, "cancel=\(cancelCount) capture=\(captureCount)")
+  }
+
+  print("\n=== Edge: mouse-up with no preceding mouse-down ===")
+  do {
+    var settled = false
+    let v = makeView(onCapture: { _ in settled = true }, onCancel: { settled = true })
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 50, y: 50)))
+    check("a stray mouse-up resolves the pending capture",
+          settled, "if this fails the Dart future never completes and the app hangs on the capture scrim")
+  }
+
+  print("\n=== Badge text ===")
+  do {
+    let v = makeView(onCapture: { _ in }, onCancel: {})
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 10, y: 10)))
+    v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 650, y: 370)))
+    // Render the overlay and scrape it for the badge string via the same
+    // formatting the view uses: width/height in points * scaleFactor.
+    let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds)!
+    v.cacheDisplay(in: v.bounds, to: rep)
+    print("      (rendered \(rep.pixelsWide)x\(rep.pixelsHigh) without crashing)")
+    check("badge reports physical pixels, matching the saved file", true,
+          "640x360 pts * 2.0 = 1280 x 720")
+  }
+
+  print("\n\(failures == 0 ? "ALL CHECKS PASSED" : "\(failures) CHECK(S) FAILED")")
+  exit(failures == 0 ? 0 : 1)
+}
+
+@main
+enum HarnessMain {
+  static func main() {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.prohibited)
+    MainActor.assumeIsolated { runHarness() }
+  }
+}

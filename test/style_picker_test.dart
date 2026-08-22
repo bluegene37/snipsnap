@@ -64,8 +64,6 @@ Future<void> _pump(
           onBorderRadiusChanged: (_) {},
           blurStrength: 14.0,
           onBlurStrengthChanged: (_) {},
-          rotation: 0.0,
-          onRotationChanged: (_) {},
           activeTool: tool,
           shapeKind: ShapeKind.rectangle,
           onShapeKindChanged: (_) {},
@@ -94,7 +92,7 @@ void main() {
   for (final mode in SnipThemeMode.values) {
     testWidgets('pumps cleanly in $mode for every conditional section', (tester) async {
       // Sweeps every CanvasTool that toggles a distinct block of the panel
-      // (shape chooser, fill/text-background swatches, blur mode, rotation,
+      // (shape chooser, fill/text-background swatches, blur mode,
       // step-marker card, fill-tool quick styles) so a mode-conversion typo
       // anywhere in the file would throw during this pump.
       for (final tool in const [
