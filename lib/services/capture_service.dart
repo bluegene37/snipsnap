@@ -1,9 +1,12 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 class CaptureService {
+  static const MethodChannel _channel = MethodChannel('snipsnap/capture');
+
   /// Gets the directory where captures are stored
   Future<Directory> getStorageDirectory() async {
     final docsDir = await getApplicationDocumentsDirectory();
@@ -26,20 +29,32 @@ class CaptureService {
     final targetPath = await _generateNewPath();
     try {
       if (Platform.isMacOS) {
-        final result = await Process.run('/usr/sbin/screencapture', ['-i', targetPath]);
-        final file = File(targetPath);
-        if (result.exitCode == 0 && await file.exists()) {
-          final len = await file.length();
-          if (len > 0) {
-            return targetPath;
-          } else {
-            try {
-              await file.delete();
-            } catch (_) {}
+        try {
+          final result = await _channel.invokeMethod<String?>('captureInteractive', {
+            'targetPath': targetPath,
+          });
+          if (result != null && await File(result).exists() && (await File(result).length()) > 0) {
+            return result;
           }
+          if (result == null) {
+            // User pressed any key to escape or cancelled capture
+            return null;
+          }
+        } on MissingPluginException catch (_) {
+          final result = await Process.run('/usr/sbin/screencapture', ['-i', targetPath]);
+          final file = File(targetPath);
+          if (result.exitCode == 0 && await file.exists()) {
+            final len = await file.length();
+            if (len > 0) {
+              return targetPath;
+            } else {
+              try {
+                await file.delete();
+              } catch (_) {}
+            }
+          }
+          return null;
         }
-        // User pressed ESC or cancelled region capture: Return null cleanly!
-        return null;
       } else if (Platform.isWindows) {
         // Launch Windows Snipping Tool / Snip & Sketch to clipboard
         await Process.run('snippingtool', ['/clip']);
@@ -86,9 +101,18 @@ if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
     final targetPath = await _generateNewPath();
     try {
       if (Platform.isMacOS) {
-        final result = await Process.run('/usr/sbin/screencapture', [targetPath]);
-        if (result.exitCode == 0 && await File(targetPath).exists()) {
-          return targetPath;
+        try {
+          final result = await _channel.invokeMethod<String?>('captureFullScreen', {
+            'targetPath': targetPath,
+          });
+          if (result != null && await File(result).exists() && (await File(result).length()) > 0) {
+            return result;
+          }
+        } on MissingPluginException catch (_) {
+          final result = await Process.run('/usr/sbin/screencapture', [targetPath]);
+          if (result.exitCode == 0 && await File(targetPath).exists()) {
+            return targetPath;
+          }
         }
       } else if (Platform.isWindows) {
         final winPath = targetPath.replaceAll('/', '\\').replaceAll('"', '\\"');

@@ -12,6 +12,7 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     OcrPlugin.register(with: flutterViewController.registrar(forPlugin: "OcrPlugin"))
+    CapturePlugin.register(with: flutterViewController.registrar(forPlugin: "CapturePlugin"))
 
     super.awakeFromNib()
   }
