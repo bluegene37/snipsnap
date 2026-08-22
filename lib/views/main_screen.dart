@@ -262,6 +262,10 @@ class _MainScreenState extends State<MainScreen> {
   static const int _maxUndoBytes = 256 * 1024 * 1024;
   int _imageRevision = 0;
 
+  /// Bumped by every undo and redo, so the canvas can drop the selection,
+  /// marquee and floating cut that described the state just replaced.
+  int _historyRevision = 0;
+
   // Text extraction (OCR)
   final OcrService _ocrService = OcrService();
 
@@ -1192,6 +1196,7 @@ class _MainScreenState extends State<MainScreen> {
 
     setState(() {
       _bumpImageRevision();
+      _historyRevision++;
       _annotations = List.from(snapshot.annotations);
       _selectedAnnotationId = null;
       _stepCounter = _findMaxStepNumber(snapshot.annotations) + 1;
@@ -1930,6 +1935,7 @@ class _MainScreenState extends State<MainScreen> {
                             zoomScale: _zoomScale,
                             onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
                             imageRevision: _imageRevision,
+                            historyRevision: _historyRevision,
                           ),
                         ),
 

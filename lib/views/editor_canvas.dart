@@ -79,6 +79,15 @@ class EditorCanvas extends StatefulWidget {
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
   final int imageRevision;
+
+  /// Bumped by every undo and redo.
+  ///
+  /// Undo rewrites the annotation list from a snapshot, but the selection
+  /// chrome, the marquee and any floating cut live in this canvas and nothing
+  /// else can reach them — so they stayed painted over the restored state, and
+  /// the box the user had just been dragging sat there looking like the edit
+  /// had not been undone at all.
+  final int historyRevision;
   final double borderRadius;
   final ShapeKind shapeKind;
   final LineStyle lineStyle;
@@ -120,6 +129,7 @@ class EditorCanvas extends StatefulWidget {
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
     this.imageRevision = 0,
+    this.historyRevision = 0,
     this.borderRadius = 8.0,
     this.shapeKind = ShapeKind.rectangle,
     this.lineStyle = LineStyle.solid,
@@ -169,6 +179,13 @@ const _freehandTools = {CanvasTool.pen, CanvasTool.highlight};
 /// is what stops a vertical drag on a near-horizontal arrow from reading as a
 /// rotation: the bounding box of such an arrow is only a pixel or two tall, so
 /// per-axis scaling turned any vertical movement into a huge change of angle.
+/// Stroke tools whose weight a resize must leave alone.
+///
+/// The pen keeps its thickness slider, and that stays the only way to change a
+/// stroke's weight: dragging a squiggle bigger should make it bigger, not
+/// heavier. Resizing one of these scales it uniformly and touches nothing else.
+const _fixedWeightStrokeTools = {CanvasTool.pen};
+
 const _strokeTools = {
   CanvasTool.pen,
   CanvasTool.line,
@@ -177,10 +194,19 @@ const _strokeTools = {
   CanvasTool.ruler,
 };
 
-/// The stroke-width range the properties slider offers. Resizing stays inside
-/// it so a scaled annotation is still adjustable by the slider afterwards.
+/// The stroke-width range the properties slider offers. Resizing a mark that
+/// still has a slider stays inside it, so the slider can always take over
+/// afterwards.
 const double _minStrokeWidth = 1.0;
 const double _maxStrokeWidth = 30.0;
+
+/// The ceiling for marks in [dragSizedStrokeTools], whose thickness is set by
+/// dragging alone. No slider has to be able to reach these values, so the only
+/// job of this number is to stop a runaway drag — 30 was simply the slider's
+/// limit, and it made a dragged line stop growing well before it looked thick
+/// on a large capture.
+const double _maxDragStrokeWidth = 240.0;
+
 
 /// Tools whose annotation is created on tap-up, so a stray drag cannot spawn
 /// duplicates. Their handlers still own the placement — the canvas only
@@ -377,6 +403,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       _zoomToCentre(widget.zoomScale);
     }
 
+    if (oldWidget.historyRevision != widget.historyRevision) {
+      _clearTransientMarks();
+    }
+
     if (oldWidget.activeTool != widget.activeTool) {
       if (oldWidget.activeTool == CanvasTool.select && _hasExtractedSelection) {
         _commitFloatingSelection();
@@ -508,6 +538,44 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // async), so seeding a default now would hand the new capture the old
     // image's rectangle — the very carry-over this method exists to stop.
     // `_loadBaseImage` seeds it once the new decode lands.
+  }
+
+  /// Drops everything this canvas draws that is not in the annotation list.
+  ///
+  /// Used after an undo or redo: the restored list is authoritative, and any
+  /// selection, marquee or in-flight cut describes the state that was just
+  /// thrown away. A floating cut is *discarded* rather than committed — undo
+  /// has already put those pixels back into the bitmap, so pasting the copy
+  /// held in memory would stamp them in a second time.
+  void _clearTransientMarks() {
+    _floatingSelectionUiImage?.dispose();
+    _floatingSelectionUiImage = null;
+    _cutSelectionImage = null;
+    _floatingSelectionRect = null;
+    _floatingSelectionOriginRect = null;
+    _hasExtractedSelection = false;
+    _selectionMarquee = null;
+    _ocrRegion = null;
+
+    _currentAnnotation = null;
+    _drawStart = null;
+    _gestureOrigin = null;
+    _currentAnnHandle = _AnnHandle.none;
+    _isDraggingAnnotation = false;
+    _isResizingAnnotation = false;
+    _isRotatingAnnotation = false;
+    _isDraggingSelection = false;
+    _currentSelectionHandle = _CropHandle.none;
+    _selectionGestureOriginRect = null;
+    _isPanningView = false;
+
+    final hadSelection = _selectedAnnotationId != null;
+    _selectedAnnotationId = null;
+    if (hadSelection && widget.onSelectAnnotation != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onSelectAnnotation!(null);
+      });
+    }
   }
 
   Future<void> _loadBaseImage() async {
@@ -1083,61 +1151,127 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   // Resize
   // ---------------------------------------------------------------------------
 
-  /// Scales a stroke annotation uniformly about the corner opposite [handle],
-  /// carrying its thickness with it.
+  /// Resizes a stroke by moving its bounding box exactly the way the shape tool
+  /// does — the grabbed corner follows the pointer — and then reading the two
+  /// things a stroke has out of the new box: its length along its own axis, and
+  /// its weight across it.
   ///
-  /// The scale factor is the drag projected onto the original corner-to-anchor
-  /// vector, rather than a per-axis ratio of the bounding box. Two reasons, and
-  /// both of them are the bugs this replaces:
+  /// Working from box extents rather than from the raw drag is what makes the
+  /// two axes fall out cleanly. A purely sideways drag on a horizontal line
+  /// changes the box width and nothing else, so the length changes and the
+  /// weight is untouched — exactly, with no threshold needed to suppress
+  /// crosstalk. A purely vertical drag changes only the height, so only the
+  /// weight moves.
   ///
-  /// * A near-horizontal line has a bounding box a pixel or two tall, so
-  ///   `newHeight / oldHeight` explodes on the smallest vertical movement —
-  ///   which is why dragging an arrow's handle downward span it around instead
-  ///   of resizing it.
-  /// * Scaling the axes independently changes the angle by definition. A
-  ///   projection cannot: movement perpendicular to the stroke contributes
-  ///   nothing, so the mark keeps pointing where the user drew it.
+  /// The angle is fixed by construction: the mark is scaled along its existing
+  /// direction rather than stretched to fill the box, which is what used to
+  /// swing a near-horizontal arrow around on the smallest vertical movement.
   Annotation _resizeStroke(Annotation origin, _AnnHandle handle, Offset totalDelta) {
-    // `selectionRect`, not `boundingRect`: this is the rect the handles sit on,
-    // so the corner the user grabbed is the corner being scaled and dragging it
-    // twice as far from the anchor makes the mark twice the size.
-    final bounds = AnnotationRenderer.selectionRect(origin);
+    // `boundingRect`, not `selectionRect`: the handle sits a constant inset
+    // outside, and a constant cancels out of every delta below.
+    final bounds = AnnotationRenderer.boundingRect(origin);
     if (bounds == Rect.zero) return origin;
 
-    final Offset anchor;
-    final Offset corner;
+    double left = bounds.left;
+    double top = bounds.top;
+    double right = bounds.right;
+    double bottom = bounds.bottom;
     switch (handle) {
       case _AnnHandle.topLeft:
-        anchor = bounds.bottomRight;
-        corner = bounds.topLeft;
+        left += totalDelta.dx;
+        top += totalDelta.dy;
       case _AnnHandle.topRight:
-        anchor = bounds.bottomLeft;
-        corner = bounds.topRight;
+        right += totalDelta.dx;
+        top += totalDelta.dy;
       case _AnnHandle.bottomLeft:
-        anchor = bounds.topRight;
-        corner = bounds.bottomLeft;
+        left += totalDelta.dx;
+        bottom += totalDelta.dy;
       case _AnnHandle.bottomRight:
-        anchor = bounds.topLeft;
-        corner = bounds.bottomRight;
+        right += totalDelta.dx;
+        bottom += totalDelta.dy;
       default:
         return origin;
     }
+    final grown = Rect.fromLTRB(
+      math.min(left, right),
+      math.min(top, bottom),
+      math.max(left, right),
+      math.max(top, bottom),
+    );
 
-    final original = corner - anchor;
-    final lengthSquared = original.distanceSquared;
-    // A mark with no extent has no direction to scale along.
-    if (lengthSquared < 1.0) return origin;
+    // Which side of the box is the mark's length, and which is its weight.
+    // Snapped to whichever screen axis the stroke is closer to, rather than
+    // blended across both: a line drawn two pixels off horizontal is horizontal
+    // as far as anyone using it is concerned, and blending would leak a slice
+    // of every sideways drag into its thickness.
+    final axis = _strokeAxis(origin, bounds);
+    final runsHorizontally = axis.dx.abs() >= axis.dy.abs();
+    double along(Rect r) => runsHorizontally ? r.width : r.height;
+    double across(Rect r) => runsHorizontally ? r.height : r.width;
 
-    final dragged = corner + totalDelta - anchor;
-    final factor =
-        ((dragged.dx * original.dx + dragged.dy * original.dy) / lengthSquared)
-            .clamp(0.05, 20.0);
+    final fixedWeight = _fixedWeightStrokeTools.contains(origin.tool);
+    final ceiling = dragSizedStrokeTools.contains(origin.tool)
+        ? _maxDragStrokeWidth
+        : _maxStrokeWidth;
+    // The box change is what the pointer asked for; the stroke weight that
+    // produces it is that divided by how fast this mark grows per unit of
+    // weight. One for a plain stroke, eight for a ruler — whose caps reach
+    // 3.5x the weight on each side of its line, so treating the two as
+    // interchangeable made a ruler explode under the smallest drag.
+    final perUnit = AnnotationRenderer.acrossExtentPerStrokeWidth(origin.tool);
+    final width = fixedWeight
+        ? origin.strokeWidth
+        : (origin.strokeWidth + (across(grown) - across(bounds)) / perUnit)
+            .clamp(_minStrokeWidth, ceiling);
 
-    Offset scaled(Offset p) => anchor + (p - anchor) * factor;
+    // Length follows the *change* in the box's along-extent, one pixel for one
+    // pixel, so the far end tracks the pointer exactly as a shape's corner
+    // does. Deriving it from the new extent instead would couple the two axes
+    // back together: the bounds grow by the stroke weight on every side, so a
+    // purely downward drag would have thickened the mark and shortened it by
+    // the same amount in one gesture.
+    double diagonal(Rect r) => math.sqrt(r.width * r.width + r.height * r.height);
+
+    final double factor;
+    if (fixedWeight) {
+      // Nothing is being read out of the across-axis, so the whole box drives a
+      // uniform scale: every corner drag makes the mark bigger or smaller in
+      // proportion, whichever way it is pulled.
+      final was = diagonal(bounds);
+      factor = was < 1.0 ? 1.0 : (diagonal(grown) / was).clamp(0.05, 20.0);
+    } else {
+      final oldRun = math.max(1.0, along(bounds) - origin.strokeWidth);
+      final newRun = math.max(1.0, oldRun + along(grown) - along(bounds));
+      factor = (newRun / oldRun).clamp(0.05, 20.0);
+    }
+
+    // A stroke straddles its own centre line, so growing the weight alone would
+    // push it out in *both* directions — hold the bottom handle and the top
+    // edge climbs away from you too. Offsetting the mark by half the growth,
+    // away from the edge being held, pins that edge exactly as dragging a
+    // shape's bottom corner leaves its top where it was.
+    final acrossAxis = runsHorizontally ? const Offset(0, 1) : const Offset(1, 0);
+    final growsPositive = runsHorizontally
+        ? handle == _AnnHandle.bottomLeft || handle == _AnnHandle.bottomRight
+        : handle == _AnnHandle.topRight || handle == _AnnHandle.bottomRight;
+    // Offset by half the *achieved* growth in drawn height, not half the change
+    // in stroke weight: for a ruler those differ by a factor of eight, and
+    // using the weight left the top edge climbing away while the bottom was
+    // held. Reading it back from the clamped width also keeps the pin honest
+    // once the drag hits the ceiling.
+    // No weight change means no edge to pin, so nothing is offset.
+    final grownAcross = (width - origin.strokeWidth) * perUnit;
+    final shift = fixedWeight
+        ? Offset.zero
+        : acrossAxis * (grownAcross / 2) * (growsPositive ? 1.0 : -1.0);
+
+    // Scale about whichever end is nearest the corner being anchored, so that
+    // end stays genuinely put rather than creeping as the mark grows.
+    final anchor = _resizeAnchor(origin, bounds, handle);
+    Offset scaled(Offset p) => anchor + (p - anchor) * factor + shift;
 
     return origin.copyWith(
-      strokeWidth:
-          (origin.strokeWidth * factor).clamp(_minStrokeWidth, _maxStrokeWidth),
+      strokeWidth: width,
       points: origin.points.isEmpty ? null : origin.points.map(scaled).toList(),
       startPoint: origin.startPoint == null ? null : scaled(origin.startPoint!),
       endPoint: origin.endPoint == null ? null : scaled(origin.endPoint!),
@@ -1145,6 +1279,39 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       controlPoint:
           origin.controlPoint == null ? null : scaled(origin.controlPoint!),
     );
+  }
+
+  /// The point a resize scales about: the corner of [bounds] opposite [handle]
+  /// for a freehand mark, or — for a two-point mark — whichever of its ends is
+  /// nearest that corner, so that end does not drift.
+  Offset _resizeAnchor(Annotation origin, Rect bounds, _AnnHandle handle) {
+    final corner = switch (handle) {
+      _AnnHandle.topLeft => bounds.bottomRight,
+      _AnnHandle.topRight => bounds.bottomLeft,
+      _AnnHandle.bottomLeft => bounds.topRight,
+      _ => bounds.topLeft,
+    };
+    final start = origin.startPoint;
+    final end = origin.endPoint;
+    if (start == null || end == null) return corner;
+    return (start - corner).distanceSquared <= (end - corner).distanceSquared
+        ? start
+        : end;
+  }
+
+  /// The unit vector a stroke runs along.
+  ///
+  /// Two-point marks have a real direction. A freehand squiggle does not, so it
+  /// falls back to whichever way its bounding box is longer — the axis a user
+  /// would call its length.
+  Offset _strokeAxis(Annotation origin, Rect bounds) {
+    final start = origin.startPoint;
+    final end = origin.endPoint;
+    if (start != null && end != null) {
+      final span = end - start;
+      if (span.distance > 1.0) return span / span.distance;
+    }
+    return bounds.width >= bounds.height ? const Offset(1, 0) : const Offset(0, 1);
   }
 
   Annotation _resizeAnnotation(Annotation origin, _AnnHandle handle, Offset totalDelta) {

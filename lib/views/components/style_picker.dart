@@ -166,6 +166,9 @@ class StylePicker extends StatelessWidget {
     final effectiveTool = selectedAnnotation?.tool ?? activeTool;
     final effectiveShapeKind = selectedAnnotation?.shapeKind ?? shapeKind;
 
+    // Thickness is drag-set for some marks, and a slider showing the same
+    // property would only be a second, coarser way to do it — capped lower than
+    // the drag allows, at that. See [dragSizedStrokeTools].
     final showStroke = [
       CanvasTool.pen,
       CanvasTool.arrow,
@@ -173,7 +176,8 @@ class StylePicker extends StatelessWidget {
       CanvasTool.shape,
       CanvasTool.highlight,
       CanvasTool.ruler,
-    ].contains(effectiveTool);
+    ].contains(effectiveTool) &&
+        !dragSizedStrokeTools.contains(effectiveTool);
 
     final showFont = effectiveTool == CanvasTool.text || effectiveTool == CanvasTool.stepMarker;
     final showFill = [CanvasTool.shape, CanvasTool.text].contains(effectiveTool);

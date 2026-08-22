@@ -15,6 +15,64 @@ class AnnotationRenderer {
   const AnnotationRenderer._();
 
   static const double hitPadding = 10.0;
+  /// Two-point marks whose extent includes their stroke weight.
+  static const Set<CanvasTool> _strokeBoundedTools = {CanvasTool.line};
+
+  /// An arrow head reaches this multiple of the stroke weight back from the
+  /// tip, and flares [arrowHeadAspect] of that to each side.
+  static const double arrowHeadLengthMultiplier = 4.0;
+  static const double arrowHeadAspect = 0.45;
+  static const double arrowHeadMinLength = 12.0;
+
+  /// The head geometry for a straight arrow, shared by the painter and by
+  /// [boundingRect] so the two can never disagree about how big the head is.
+  ///
+  /// Both dimensions scale with the stroke weight, and a head too long for a
+  /// short arrow is scaled down on *both* axes together. Clamping only the
+  /// length — as this used to, at half the arrow's span — left the head frozen
+  /// while the shaft went on thickening, until the body was wider than the
+  /// point it was supposed to be attached to.
+  static ({double length, double halfWidth}) arrowHead(Annotation ann) {
+    final start = ann.startPoint;
+    final end = ann.endPoint;
+    if (start == null || end == null) return (length: 0, halfWidth: 0);
+
+    var length = math.max(arrowHeadMinLength, ann.strokeWidth * arrowHeadLengthMultiplier);
+    var halfWidth = length * arrowHeadAspect;
+
+    final maxLength = (end - start).distance * 0.8;
+    if (maxLength > 0 && length > maxLength) {
+      final scale = maxLength / length;
+      length *= scale;
+      halfWidth *= scale;
+    }
+    return (length: length, halfWidth: halfWidth);
+  }
+
+  /// How far a ruler's end caps and ticks reach on each side of its line, as a
+  /// multiple of the stroke weight. Ticks have to stay visible as the line
+  /// thickens, which is why they scale rather than sit at a fixed size.
+  static const double rulerCapMultiplier = 3.5;
+  static const double rulerMinCapHalf = 6.0;
+
+  static double rulerCapHalf(Annotation ann) =>
+      math.max(rulerMinCapHalf, ann.strokeWidth * rulerCapMultiplier);
+
+  /// How much a mark's extent *across* its own axis grows per unit of stroke
+  /// weight.
+  ///
+  /// One for anything drawn as a plain stroke. A ruler is the exception: its
+  /// caps reach [rulerCapMultiplier] times the weight on each side of the line,
+  /// so a ruler grows eight times as fast as its stroke width. Resizing divides
+  /// by this, or a drag that should have added 80px of height added 640 — the
+  /// ruler "expanding extremely".
+  static double acrossExtentPerStrokeWidth(CanvasTool tool) => switch (tool) {
+        CanvasTool.ruler => 1.0 + rulerCapMultiplier * 2,
+        // An arrow is as wide as its head, which flares well past the shaft.
+        CanvasTool.arrow => arrowHeadLengthMultiplier * arrowHeadAspect * 2,
+        _ => 1.0,
+      };
+
   static const double selectionInset = 8.0;
   static const double rotationHandleGap = 24.0;
   static const double handleHitRadius = 14.0;
@@ -41,6 +99,52 @@ class AnnotationRenderer {
         }
         return Rect.fromLTRB(minX, minY, maxX, maxY).inflate(ann.strokeWidth / 2);
 
+      case CanvasTool.arrow:
+        if (ann.startPoint == null || ann.endPoint == null) return Rect.zero;
+        if (ann.controlPoint != null) {
+          final minX = math.min(ann.startPoint!.dx, math.min(ann.endPoint!.dx, ann.controlPoint!.dx));
+          final maxX = math.max(ann.startPoint!.dx, math.max(ann.endPoint!.dx, ann.controlPoint!.dx));
+          final minY = math.min(ann.startPoint!.dy, math.min(ann.endPoint!.dy, ann.controlPoint!.dy));
+          final maxY = math.max(ann.startPoint!.dy, math.max(ann.endPoint!.dy, ann.controlPoint!.dy));
+          return Rect.fromLTRB(minX, minY, maxX, maxY).inflate(ann.strokeWidth / 2);
+        }
+        // The head flares wider than the shaft, so the span alone does not
+        // bound the mark: take in the head's base corners as well, or the
+        // selection guide sits inside the arrow point.
+        return _boundsThrough(
+          _arrowOutlinePoints(ann),
+          ann.strokeWidth / 2,
+        );
+
+      case CanvasTool.ruler:
+        if (ann.startPoint == null || ann.endPoint == null) return Rect.zero;
+        // The four cap ends, which is the true drawn extent: the caps run
+        // perpendicular to the line, so the bounds have to be wide across the
+        // ruler and only stroke-deep along it. Inflating uniformly by the
+        // stroke weight, as the other two-point marks do, left the guide a
+        // fraction of the size of the mark it was meant to enclose.
+        final capHalf = rulerCapHalf(ann);
+        final span = ann.endPoint! - ann.startPoint!;
+        final length = span.distance;
+        final normal = length < 1
+            ? const Offset(0, 1)
+            : Offset(-span.dy / length, span.dx / length);
+        final corners = [
+          ann.startPoint! - normal * capHalf,
+          ann.startPoint! + normal * capHalf,
+          ann.endPoint! - normal * capHalf,
+          ann.endPoint! + normal * capHalf,
+        ];
+        var minX = corners.first.dx, maxX = corners.first.dx;
+        var minY = corners.first.dy, maxY = corners.first.dy;
+        for (final c in corners) {
+          if (c.dx < minX) minX = c.dx;
+          if (c.dx > maxX) maxX = c.dx;
+          if (c.dy < minY) minY = c.dy;
+          if (c.dy > maxY) maxY = c.dy;
+        }
+        return Rect.fromLTRB(minX, minY, maxX, maxY).inflate(ann.strokeWidth / 2);
+
       case CanvasTool.stepMarker:
         if (ann.startPoint == null) return Rect.zero;
         return Rect.fromCircle(center: ann.startPoint!, radius: _stepRadius(ann));
@@ -64,10 +168,62 @@ class AnnotationRenderer {
             final maxY = math.max(ann.startPoint!.dy, math.max(ann.endPoint!.dy, ann.controlPoint!.dy));
             return Rect.fromLTRB(minX, minY, maxX, maxY).inflate(ann.strokeWidth / 2);
           }
-          return Rect.fromPoints(ann.startPoint!, ann.endPoint!);
+          final span = Rect.fromPoints(ann.startPoint!, ann.endPoint!);
+          // A line, arrow or ruler *is* its stroke, so its bounds have to
+          // include the width — otherwise a thick one spills well outside its
+          // own selection box, and the handles sit buried inside the mark
+          // instead of on its edge. Pen, highlighter and curved arrows already
+          // inflate in their own branches; a shape or a blur is bounded by its
+          // rect rather than by its outline, so those keep the raw span.
+          return _strokeBoundedTools.contains(ann.tool)
+              ? span.inflate(ann.strokeWidth / 2)
+              : span;
         }
         return Rect.zero;
     }
+  }
+
+  /// Axis-aligned bounds of [points], inflated by [padding].
+  static Rect _boundsThrough(List<Offset> points, double padding) {
+    if (points.isEmpty) return Rect.zero;
+    var minX = points.first.dx, maxX = points.first.dx;
+    var minY = points.first.dy, maxY = points.first.dy;
+    for (final p in points) {
+      if (p.dx < minX) minX = p.dx;
+      if (p.dx > maxX) maxX = p.dx;
+      if (p.dy < minY) minY = p.dy;
+      if (p.dy > maxY) maxY = p.dy;
+    }
+    return Rect.fromLTRB(minX, minY, maxX, maxY).inflate(padding);
+  }
+
+  /// The extreme points of a straight arrow: both ends, plus the corners where
+  /// each head flares widest.
+  static List<Offset> _arrowOutlinePoints(Annotation ann) {
+    final start = ann.startPoint!;
+    final end = ann.endPoint!;
+    final span = end - start;
+    final length = span.distance;
+    if (length < 0.5) return [start, end];
+
+    final head = arrowHead(ann);
+    final direction = span / length;
+    final normal = Offset(-direction.dy, direction.dx);
+
+    List<Offset> cornersAt(Offset tip, double sign) {
+      final base = tip - direction * (head.length * sign);
+      return [
+        base + normal * head.halfWidth,
+        base - normal * head.halfWidth,
+      ];
+    }
+
+    return [
+      start,
+      end,
+      ...cornersAt(end, 1),
+      if (ann.isDoubleArrow) ...cornersAt(start, -1),
+    ];
   }
 
   /// Bounds of the selection frame drawn around [ann].
@@ -359,7 +515,11 @@ class AnnotationRenderer {
   /// Effective fill for a shape: the explicit fill colour when set, otherwise a
   /// translucent tint of the stroke colour.
   static Color _effectiveFill(Annotation ann) {
-    final base = ann.fillColor ?? ann.color.withValues(alpha: 0.25);
+    // Solid. The 25% wash this used to fall back to was a second, invisible
+    // transparency control layered under the two the panel already offers — a
+    // fill colour and an opacity slider — so a shape set to a solid colour at
+    // full opacity still came out translucent with no way to say otherwise.
+    final base = ann.fillColor ?? ann.color;
     return _applyOpacity(base, ann.opacity);
   }
 
@@ -539,10 +699,11 @@ class AnnotationRenderer {
 
     final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
 
-    // Head scales with stroke weight but never overwhelms a short arrow.
-    final length = (end - start).distance;
-    final headLength = math.min(math.max(12.0, strokeW * 4.0), length * 0.5);
-    final headHalfWidth = headLength * 0.45;
+    // Head scales with stroke weight but never overwhelms a short arrow. Both
+    // dimensions come from one helper that `boundingRect` shares.
+    final head = arrowHead(ann);
+    final headLength = head.length;
+    final headHalfWidth = head.halfWidth;
 
     Offset shorten(Offset from, double by, double dir) => Offset(
           from.dx - dir * by * math.cos(angle),
@@ -753,7 +914,7 @@ class AnnotationRenderer {
 
     final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
     final normal = Offset(-math.sin(angle), math.cos(angle));
-    final capHalf = math.max(6.0, ann.strokeWidth * 3.5);
+    final capHalf = rulerCapHalf(ann);
 
     canvas.drawLine(start, end, paint);
     // End caps

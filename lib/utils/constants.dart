@@ -1,5 +1,19 @@
 import 'package:flutter/material.dart';
 
+/// Tools whose stroke weight is set by dragging the mark itself, not by the
+/// properties slider.
+///
+/// Dragging a resize handle across one of these changes its thickness (see
+/// `EditorCanvas._resizeStroke`), which makes a slider for the same property
+/// redundant — so the panel hides it for them, and their weight is free to go
+/// well past the range a slider could offer.
+const dragSizedStrokeTools = {
+  CanvasTool.line,
+  CanvasTool.arrow,
+  CanvasTool.highlight,
+  CanvasTool.ruler,
+};
+
 enum CanvasTool {
   select,
   pen,
