@@ -70,11 +70,12 @@ void main() {
   });
 
   test('resizing accounts for how fast an arrow grows per unit of weight', () {
-    // The arrow's width across its axis is its head, which is
-    // 4 x 0.45 x 2 = 3.6 times the stroke weight. Resizing divides by this, so
-    // a drag asking for n pixels of height gets n rather than 3.6n.
+    // The arrow's width across its axis is its head, 4 x 0.45 x 2 = 3.6 times
+    // the stroke weight, plus the half-weight padding on each side that
+    // `boundingRect` adds: 4.6. Resizing divides by this, so a drag asking for
+    // n pixels of height gets n rather than 4.6n.
     expect(AnnotationRenderer.acrossExtentPerStrokeWidth(CanvasTool.arrow),
-        closeTo(3.6, 0.001));
+        closeTo(4.6, 0.001));
     expect(AnnotationRenderer.acrossExtentPerStrokeWidth(CanvasTool.line), 1.0);
   });
 }

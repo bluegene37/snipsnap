@@ -160,7 +160,7 @@ void main() {
 
   setUp(() => TestWidgetsFlutterBinding.ensureInitialized());
 
-  for (final tool in const [CanvasTool.line, CanvasTool.arrow, CanvasTool.ruler]) {
+  for (final tool in const [CanvasTool.line, CanvasTool.ruler]) {
     testWidgets('dragging along a ${tool.name} changes its length only',
         (tester) async {
       await tester.binding.setSurfaceSize(const Size(900, 800));
@@ -210,6 +210,106 @@ void main() {
           reason: 'a perpendicular drag must not swing it around');
     });
   }
+
+  testWidgets('an arrow scales as one object from a corner drag', (tester) async {
+    // The report: enlarging an arrow by its guide did not keep its proportions.
+    // Under the along/across split a drag lengthened the shaft while the head
+    // (sized from the weight) lagged behind, so the arrow came out as a long
+    // thin shaft with a stubby point. Length, weight and therefore head now
+    // all scale by one factor, about the corner opposite the handle.
+    await tester.binding.setSurfaceSize(const Size(900, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final h = await _pump(tester, _flat(CanvasTool.arrow, strokeWidth: 8));
+    addTearDown(() => h.dir.deleteSync(recursive: true));
+
+    final before = _toCanvas(h.latest.single, h.box.size);
+    final beforeBounds = AnnotationRenderer.boundingRect(before);
+    final handles = await _selectAndGetHandles(tester, h);
+    final corner = h.box.localToGlobal(handles.bottomRight);
+    // Straight along the arrow: the proportional axis.
+    await _dragFromTo(tester, corner, corner + const Offset(180, 0));
+
+    final after = _toCanvas(h.latest.single, h.box.size);
+    final lengthRatio = _length(after) / _length(before);
+    final weightRatio = after.strokeWidth / before.strokeWidth;
+
+    expect(lengthRatio, greaterThan(1.2), reason: 'the drag must enlarge it');
+    expect(weightRatio, closeTo(lengthRatio, 0.03),
+        reason: 'weight — and so the head — scales by the same factor as the '
+            'length, or the arrow changes shape as it grows');
+    expect(_angle(after), closeTo(_angle(before), 0.02));
+
+    final afterBounds = AnnotationRenderer.boundingRect(after);
+    expect(afterBounds.topLeft.dx, closeTo(beforeBounds.topLeft.dx, 3));
+    expect(afterBounds.topLeft.dy, closeTo(beforeBounds.topLeft.dy, 3),
+        reason: 'the corner opposite the handle stays put, like a shape');
+  });
+
+  testWidgets('an arrow dragged across thickens at the pointer, head included',
+      (tester) async {
+    // The report: under a pure diagonal-ratio scale a vertical pull on a wide
+    // flat arrow moved its diagonal by about one percent, so the handle did
+    // not follow. Across the arrow now means what it means for a line — the
+    // held edge tracks the pointer — and the head, sized from the weight,
+    // grows with it.
+    await tester.binding.setSurfaceSize(const Size(900, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final h = await _pump(tester, _flat(CanvasTool.arrow, strokeWidth: 8));
+    addTearDown(() => h.dir.deleteSync(recursive: true));
+
+    final before = _toCanvas(h.latest.single, h.box.size);
+    final beforeBounds = AnnotationRenderer.boundingRect(before);
+    final handles = await _selectAndGetHandles(tester, h);
+    final corner = h.box.localToGlobal(handles.bottomRight);
+    await _dragFromTo(tester, corner, corner + const Offset(0, 90));
+
+    final after = _toCanvas(h.latest.single, h.box.size);
+    final afterBounds = AnnotationRenderer.boundingRect(after);
+    expect(afterBounds.bottom - beforeBounds.bottom, closeTo(90, 5),
+        reason: 'the held edge must land under the pointer');
+    expect(afterBounds.top, closeTo(beforeBounds.top, 3),
+        reason: 'and the opposite edge stays put');
+    expect(_length(after), closeTo(_length(before), 2),
+        reason: 'an across drag does not lengthen it');
+    expect(AnnotationRenderer.arrowHead(after).halfWidth,
+        greaterThan(AnnotationRenderer.arrowHead(before).halfWidth * 1.5),
+        reason: 'the head grows with the weight');
+  });
+
+  testWidgets('a big enough arrow drag still clears the old slider ceiling',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(900, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    // Short, so a x3 drag stays inside the test surface: pointer moves past
+    // its edge are not delivered, and a drag that runs off it under-scales.
+    final short = Annotation(
+      id: 'a1',
+      tool: CanvasTool.arrow,
+      color: const Color(0xFF000000),
+      // Heavy to begin with: the ceiling is checked in canvas units, and the
+      // image is letterboxed to about 0.58x here, so 20 image px is ~12 on
+      // the canvas — x3 clears 30 with room to spare.
+      strokeWidth: 20,
+      startPoint: const Offset(400, 450),
+      endPoint: const Offset(700, 452),
+    );
+    final h = await _pump(tester, short);
+    addTearDown(() => h.dir.deleteSync(recursive: true));
+
+    final handles = await _selectAndGetHandles(tester, h);
+    final corner = h.box.localToGlobal(handles.bottomRight);
+    final anchor = h.box.localToGlobal(handles.topLeft);
+    // Scaling the whole arrow x3 takes its weight well past 30 — the cap the
+    // arrow's removed slider used to impose.
+    await _dragFromTo(tester, corner, anchor + (corner - anchor) * 3);
+
+    final canvas = _toCanvas(h.latest.single, h.box.size);
+    expect(canvas.strokeWidth, greaterThan(30.0));
+    expect(canvas.strokeWidth, lessThanOrEqualTo(240.0 + 0.001));
+  });
 
   testWidgets('the top-left handle thickens when pulled the other way',
       (tester) async {
@@ -578,11 +678,7 @@ void main() {
         reason: 'but a runaway drag still stops somewhere');
   });
 
-  for (final tool in const [
-    CanvasTool.arrow,
-    CanvasTool.highlight,
-    CanvasTool.ruler,
-  ]) {
+  for (final tool in const [CanvasTool.highlight, CanvasTool.ruler]) {
     testWidgets('${tool.name} can also be dragged past the old ceiling',
         (tester) async {
       await tester.binding.setSurfaceSize(const Size(900, 800));

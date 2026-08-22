@@ -186,6 +186,18 @@ const _freehandTools = {CanvasTool.pen, CanvasTool.highlight};
 /// heavier. Resizing one of these scales it uniformly and touches nothing else.
 const _fixedWeightStrokeTools = {CanvasTool.pen};
 
+/// Stroke tools whose weight rides along with their length.
+///
+/// An arrow's head is sized from its weight, so lengthening the shaft alone —
+/// what the plain along/across split does — left the head behind and the
+/// arrow lost its proportions. For these, a drag *along* the mark scales
+/// length and weight by one factor, about the opposite corner, so a longer
+/// arrow is the same arrow, bigger. A drag *across* it still thickens at the
+/// pointer exactly as it does for a line: a pure diagonal-ratio scale was
+/// tried first and a vertical pull on a wide flat arrow moved its diagonal by
+/// about one percent, so the handle simply did not follow.
+const _proportionalStrokeTools = {CanvasTool.arrow};
+
 const _strokeTools = {
   CanvasTool.pen,
   CanvasTool.line,
@@ -1210,18 +1222,35 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     double across(Rect r) => runsHorizontally ? r.height : r.width;
 
     final fixedWeight = _fixedWeightStrokeTools.contains(origin.tool);
+    final proportional = _proportionalStrokeTools.contains(origin.tool);
     final ceiling = dragSizedStrokeTools.contains(origin.tool)
         ? _maxDragStrokeWidth
         : _maxStrokeWidth;
+
+    double diagonal(Rect r) => math.sqrt(r.width * r.width + r.height * r.height);
+    final wasDiagonal = diagonal(bounds);
+    final uniformFactor =
+        wasDiagonal < 1.0 ? 1.0 : (diagonal(grown) / wasDiagonal).clamp(0.05, 20.0);
+
+    // Length from the change in the along-extent, one pixel for one pixel (see
+    // the note below). Computed up front because a proportional mark's weight
+    // is derived from it.
+    final oldRun = math.max(1.0, along(bounds) - origin.strokeWidth);
+    final newRun = math.max(1.0, oldRun + along(grown) - along(bounds));
+    final alongFactor = (newRun / oldRun).clamp(0.05, 20.0);
     // The box change is what the pointer asked for; the stroke weight that
     // produces it is that divided by how fast this mark grows per unit of
     // weight. One for a plain stroke, eight for a ruler — whose caps reach
     // 3.5x the weight on each side of its line, so treating the two as
     // interchangeable made a ruler explode under the smallest drag.
     final perUnit = AnnotationRenderer.acrossExtentPerStrokeWidth(origin.tool);
+    // A proportional mark's weight starts from the along-scaled value, then
+    // takes the across drag on top — so a sideways pull thickens it just as it
+    // thickens a line, and a lengthwise pull keeps it in proportion.
+    final baseWeight = proportional ? origin.strokeWidth * alongFactor : origin.strokeWidth;
     final width = fixedWeight
         ? origin.strokeWidth
-        : (origin.strokeWidth + (across(grown) - across(bounds)) / perUnit)
+        : (baseWeight + (across(grown) - across(bounds)) / perUnit)
             .clamp(_minStrokeWidth, ceiling);
 
     // Length follows the *change* in the box's along-extent, one pixel for one
@@ -1230,20 +1259,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // back together: the bounds grow by the stroke weight on every side, so a
     // purely downward drag would have thickened the mark and shortened it by
     // the same amount in one gesture.
-    double diagonal(Rect r) => math.sqrt(r.width * r.width + r.height * r.height);
-
-    final double factor;
-    if (fixedWeight) {
-      // Nothing is being read out of the across-axis, so the whole box drives a
-      // uniform scale: every corner drag makes the mark bigger or smaller in
-      // proportion, whichever way it is pulled.
-      final was = diagonal(bounds);
-      factor = was < 1.0 ? 1.0 : (diagonal(grown) / was).clamp(0.05, 20.0);
-    } else {
-      final oldRun = math.max(1.0, along(bounds) - origin.strokeWidth);
-      final newRun = math.max(1.0, oldRun + along(grown) - along(bounds));
-      factor = (newRun / oldRun).clamp(0.05, 20.0);
-    }
+    // A fixed-weight mark reads nothing out of the across-axis on its own, so
+    // the whole box drives a uniform scale: every corner drag makes it bigger
+    // or smaller in proportion, whichever way it is pulled. Everything else
+    // takes its length from the along-axis alone.
+    final factor = fixedWeight ? uniformFactor : alongFactor;
 
     // A stroke straddles its own centre line, so growing the weight alone would
     // push it out in *both* directions — hold the bottom handle and the top
@@ -1260,14 +1280,22 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // held. Reading it back from the clamped width also keeps the pin honest
     // once the drag hits the ceiling.
     // No weight change means no edge to pin, so nothing is offset.
-    final grownAcross = (width - origin.strokeWidth) * perUnit;
+    // Only the across-drag's share of the growth is pinned: the part a
+    // proportional mark gained from its along-scale is already anchored at
+    // the opposite corner by the scale itself.
+    final grownAcross = (width - baseWeight) * perUnit;
     final shift = fixedWeight
         ? Offset.zero
         : acrossAxis * (grownAcross / 2) * (growsPositive ? 1.0 : -1.0);
 
     // Scale about whichever end is nearest the corner being anchored, so that
-    // end stays genuinely put rather than creeping as the mark grows.
-    final anchor = _resizeAnchor(origin, bounds, handle);
+    // end stays genuinely put rather than creeping as the mark grows. A
+    // proportional mark scales about the box corner itself: its whole outline
+    // — weight and head included — is linear in the scale, so the far corner
+    // of the box is exactly what stays put, as it does for a shape.
+    final anchor = proportional
+        ? _oppositeCorner(bounds, handle)
+        : _resizeAnchor(origin, bounds, handle);
     Offset scaled(Offset p) => anchor + (p - anchor) * factor + shift;
 
     return origin.copyWith(
@@ -1280,6 +1308,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           origin.controlPoint == null ? null : scaled(origin.controlPoint!),
     );
   }
+
+  Offset _oppositeCorner(Rect bounds, _AnnHandle handle) => switch (handle) {
+        _AnnHandle.topLeft => bounds.bottomRight,
+        _AnnHandle.topRight => bounds.bottomLeft,
+        _AnnHandle.bottomLeft => bounds.topRight,
+        _ => bounds.topLeft,
+      };
 
   /// The point a resize scales about: the corner of [bounds] opposite [handle]
   /// for a freehand mark, or — for a two-point mark — whichever of its ends is

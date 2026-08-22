@@ -68,8 +68,10 @@ class AnnotationRenderer {
   /// ruler "expanding extremely".
   static double acrossExtentPerStrokeWidth(CanvasTool tool) => switch (tool) {
         CanvasTool.ruler => 1.0 + rulerCapMultiplier * 2,
-        // An arrow is as wide as its head, which flares well past the shaft.
-        CanvasTool.arrow => arrowHeadLengthMultiplier * arrowHeadAspect * 2,
+        // An arrow is as wide as its head, which flares well past the shaft —
+        // plus the half-weight `boundingRect` pads on each side, the same
+        // term the ruler's own figure carries.
+        CanvasTool.arrow => 1.0 + arrowHeadLengthMultiplier * arrowHeadAspect * 2,
         _ => 1.0,
       };
 
