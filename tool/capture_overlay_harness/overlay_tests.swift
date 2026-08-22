@@ -184,6 +184,24 @@ private func makeView(
           captureCount == 0, "cancel=\(cancelCount) capture=\(captureCount)")
   }
 
+  print("\n=== Window: must reach a full-screen app's Space ===")
+  do {
+    let screen = NSScreen.main ?? NSScreen.screens.first!
+    let w = CaptureOverlayWindow(
+      screen: screen, screenImage: nil, onCapture: { _ in }, onCancel: {})
+    // The one property that decided it in the live matrix: a regular window is
+    // placed on its own app's Space instead of the active full-screen one.
+    check("is a non-activating panel", w is NSPanel && w.styleMask.contains(.nonactivatingPanel),
+          "NSWindow variants never reached the full-screen Space; every nonactivating NSPanel did")
+    check("survives the app not being active", !w.hidesOnDeactivate)
+    check("is above ordinary windows", w.level.rawValue >= NSWindow.Level.screenSaver.rawValue,
+          "level=\(w.level.rawValue)")
+    check("joins every Space, including full-screen ones",
+          w.collectionBehavior.contains(.canJoinAllSpaces) && w.collectionBehavior.contains(.fullScreenAuxiliary))
+    check("can take key so the cancel keys land", w.canBecomeKey)
+    check("never becomes main, so the app's Space is left alone", !w.canBecomeMain)
+  }
+
   print("\n=== Activation: the first click must not be swallowed ===")
   do {
     let v = makeView(onCapture: { _ in }, onCancel: {})

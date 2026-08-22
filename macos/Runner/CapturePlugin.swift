@@ -131,14 +131,20 @@ class CapturePlugin: NSObject {
           }
         )
         self.activeWindows.append(overlayWindow)
-        overlayWindow.makeKeyAndOrderFront(nil)
+        // `orderFrontRegardless`, not `makeKeyAndOrderFront`: the latter is
+        // ignored while another app is active, which for a capture launched
+        // from the global hotkey is always. Showing the window first also
+        // means it is already up if activation moves Spaces underneath it.
+        overlayWindow.orderFrontRegardless()
       }
 
       // Ensure first overlay window is key window to receive events
-      if let first = self.activeWindows.first {
-        first.makeKey()
-        NSApp.activate(ignoringOtherApps: true)
-      }
+      // Deliberately no `NSApp.activate`. Activating a regular app brings its
+      // main window's Space forward, which is the desktop — so it would switch
+      // the user away from the full-screen app they meant to capture. The
+      // non-activating panel takes key on its own, which is all the cancel
+      // keys need.
+      self.activeWindows.first?.makeKey()
 
       // Global and local key event monitors: ANY key press immediately cancels
       self.localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
@@ -217,7 +223,20 @@ class CapturePlugin: NSObject {
 
 // MARK: - Capture Overlay Window
 
-private class CaptureOverlayWindow: NSWindow {
+/// A non-activating panel, not a window — and that distinction is the whole
+/// fix for capture over a full-screen app.
+///
+/// A full-screen app owns its own Space. When a regular `NSWindow` is ordered
+/// front while that Space is active, the window server places it on *its own
+/// app's* Space instead, so the overlay was never on screen at all: every
+/// level from `.screenSaver` to the shielding level, with and without
+/// activation, landed on the desktop behind Chrome or Android Studio. Measured
+/// directly — seven `NSWindow` variants, all off the active Space, none
+/// receiving a click. An `NSPanel` with `.nonactivatingPanel` is what the
+/// screenshot tools that do work over full-screen apps use, and every variant
+/// of it passed the same test: on screen, on the active Space, key, click
+/// delivered. Nothing else about the configuration mattered.
+private class CaptureOverlayWindow: NSPanel {
   init(
     screen: NSScreen,
     screenImage: CGImage?,
@@ -226,7 +245,7 @@ private class CaptureOverlayWindow: NSWindow {
   ) {
     super.init(
       contentRect: screen.frame,
-      styleMask: [.borderless],
+      styleMask: [.borderless, .nonactivatingPanel],
       backing: .buffered,
       defer: false
     )
@@ -237,7 +256,13 @@ private class CaptureOverlayWindow: NSWindow {
     self.hasShadow = false
     self.ignoresMouseEvents = false
     self.acceptsMouseMovedEvents = true
-    self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    // Not `isFloatingPanel`: that convenience silently resets `level` to
+    // `.floating`, undoing the line above.
+    // A panel hides itself when its app deactivates by default. This one must
+    // outlive that: the app is *not* activated to show it, precisely so the
+    // user's full-screen Space stays where it is.
+    self.hidesOnDeactivate = false
+    self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
 
     let view = CaptureOverlayView(
       frame: NSRect(origin: .zero, size: screen.frame.size),
@@ -249,12 +274,15 @@ private class CaptureOverlayWindow: NSWindow {
     self.contentView = view
   }
 
+  // Key but never main: key is what routes the cancel keys here, and a
+  // non-activating panel can take it without the app becoming active. Main
+  // would drag the rest of the app — and its Space — along with it.
   override var canBecomeKey: Bool {
     return true
   }
 
   override var canBecomeMain: Bool {
-    return true
+    return false
   }
 }
 
