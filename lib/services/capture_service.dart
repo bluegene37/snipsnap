@@ -94,26 +94,40 @@ class CaptureService {
           return null;
         }
       } else if (Platform.isWindows) {
-        // Launch Windows Snipping Tool / Snip & Sketch to clipboard
-        await Process.run('snippingtool', ['/clip']);
-        // Read clipboard image and persist to targetPath
+        // `ms-screenclip:` is the modern overlay; `snippingtool /clip` is the
+        // Windows 10 spelling and was *removed* in Windows 11, so it is the
+        // fallback rather than the first choice.
+        //
+        // The clipboard is cleared first and then polled, because the capture
+        // is not finished when the launcher returns — it is finished when the
+        // user lets go of the selection. Sleeping a fixed 600ms and reading
+        // once, as this did, meant every interactive capture on Windows read
+        // an empty clipboard and reported failure.
         final winPath = targetPath.replaceAll('/', '\\').replaceAll('"', '\\"');
         final script = '''
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
-Start-Sleep -Milliseconds 600
-if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
-  \$img = [System.Windows.Forms.Clipboard]::GetImage()
-  if (\$img -ne \$null) {
-    \$img.Save("$winPath", [System.Drawing.Imaging.ImageFormat]::Png)
+[System.Windows.Forms.Clipboard]::Clear()
+try { Start-Process "ms-screenclip:" | Out-Null }
+catch { Start-Process "snippingtool" -ArgumentList "/clip" | Out-Null }
+\$deadline = (Get-Date).AddSeconds(120)
+while ((Get-Date) -lt \$deadline) {
+  Start-Sleep -Milliseconds 200
+  if ([System.Windows.Forms.Clipboard]::ContainsImage()) {
+    \$img = [System.Windows.Forms.Clipboard]::GetImage()
+    if (\$img -ne \$null) {
+      \$img.Save("$winPath", [System.Drawing.Imaging.ImageFormat]::Png)
+      break
+    }
   }
 }
 ''';
-        final result = await Process.run('powershell', ['-NoProfile', '-Command', script]);
-        if (result.exitCode == 0 && await File(targetPath).exists()) {
-          final len = await File(targetPath).length();
-          if (len > 0) return targetPath;
-        }
-        return null;
+        // `-Sta`: the clipboard APIs require a single-threaded apartment, and
+        // a capture that silently threw here would look like a cancelled snip.
+        final result = await Process.run(
+            'powershell', ['-NoProfile', '-Sta', '-Command', script]);
+        if (result.exitCode != 0) return null;
+        // Nothing on the clipboard within the window means the user cancelled.
+        return await _acceptIfNonEmpty(targetPath);
       } else if (Platform.isLinux) {
         var result = await Process.run('gnome-screenshot', ['-a', '-f', targetPath]);
         if (result.exitCode != 0) {

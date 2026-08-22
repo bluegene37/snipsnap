@@ -14,7 +14,10 @@ class ClipboardService {
       } else if (Platform.isWindows) {
         final winPath = filePath.replaceAll('/', '\\').replaceAll('"', '\\"');
         final script = 'Add-Type -AssemblyName System.Windows.Forms,System.Drawing; [System.Windows.Forms.Clipboard]::SetImage([System.Drawing.Image]::FromFile("$winPath"))';
-        final result = await Process.run('powershell', ['-NoProfile', '-Command', script]);
+        // `-Sta`: the clipboard APIs need a single-threaded apartment, and
+        // without it the copy throws instead of copying.
+        final result = await Process.run(
+            'powershell', ['-NoProfile', '-Sta', '-Command', script]);
         return result.exitCode == 0;
       } else if (Platform.isLinux) {
         final result = await Process.run(

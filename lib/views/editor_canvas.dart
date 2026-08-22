@@ -415,6 +415,16 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       _zoomToCentre(widget.zoomScale);
     }
 
+    // A different list from the parent is authoritative: the only override
+    // that should outlive a build is one belonging to a gesture still running.
+    if (!identical(oldWidget.annotations, widget.annotations) &&
+        !_isDraggingAnnotation &&
+        !_isResizingAnnotation &&
+        !_isRotatingAnnotation &&
+        _currentAnnHandle != _AnnHandle.curve) {
+      _liveAnnotations = null;
+    }
+
     if (oldWidget.historyRevision != widget.historyRevision) {
       _clearTransientMarks();
     }
@@ -486,6 +496,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   ///   the new capture through the previous one's geometry (and, at a different
   ///   aspect ratio, through its letterbox).
   void _discardStateForPreviousCapture(String? previousPath) {
+    _liveAnnotations = null;
     if (_hasExtractedSelection) {
       // Fire-and-forget, like the tool-change path: the paste is a file write
       // and this runs inside `didUpdateWidget`. `_imageRect` is still the old
@@ -560,6 +571,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// has already put those pixels back into the bitmap, so pasting the copy
   /// held in memory would stamp them in a second time.
   void _clearTransientMarks() {
+    _liveAnnotations = null;
     _floatingSelectionUiImage?.dispose();
     _floatingSelectionUiImage = null;
     _cutSelectionImage = null;
@@ -826,18 +838,45 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   List<Annotation> _canvasAnnotationsFor(CanvasProjection p) {
     if (_canvasAnnotationsCache != null &&
         _cachedProjection == p &&
-        identical(_cachedSource, widget.annotations)) {
+        identical(_cachedSource, _sourceAnnotations)) {
       return _canvasAnnotationsCache!;
     }
     // An invalid projection (no image yet, or a zero-sized canvas) cannot place
     // anything, so the list passes through untouched rather than being mangled.
+    final source = _sourceAnnotations;
     final mapped = p.isValid
-        ? widget.annotations.map((a) => a.mappedToCanvasSpace(p)).toList()
-        : widget.annotations;
+        ? source.map((a) => a.mappedToCanvasSpace(p)).toList()
+        : source;
     _canvasAnnotationsCache = mapped;
     _cachedProjection = p;
-    _cachedSource = widget.annotations;
+    _cachedSource = source;
     return mapped;
+  }
+
+  /// The annotation list as it looks mid-gesture, before the parent has been
+  /// told — null whenever no gesture is in flight.
+  ///
+  /// A live drag used to round-trip every pointer move through the parent's
+  /// `setState`, which rebuilt the header bar, both sidebars and the whole
+  /// properties panel for a change only this painter cares about. Measured at
+  /// ~92ms a frame with a few captures in the tray, which is the "clunky".
+  /// The gesture now stays here and the parent hears about it once, on
+  /// release, so a drag repaints the canvas and nothing else.
+  List<Annotation>? _liveAnnotations;
+
+  /// The list every read inside this canvas goes through: the in-flight
+  /// version while a gesture is running, the parent's otherwise.
+  List<Annotation> get _sourceAnnotations => _liveAnnotations ?? widget.annotations;
+
+  /// Hands the in-flight list to the parent and stops overriding.
+  ///
+  /// Goes out through the *live* callback so it lands without a second undo
+  /// entry — the checkpoint for this gesture was already pushed at its start.
+  void _flushLiveAnnotations() {
+    final pending = _liveAnnotations;
+    if (pending == null) return;
+    _liveAnnotations = null;
+    (widget.onAnnotationsLiveUpdated ?? widget.onAnnotationsUpdated)?.call(pending);
   }
 
   List<Annotation>? _canvasAnnotationsCache;
@@ -1009,16 +1048,25 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// Writes [updated] — a **canvas-space** annotation — back to the parent,
   /// which stores image pixels.
   void _replaceAnnotation(Annotation updated, {required bool live}) {
-    final callback =
-        live ? (widget.onAnnotationsLiveUpdated ?? widget.onAnnotationsUpdated) : widget.onAnnotationsUpdated;
-    if (callback == null) return;
-    final index = widget.annotations.indexWhere((a) => a.id == updated.id);
+    if (widget.onAnnotationsLiveUpdated == null && widget.onAnnotationsUpdated == null) {
+      return;
+    }
+    final source = _sourceAnnotations;
+    final index = source.indexWhere((a) => a.id == updated.id);
     if (index == -1) return;
     final p = _projection;
     if (!_canPlaceWrite(p)) return;
-    final list = List<Annotation>.from(widget.annotations);
+    final list = List<Annotation>.from(source);
     list[index] = updated.mappedToImageSpace(p);
-    callback(list);
+
+    if (live) {
+      // Held here and painted from `_sourceAnnotations`; the parent is told at
+      // gesture end by `_flushLiveAnnotations`.
+      setState(() => _liveAnnotations = list);
+      return;
+    }
+    _liveAnnotations = null;
+    widget.onAnnotationsUpdated?.call(list);
   }
 
   /// Hands a newly drawn **canvas-space** annotation to the parent in image
@@ -2040,6 +2088,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         _isDraggingAnnotation ||
         _currentAnnHandle == _AnnHandle.curve) {
       final settled = _selectedAnnotation;
+      _flushLiveAnnotations();
       setState(() {
         _isRotatingAnnotation = false;
         _isResizingAnnotation = false;
@@ -2797,6 +2846,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final selected = _selectedAnnotation;
     final selectedBounds =
         selected != null ? AnnotationRenderer.selectionRect(selected) : Rect.zero;
+    // Resolved once. `imageRect` walks to the render object and refits the
+    // bitmap on every read, and this build asked for it seven times a frame.
+    final imageRect = _imageRect;
+    final nativeImageSize = _baseImage == null
+        ? null
+        : Size(_baseImage!.width.toDouble(), _baseImage!.height.toDouble());
 
     return Focus(
       focusNode: _focusNode,
@@ -2861,12 +2916,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                         clipBehavior: Clip.none,
                         children: [
                           // Checkerboard directly under the image (revealed under transparent PNG pixels)
-                          if (_imageRect.width > 0 && _imageRect.height > 0)
+                          if (imageRect.width > 0 && imageRect.height > 0)
                             Positioned(
-                              left: _imageRect.left,
-                              top: _imageRect.top,
-                              width: _imageRect.width,
-                              height: _imageRect.height,
+                              left: imageRect.left,
+                              top: imageRect.top,
+                              width: imageRect.width,
+                              height: imageRect.height,
                               child: Container(
                                 decoration: BoxDecoration(
                                   boxShadow: [
@@ -2971,11 +3026,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                     marqueeRect: _selectionMarquee,
                                     floatingRect: _floatingSelectionRect,
                                     floatingImage: _floatingSelectionUiImage,
-                                    nativeImageSize: _baseImage != null
-                                        ? Size(_baseImage!.width.toDouble(),
-                                            _baseImage!.height.toDouble())
-                                        : null,
-                                    imageRect: _imageRect,
+                                    nativeImageSize: nativeImageSize,
+                                    imageRect: imageRect,
                                   ),
                                 ),
                               ),
@@ -2991,11 +3043,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                   painter: _CropOverlayPainter(
                                     theme: t,
                                     cropRect: _activeCropRect!,
-                                    imageRect: _imageRect,
-                                    nativeImageSize: _baseImage != null
-                                        ? Size(_baseImage!.width.toDouble(),
-                                            _baseImage!.height.toDouble())
-                                        : null,
+                                    imageRect: imageRect,
+                                    nativeImageSize: nativeImageSize,
                                   ),
                                 ),
                               ),

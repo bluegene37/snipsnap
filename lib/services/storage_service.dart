@@ -125,27 +125,7 @@ class StorageService {
     return null;
   }
 
-  /// Save image bytes to a custom location chosen by the user (defaults to Downloads directory)
-  static Future<String?> exportImageDialog(List<int> bytes, String defaultName) async {
-    return exportImageDialogWithFormat(bytes: bytes, fileName: defaultName, isJpg: false);
-  }
 
-  /// Direct save to user's Downloads folder
-  static Future<String?> saveToDownloads(List<int> bytes, String defaultName) async {
-    try {
-      final downloadsDir = await getDownloadsDirectory();
-      if (downloadsDir != null) {
-        final fileName = defaultName.endsWith('.png') ? defaultName : '$defaultName.png';
-        final targetPath = p.join(downloadsDir.path, fileName);
-        final file = File(targetPath);
-        await file.writeAsBytes(bytes);
-        return targetPath;
-      }
-    } catch (e) {
-      debugPrint('SnipSnap storage error: $e');
-    }
-    return null;
-  }
 
   /// Write image bytes to temporary or cache file
   static Future<String> saveTempImage(List<int> bytes) async {
@@ -260,8 +240,11 @@ class StorageService {
         final result = await Process.run('open', [folderPath]);
         return result.exitCode == 0;
       } else if (Platform.isWindows) {
-        final result = await Process.run('explorer.exe', [folderPath.replaceAll('/', '\\')]);
-        return result.exitCode == 0;
+        // Not gated on the exit code: `explorer.exe` routinely returns 1 even
+        // when it opened the window, so checking it reported failure for a
+        // folder the user was already looking at.
+        await Process.run('explorer.exe', [folderPath.replaceAll('/', '\\')]);
+        return true;
       } else if (Platform.isLinux) {
         final result = await Process.run('xdg-open', [folderPath]);
         return result.exitCode == 0;
@@ -280,8 +263,12 @@ class StorageService {
         final result = await Process.run('open', ['-R', filePath]);
         return result.exitCode == 0;
       } else if (Platform.isWindows) {
-        final result = await Process.run('explorer.exe', ['/select,', filePath.replaceAll('/', '\\')]);
-        return result.exitCode == 0;
+        // One argument, not two: `explorer /select,C:\path` is a single token
+        // and splitting it left explorer opening Documents instead of
+        // selecting the file. Exit code ignored for the reason above.
+        await Process.run(
+            'explorer.exe', ['/select,${filePath.replaceAll('/', '\\')}']);
+        return true;
       } else if (Platform.isLinux) {
         final dir = p.dirname(filePath);
         final result = await Process.run('xdg-open', [dir]);
