@@ -2632,6 +2632,25 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                   onHover: (e) => _updateCursor(e.localPosition),
                                   child: GestureDetector(
                                     behavior: HitTestBehavior.opaque,
+                                    // Everything except the trackpad's own
+                                    // pan/zoom pointer.
+                                    //
+                                    // `DragGestureRecognizer` treats a
+                                    // `PointerPanZoom` sequence as a drag, so a
+                                    // two-finger swipe to scroll around a
+                                    // zoomed-in capture also drew with whatever
+                                    // tool was selected — one stray stroke per
+                                    // pan. Those events carry
+                                    // `PointerDeviceKind.trackpad`; a click-drag
+                                    // on the same trackpad arrives as `mouse`
+                                    // and still draws normally.
+                                    supportedDevices: const {
+                                      PointerDeviceKind.mouse,
+                                      PointerDeviceKind.touch,
+                                      PointerDeviceKind.stylus,
+                                      PointerDeviceKind.invertedStylus,
+                                      PointerDeviceKind.unknown,
+                                    },
                                     onPanStart: _onPanStart,
                                     onPanUpdate: _onPanUpdate,
                                     onPanEnd: _onPanEnd,
