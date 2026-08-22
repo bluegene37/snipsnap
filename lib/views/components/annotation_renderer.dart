@@ -515,12 +515,12 @@ class AnnotationRenderer {
   /// Effective fill for a shape: the explicit fill colour when set, otherwise a
   /// translucent tint of the stroke colour.
   static Color _effectiveFill(Annotation ann) {
-    // Solid. The 25% wash this used to fall back to was a second, invisible
-    // transparency control layered under the two the panel already offers — a
-    // fill colour and an opacity slider — so a shape set to a solid colour at
-    // full opacity still came out translucent with no way to say otherwise.
-    final base = ann.fillColor ?? ann.color;
-    return _applyOpacity(base, ann.opacity);
+    // The fill carries its own transparency in its colour's alpha, and that is
+    // the only opacity it answers to. `ann.opacity` — the panel's OPACITY
+    // slider — is the outline's: it used to multiply into the fill as well,
+    // so fading the border also faded the centre and the two could not be set
+    // apart. A null fill colour means "match the outline", at full strength.
+    return ann.fillColor ?? ann.color.withValues(alpha: 1.0);
   }
 
   static void _withShadow(Canvas canvas, Annotation ann, VoidCallback draw) {

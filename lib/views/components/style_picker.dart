@@ -1482,6 +1482,7 @@ class StylePicker extends StatelessWidget {
                 _CurrentColorReadout(
                   color: _effectiveFillColor,
                   label: 'FILL',
+                  paintSolid: true,
                   onTap: () => _showFillColorPickerDialog(context),
                 ),
                 const SizedBox(height: 10),
@@ -1895,10 +1896,17 @@ class _CurrentColorReadout extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
+  /// Paint the swatch at full strength even when [color] carries alpha. The
+  /// hex and percentage still report the real value; only the tile stops
+  /// fading — for the fill, a tile that thins out with the slider reads as the
+  /// colour itself changing, which is not what the slider does.
+  final bool paintSolid;
+
   const _CurrentColorReadout({
     required this.color,
     required this.onTap,
     this.label = 'CURRENT',
+    this.paintSolid = false,
   });
 
   @override
@@ -1930,7 +1938,7 @@ class _CurrentColorReadout extends StatelessWidget {
                     painter: const CheckerboardPainter(),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: color,
+                        color: paintSolid ? color.withValues(alpha: 1.0) : color,
                         border: Border.all(color: t.border, width: t.hairline),
                         borderRadius: BorderRadius.circular(4),
                       ),

@@ -118,15 +118,24 @@ void main() {
     expect(px.r, lessThan(20));
   });
 
-  test('the opacity slider is still the way to make a fill translucent',
-      () async {
-    // Solid by default does not mean solid always — opacity has to keep
-    // working, or removing the hardcoded wash would have removed the only way
-    // to see through a shape.
+  test('the outline opacity slider leaves the fill alone', () async {
+    // The OPACITY slider is the outline's. It used to multiply into the fill
+    // too, so fading the border faded the centre with it and the two could
+    // not be set independently now that the fill has a slider of its own.
     final px = await renderAndSampleCentre(filledSquare(opacity: 0.5));
 
+    expect(px.r, greaterThan(240));
+    expect(px.g, lessThan(20),
+        reason: 'a half-opacity outline must not thin the solid fill');
+  });
+
+  test('the fill alpha is what makes a fill translucent', () async {
+    final px = await renderAndSampleCentre(
+      filledSquare(fillColor: const Color(0xFFFF0000).withValues(alpha: 0.5)),
+    );
+
     expect(px.g, greaterThan(100),
-        reason: 'half-opacity red over white must let white through');
+        reason: 'half-alpha red over white must let white through');
     expect(px.g, lessThan(200));
   });
 

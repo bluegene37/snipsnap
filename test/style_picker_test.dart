@@ -40,12 +40,14 @@ Future<void> _pump(
   Color? textBackgroundColor,
   Color? fillColor,
   bool wireFillColour = false,
+  List<Color> savedColors = const [],
 }) async {
   await tester.pumpWidget(SnipThemeScope(
     theme: SnipTheme.forMode(mode),
     child: MaterialApp(
       home: Scaffold(
         body: StylePicker(
+          savedColors: savedColors,
           textBackgroundColor: textBackgroundColor,
           onTextBackgroundColorChanged: (_) {},
           fillColor: fillColor,
@@ -220,17 +222,6 @@ void main() {
       Color(0xFF34C759),
     ];
 
-    // The fill palette is the same palette the outline uses, tinted to whatever
-    // transparency the fill is set to. Only the translucent case is listed
-    // here: an opaque fill paints an identical circle to the outline grid's,
-    // which the finder below cannot tell apart — and the ring tests above
-    // already cover opaque palette entries through the pen tool, where no fill
-    // grid exists. What is new, and only reachable here, is a fill carrying
-    // alpha, whose ring has to be scored against what it composites to.
-    final shapeFills = <Color>[
-      for (final c in AppColors.palette) c.withValues(alpha: 0.4),
-    ];
-
     /// The check glyph inside the one swatch whose fill is [swatch] — found
     /// by walking down from that swatch's own Container so a check somewhere
     /// else in the panel cannot be mistaken for it.
@@ -278,17 +269,23 @@ void main() {
         });
       }
 
-      for (final swatch in shapeFills) {
+      // Saved colours are the one place a swatch can still carry alpha:
+      // the fill palette paints at full strength (its transparency belongs to
+      // the mark, not the control), and the outline palette is opaque. A
+      // translucent saved swatch composites over the panel, so its ring and
+      // glyph have to be scored against what it composites *to* — which is
+      // what `_CircleColorSwatch`'s `backdrop` exists for.
+      for (final base in AppColors.palette) {
+        final swatch = base.withValues(alpha: 0.4);
         testWidgets(
-            '$mode: shape-fill ${swatch.toARGB32().toRadixString(16)} '
+            '$mode: saved ${swatch.toARGB32().toRadixString(16)} '
             'checkmark clears 3:1', (tester) async {
           await _pump(
             tester,
             mode: mode,
-            tool: CanvasTool.shape,
-            isFilled: true,
-            wireFillColour: true,
-            fillColor: swatch,
+            tool: CanvasTool.pen,
+            selectedColor: swatch,
+            savedColors: [swatch],
           );
 
           final check = checkColourFor(tester, swatch);
@@ -310,7 +307,10 @@ void main() {
         // of catching the bug it was written for, rather than passing because
         // every entry happens to be dark.
         final t = SnipTheme.forMode(mode);
-        final worst = [...textBackgrounds, ...shapeFills]
+        final worst = [
+          ...textBackgrounds,
+          for (final c in AppColors.palette) c.withValues(alpha: 0.4),
+        ]
             .map((c) => _contrast(Colors.white, Color.alphaBlend(c, t.surface)))
             .reduce(math.min);
         expect(worst, lessThan(3.0),
