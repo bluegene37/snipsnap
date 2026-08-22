@@ -188,6 +188,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   bool _fileExists = false;
   late TransformationController _transformationController;
 
+  /// Marks the zoom viewport so pointer positions can be resolved against it.
+  final GlobalKey _viewportKey = GlobalKey();
+
+  /// True while a space-held drag is moving the viewport rather than drawing.
+  bool _isPanningView = false;
+
+  static const double _minZoom = 0.2;
+  static const double _maxZoom = 4.0;
+
   /// Decoded source pixels, used to render blur/pixelate regions on screen with
   /// exactly the same code path the exporter uses.
   ui.Image? _baseImage;
@@ -270,7 +279,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   Offset? _drawStart;
 
   MouseCursor _cursor = SystemMouseCursors.basic;
-  bool _isInteractiveZooming = false;
+  /// Trackpad pan/zoom gesture state. `PointerPanZoomUpdateEvent` reports
+  /// cumulative values, so each frame's increment is the difference from the
+  /// last one.
+  double _trackpadPanZoomScale = 1.0;
+  Offset? _trackpadPanZoomOrigin;
+  Offset _trackpadPanLast = Offset.zero;
 
   // Manual double-click detection (see _consumeDoubleTap).
   DateTime _lastTapAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -287,7 +301,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     _loadBaseImage();
     _transformationController = TransformationController();
     if (widget.zoomScale != 1.0) {
-      _updateZoomMatrix(widget.zoomScale);
+      // Post-frame: the viewport has no size until it has been laid out, and
+      // the focal point is measured against it.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _zoomToCentre(widget.zoomScale);
+      });
     }
     _ensureCropRectInitialized();
   }
@@ -329,8 +347,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       if (!isSelfEdit) _loadBaseImage();
     }
 
-    if (oldWidget.zoomScale != widget.zoomScale && !_isInteractiveZooming) {
-      _updateZoomMatrix(widget.zoomScale);
+    // Guarded on the live scale, not on a gesture flag: this same callback is
+    // what `_notifyZoom` triggers, so comparing against the controller is what
+    // stops a pointer zoom from being re-applied centred on the way back.
+    if (oldWidget.zoomScale != widget.zoomScale &&
+        (_transformationController.value.getMaxScaleOnAxis() - widget.zoomScale).abs() >
+            0.001) {
+      _zoomToCentre(widget.zoomScale);
     }
 
     if (oldWidget.activeTool != widget.activeTool) {
@@ -520,20 +543,140 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     }
   }
 
-  void _updateZoomMatrix(double targetScale) {
-    final size = _canvasSize;
-    final cx = size.width / 2;
-    final cy = size.height / 2;
+  /// Size of the zoom viewport — the area the transform is applied *within*,
+  /// which is what pointer positions from the surrounding [Listener] are
+  /// relative to. Distinct from [_canvasSize], which is the untransformed child
+  /// inside it.
+  Size get _viewportSize {
+    final box = _viewportKey.currentContext?.findRenderObject();
+    if (box is RenderBox && box.hasSize) return box.size;
+    return Size.zero;
+  }
 
-    final matrix = Matrix4.identity();
-    if ((targetScale - 1.0).abs() > 0.001) {
-      final storage = matrix.storage;
-      storage[0] = targetScale;
-      storage[5] = targetScale;
-      storage[12] = (1.0 - targetScale) * cx;
-      storage[13] = (1.0 - targetScale) * cy;
+  /// Keeps the content from being panned out of sight.
+  ///
+  /// On an axis where the scaled content is smaller than the viewport there is
+  /// nothing to pan, so it is pinned centred; on an axis where it is larger,
+  /// translation is clamped to its own edges. Without this, `boundaryMargin:
+  /// infinity` lets a flick throw the capture off screen with no way back.
+  Matrix4 _constrain(Matrix4 matrix) {
+    final viewport = _viewportSize;
+    if (viewport.isEmpty) return matrix;
+    final scale = matrix.getMaxScaleOnAxis();
+    final storage = matrix.storage;
+
+    double axis(double translation, double viewportExtent) {
+      final contentExtent = viewportExtent * scale;
+      if (contentExtent <= viewportExtent) return (viewportExtent - contentExtent) / 2;
+      return translation.clamp(viewportExtent - contentExtent, 0.0);
     }
-    _transformationController.value = matrix;
+
+    storage[12] = axis(storage[12], viewport.width);
+    storage[13] = axis(storage[13], viewport.height);
+    return matrix;
+  }
+
+  void _setTransform(Matrix4 matrix) {
+    _transformationController.value = _constrain(matrix);
+  }
+
+  /// Scales to [targetScale] while holding [focalPoint] (viewport coordinates)
+  /// still under the pointer.
+  ///
+  /// Composed onto the *current* matrix rather than rebuilt from identity. The
+  /// previous implementation constructed a fresh centre-anchored matrix on
+  /// every step, which threw away the translation — so any pan was undone by
+  /// the next zoom, and zooming always dragged the view back to the middle of
+  /// the image instead of magnifying what the cursor was over.
+  void _zoomAt(double targetScale, Offset focalPoint) {
+    final matrix = _transformationController.value;
+    final current = matrix.getMaxScaleOnAxis();
+    final clamped = targetScale.clamp(_minZoom, _maxZoom);
+    final factor = clamped / current;
+    if ((factor - 1.0).abs() < 1e-6) return;
+
+    final zoom = Matrix4.identity()
+      ..translateByDouble(focalPoint.dx, focalPoint.dy, 0, 1)
+      // Z scales with X and Y, which matters only because `getMaxScaleOnAxis`
+      // reports the largest column norm of all three: leaving Z at 1 makes it
+      // report 1.0 for every scale below 1.0, so zooming out read back as "no
+      // change" and stuck at 100%. Z has no effect on a 2D transform otherwise.
+      ..scaleByDouble(factor, factor, factor, 1)
+      ..translateByDouble(-focalPoint.dx, -focalPoint.dy, 0, 1);
+    _setTransform(zoom.multiplied(matrix));
+    _notifyZoom();
+  }
+
+  /// Zooms about the middle of the viewport — for the header's stepper, which
+  /// has no pointer to anchor to.
+  void _zoomToCentre(double targetScale) {
+    final viewport = _viewportSize;
+    if (viewport.isEmpty) return;
+    _zoomAt(targetScale, viewport.center(Offset.zero));
+  }
+
+  void _panBy(Offset delta) {
+    final matrix = _transformationController.value;
+    if (matrix.getMaxScaleOnAxis() <= 1.0 + 1e-6) return;
+    final pan = Matrix4.identity()..translateByDouble(delta.dx, delta.dy, 0, 1);
+    _setTransform(pan.multiplied(matrix));
+  }
+
+  void _notifyZoom() {
+    final scale = _transformationController.value.getMaxScaleOnAxis();
+    if ((scale - widget.zoomScale).abs() > 0.001) {
+      widget.onZoomScaleChanged?.call(scale);
+    }
+  }
+
+  /// Mouse wheel and trackpad two-finger scroll.
+  ///
+  /// Plain scroll pans and Cmd/Ctrl+scroll zooms, which is what every image
+  /// editor this one is measured against does — including Snagit. Scroll used
+  /// to zoom unconditionally, which left no way to pan at all.
+  void _handlePointerSignal(PointerSignalEvent signal) {
+    if (signal is! PointerScrollEvent) return;
+    if (_isZoomModifierDown) {
+      _zoomByFactor(_zoomFactorForDelta(signal.scrollDelta.dy), signal.localPosition);
+      return;
+    }
+    var delta = signal.scrollDelta;
+    // A notched wheel only reports dy. Shift swaps it onto the other axis, the
+    // long-standing convention for horizontal scrolling without a tilt wheel;
+    // a trackpad already reports both and needs no help.
+    if (delta.dx == 0 && _isShiftDown) delta = Offset(delta.dy, 0);
+    _panBy(-delta);
+  }
+
+  /// True when the view is zoomed in far enough that there is somewhere to pan.
+  bool get _canPanView =>
+      _transformationController.value.getMaxScaleOnAxis() > 1.0 + 1e-6;
+
+  bool get _isZoomModifierDown {
+    final keys = HardwareKeyboard.instance.logicalKeysPressed;
+    return keys.contains(LogicalKeyboardKey.metaLeft) ||
+        keys.contains(LogicalKeyboardKey.metaRight) ||
+        keys.contains(LogicalKeyboardKey.controlLeft) ||
+        keys.contains(LogicalKeyboardKey.controlRight);
+  }
+
+  /// True while the view-pan modifier is held, so a drag moves the viewport
+  /// instead of drawing. Space is the near-universal convention for this.
+  bool get _isPanModifierDown =>
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.space);
+
+  /// Exponential, and proportional to how far the wheel actually moved.
+  ///
+  /// The old step was a flat ±0.05 per event regardless of the gesture: a 25%
+  /// jump at 0.2x and a 1.25% nudge at 4x, which is what made zooming feel
+  /// coarse at the bottom and unresponsive at the top. Scaling multiplicatively
+  /// makes every notch the same *perceived* step, and honouring the delta lets
+  /// a trackpad resolve much finer than a notched wheel.
+  double _zoomFactorForDelta(double delta) => math.exp(-delta * 0.0035);
+
+  void _zoomByFactor(double factor, Offset focalPoint) {
+    final current = _transformationController.value.getMaxScaleOnAxis();
+    _zoomAt(current * factor, focalPoint);
   }
 
   /// Size of the editor canvas, or [Size.zero] before it has been laid out.
@@ -1245,6 +1388,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final pos = details.localPosition;
     _gestureStartPos = pos;
 
+    // Space held: drag moves the viewport rather than drawing on it. Checked
+    // before every tool branch so it works from whichever tool is selected,
+    // and it is the only way to reach an off-centre area with a mouse that has
+    // no scroll wheel.
+    if (_isPanModifierDown) {
+      _isPanningView = true;
+      return;
+    }
+
     // The OCR tool only ever reads. Letting it fall through to the shared
     // fallbacks below would let a drag grab the annotation sitting on top of
     // the very text the user is trying to extract, and move it instead.
@@ -1397,6 +1549,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final pos = details.localPosition;
     final totalDelta = pos - _gestureStartPos;
 
+    if (_isPanningView) {
+      // `details.delta` is in the child's coordinate space, which is already
+      // divided by the zoom; the viewport translation wants viewport pixels.
+      _panBy(details.delta * _transformationController.value.getMaxScaleOnAxis());
+      return;
+    }
+
     // OCR produces no annotation, so it would never survive the
     // `_currentAnnotation == null` guard this method ends with.
     if (widget.activeTool == CanvasTool.ocr) {
@@ -1536,6 +1695,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   void _onPanEnd(DragEndDetails details) {
+    if (_isPanningView) {
+      _isPanningView = false;
+      return;
+    }
     if (widget.activeTool == CanvasTool.ocr) {
       _toolHandler.onPanEnd(details);
       // `_currentAnnotation` is cleared here for the same reason the tail of
@@ -2257,6 +2420,14 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   void _updateCursor(Offset pos) {
+    // Space held over a zoomed-in view: this drag will pan, so say so before
+    // the user commits to it.
+    if (_isPanModifierDown && _canPanView) {
+      final grab = _isPanningView ? SystemMouseCursors.grabbing : SystemMouseCursors.grab;
+      if (_cursor != grab) setState(() => _cursor = grab);
+      return;
+    }
+
     if (widget.activeTool == CanvasTool.colorPicker) {
       final cached = _cachedSourceImage;
       if (cached != null) {
@@ -2357,34 +2528,45 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
             ),
             SizedBox.expand(
               child: Listener(
-                onPointerSignal: (signal) {
-                  if (signal is! PointerScrollEvent) return;
-                  final dy = signal.scrollDelta.dy;
-                  if (dy == 0) return;
-                  final current = _transformationController.value.getMaxScaleOnAxis();
-                  final newScale = (current + (dy > 0 ? -0.05 : 0.05)).clamp(0.2, 4.0);
-                  _updateZoomMatrix(newScale);
-                  widget.onZoomScaleChanged?.call(newScale);
+                key: _viewportKey,
+                onPointerSignal: _handlePointerSignal,
+                // Trackpad pan/zoom arrives as its own event family on desktop,
+                // never as a scroll signal, so it needs handling of its own:
+                // two-finger drag pans, pinch zooms about the gesture's origin.
+                onPointerPanZoomStart: (event) {
+                  _trackpadPanZoomScale = 1.0;
+                  _trackpadPanZoomOrigin = event.localPosition;
+                },
+                onPointerPanZoomUpdate: (event) {
+                  final origin = _trackpadPanZoomOrigin ?? event.localPosition;
+                  if (event.scale != _trackpadPanZoomScale && event.scale > 0) {
+                    _zoomByFactor(event.scale / _trackpadPanZoomScale, origin);
+                    _trackpadPanZoomScale = event.scale;
+                  }
+                  final panDelta = event.localPan - _trackpadPanLast;
+                  _trackpadPanLast = event.localPan;
+                  if (panDelta != Offset.zero) _panBy(panDelta);
+                },
+                onPointerPanZoomEnd: (_) {
+                  _trackpadPanZoomScale = 1.0;
+                  _trackpadPanZoomOrigin = null;
+                  _trackpadPanLast = Offset.zero;
                 },
                 child: InteractiveViewer(
                   transformationController: _transformationController,
-                  maxScale: 4.0,
-                  minScale: 0.2,
+                  maxScale: _maxZoom,
+                  minScale: _minZoom,
                   boundaryMargin: const EdgeInsets.all(double.infinity),
+                  // Both disabled: this canvas owns every zoom and pan gesture
+                  // itself (see `_handlePointerSignal` and the pan-modifier
+                  // branch in `_onPanStart`). Leaving either on would put
+                  // InteractiveViewer's own recognisers in the arena against
+                  // the drawing tools, and double-apply the trackpad gestures
+                  // handled above. What is left of it is the clipped Transform
+                  // that follows the controller.
                   panEnabled: false,
+                  scaleEnabled: false,
                   clipBehavior: Clip.hardEdge,
-                  onInteractionStart: (_) => _isInteractiveZooming = true,
-                  onInteractionUpdate: (_) {
-                    final scale = _transformationController.value.getMaxScaleOnAxis();
-                    if ((scale - widget.zoomScale).abs() > 0.02) {
-                      widget.onZoomScaleChanged?.call(scale);
-                    }
-                  },
-                  onInteractionEnd: (_) {
-                    _isInteractiveZooming = false;
-                    widget.onZoomScaleChanged
-                        ?.call(_transformationController.value.getMaxScaleOnAxis());
-                  },
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 20),
                     child: RepaintBoundary(
