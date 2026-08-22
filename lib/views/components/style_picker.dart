@@ -126,7 +126,10 @@ class StylePicker extends StatelessWidget {
   List<Widget> _savedColorSwatches({
     required SnipTheme t,
     required ValueChanged<Color> onPick,
+    Color? selectedAgainst,
+    Color Function(Color)? applied,
   }) {
+    final current = selectedAgainst ?? selectedColor;
     if (savedColors.isEmpty) return const [];
     return [
       for (final color in savedColors)
@@ -136,16 +139,40 @@ class StylePicker extends StatelessWidget {
           onLongPress:
               onRemoveSavedColor == null ? null : () => onRemoveSavedColor!(color),
           child: _CircleColorSwatch(
+            // Drawn as saved; compared and applied through [applied], which is
+            // how a section that owns its own transparency keeps the swatch
+            // itself readable.
             color: color,
-            isSelected: selectedColor.toARGB32() == color.toARGB32(),
+            isSelected: current.toARGB32() ==
+                (applied?.call(color) ?? color).toARGB32(),
             onTap: () => onPick(color),
             size: 30,
+            backdrop: t.surface,
             tooltip:
                 'Saved #${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}'
                 ' — right-click or long-press to remove',
           ),
         ),
     ];
+  }
+
+  /// The colour the fill actually renders as. A null [fillColor] means "match
+  /// the outline", which is what `AnnotationRenderer` falls back to.
+  Color get _effectiveFillColor => fillColor ?? selectedColor;
+
+  /// The fill's own transparency, carried in its colour's alpha channel rather
+  /// than as a separate field — it is already persisted and already multiplied
+  /// by the annotation's overall opacity at paint time.
+  double get _fillOpacity => _effectiveFillColor.a;
+
+  void _showFillColorPickerDialog(BuildContext context) {
+    showSnipColorPicker(
+      context: context,
+      title: 'Pick Fill Colour',
+      initialColor: _effectiveFillColor,
+      onColorChanged: (c) => onFillColorChanged?.call(c),
+      onSaveColor: onSaveColor,
+    );
   }
 
   void _showBgColorPickerDialog(BuildContext context) {
@@ -1435,7 +1462,11 @@ class StylePicker extends StatelessWidget {
                 ),
               ],
 
-              // Shape Fill Color Palette
+              // Shape Fill Colour — the same palette, saved swatches and
+              // custom picker the outline colour gets, plus a transparency of
+              // its own. The fill used to offer seven fixed pre-tinted colours
+              // and nothing else, so it could not be set to a colour the rest
+              // of the panel could.
               if (isFilled && onFillColorChanged != null && effectiveTool == CanvasTool.shape) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -1447,61 +1478,121 @@ class StylePicker extends StatelessWidget {
                     letterSpacing: 0.8,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
+                _CurrentColorReadout(
+                  color: _effectiveFillColor,
+                  label: 'FILL',
+                  onTap: () => _showFillColorPickerDialog(context),
+                ),
+                const SizedBox(height: 10),
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: 10,
+                  runSpacing: 10,
                   children: [
                     Tooltip(
-                      message: 'Auto — 25% tint of outline colour',
+                      message: 'Match the outline colour',
                       child: GestureDetector(
                         onTap: () => onFillColorChanged!(null),
                         child: Container(
-                          width: 28,
-                          height: 28,
+                          width: 30,
+                          height: 30,
                           decoration: BoxDecoration(
-                            color: selectedColor.withValues(alpha: 0.25),
+                            color: selectedColor,
                             shape: BoxShape.circle,
                             border: Border.all(
                               color: fillColor == null ? t.ink : borderColor,
                               width: fillColor == null ? 2.5 : 1,
                             ),
                           ),
-                          child: Icon(Icons.auto_awesome_rounded, size: 13, color: textColor),
+                          child: Icon(
+                            Icons.auto_awesome_rounded,
+                            size: 13,
+                            color: t.controlForeground(active: true),
+                          ),
                         ),
                       ),
                     ),
-                    ...[
-                      Colors.white.withValues(alpha: 0.85),
-                      Colors.black.withValues(alpha: 0.55),
-                      const Color(0x66FDE047),
-                      const Color(0x66EF4444),
-                      const Color(0x6610B981),
-                      const Color(0x660EA5E9),
-                      const Color(0x668B5CF6),
-                    ].map((c) {
-                      final isSelected = fillColor?.toARGB32() == c.toARGB32();
-                      final ring = isSelected ? t.ringOn(c, backdrop: t.surface) : null;
-                      return GestureDetector(
-                        onTap: () => onFillColorChanged!(c),
-                        child: Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: c,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: ring ?? t.border,
-                              width: isSelected ? 2.5 : 1,
-                            ),
-                          ),
-                          child: ring == null
-                              ? null
-                              : Icon(Icons.check_rounded, size: 14, color: ring),
-                        ),
+                    // Each swatch is painted at full strength and *applied* at
+                    // the current fill transparency. Painting them tinted made
+                    // the whole row fade out as the opacity slider came down,
+                    // until picking a colour meant guessing at a set of nearly
+                    // identical ghosts — the transparency belongs to the mark
+                    // being edited, not to the control that chooses its colour.
+                    ...AppColors.palette.map((color) {
+                      final applied = color.withValues(alpha: _fillOpacity);
+                      return _CircleColorSwatch(
+                        color: color,
+                        isSelected: fillColor != null &&
+                            fillColor!.toARGB32() == applied.toARGB32(),
+                        onTap: () => onFillColorChanged!(applied),
+                        size: 30,
+                        backdrop: t.surface,
                       );
                     }),
+                    ..._savedColorSwatches(
+                      t: t,
+                      selectedAgainst: fillColor ?? const Color(0x00000000),
+                      applied: (c) => c.withValues(alpha: _fillOpacity),
+                      onPick: (c) =>
+                          onFillColorChanged!(c.withValues(alpha: _fillOpacity)),
+                    ),
+                    Tooltip(
+                      message: 'Custom Fill Colour',
+                      child: GestureDetector(
+                        onTap: () => _showFillColorPickerDialog(context),
+                        child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: cardBg,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: borderColor),
+                          ),
+                          child: Icon(Icons.color_lens_rounded, size: 16, color: textColor),
+                        ),
+                      ),
+                    ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'FILL OPACITY',
+                      style: TextStyle(
+                        color: subTextColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: cardBg,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '${(_fillOpacity * 100).round()}%',
+                        style: TextStyle(
+                            color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+                SliderTheme(
+                  data: sliderThemeData,
+                  child: Slider(
+                    value: _fillOpacity.clamp(0.0, 1.0),
+                    min: 0.0,
+                    max: 1.0,
+                    // Separate from the annotation's own opacity slider, which
+                    // fades the outline too. This one is the fill alone, so a
+                    // shape can have a solid border over a translucent centre.
+                    onChanged: (v) =>
+                        onFillColorChanged!(_effectiveFillColor.withValues(alpha: v)),
+                  ),
                 ),
               ],
               const SizedBox(height: 16),
@@ -1657,6 +1748,13 @@ class _CircleColorSwatch extends StatelessWidget {
   final double size;
   final String? tooltip;
 
+  /// What the swatch is drawn over.
+  ///
+  /// Load-bearing for any swatch carrying alpha: a translucent fill composites
+  /// against the panel, and scoring the ring against the raw colour instead
+  /// picks a glyph that disappears once it is actually painted.
+  final Color? backdrop;
+
   const _CircleColorSwatch({
     required this.color,
     this.isTransparent = false,
@@ -1664,6 +1762,7 @@ class _CircleColorSwatch extends StatelessWidget {
     required this.onTap,
     this.size = 30.0,
     this.tooltip,
+    this.backdrop,
   });
 
   @override
@@ -1694,7 +1793,7 @@ class _CircleColorSwatch extends StatelessWidget {
                   // mode, both live AppColors.palette entries. Not a
                   // meaningful ring colour for the transparent tile (no
                   // single fill to contrast against), which keeps t.ink.
-                  ? (isTransparent ? t.ink : t.ringOn(color))
+                  ? (isTransparent ? t.ink : t.ringOn(color, backdrop: backdrop))
                   : (isTransparent
                       ? t.border
                       : (isLightColor
@@ -1731,9 +1830,12 @@ class _CircleColorSwatch extends StatelessWidget {
                 Icon(
                   Icons.check_rounded,
                   size: 16,
-                  // Contrast against this swatch's own real fill colour, not
-                  // against chrome — deliberately independent of SnipTheme.
-                  color: isLightColor ? Colors.black87 : Colors.white,
+                  // The same colour as the ring around it, from the same
+                  // helper. A hand-rolled light/dark rule sat here before and
+                  // disagreed with the ring on some swatches — and it read the
+                  // raw colour, so a translucent fill was scored against a
+                  // colour that is never actually on screen.
+                  color: t.ringOn(color, backdrop: backdrop),
                 ),
               ],
             ],

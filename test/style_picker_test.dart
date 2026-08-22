@@ -220,14 +220,15 @@ void main() {
       Color(0xFF34C759),
     ];
 
-    const shapeFills = <Color>[
-      Color(0xD9FFFFFF), // Colors.white @ 0.85
-      Color(0x8C000000), // Colors.black @ 0.55
-      Color(0x66FDE047),
-      Color(0x66EF4444),
-      Color(0x6610B981),
-      Color(0x660EA5E9),
-      Color(0x668B5CF6),
+    // The fill palette is the same palette the outline uses, tinted to whatever
+    // transparency the fill is set to. Only the translucent case is listed
+    // here: an opaque fill paints an identical circle to the outline grid's,
+    // which the finder below cannot tell apart — and the ring tests above
+    // already cover opaque palette entries through the pen tool, where no fill
+    // grid exists. What is new, and only reachable here, is a fill carrying
+    // alpha, whose ring has to be scored against what it composites to.
+    final shapeFills = <Color>[
+      for (final c in AppColors.palette) c.withValues(alpha: 0.4),
     ];
 
     /// The check glyph inside the one swatch whose fill is [swatch] — found
