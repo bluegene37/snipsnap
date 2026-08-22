@@ -1690,7 +1690,6 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final hex = '#${sampled.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
     await ClipboardService.copyText(hex);
     widget.onSampleColor?.call(sampled);
-    widget.onToolSelected?.call(CanvasTool.select);
   }
 
   Future<ui.Image?> _imageToUiImage(img.Image image) async {
@@ -2241,13 +2240,29 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                         clipBehavior: Clip.none,
                         children: [
                           // Checkerboard directly under the image (revealed under transparent PNG pixels)
-                          Positioned.fill(
-                            child: ClipRect(
-                              child: CustomPaint(
-                                painter: _SteadyCheckerboardPainter(theme: t),
+                          if (_imageRect.width > 0 && _imageRect.height > 0)
+                            Positioned(
+                              left: _imageRect.left,
+                              top: _imageRect.top,
+                              width: _imageRect.width,
+                              height: _imageRect.height,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: t.isDark ? 0.35 : 0.08),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 3),
+                                    ),
+                                  ],
+                                ),
+                                child: ClipRect(
+                                  child: CustomPaint(
+                                    painter: _SteadyCheckerboardPainter(theme: t),
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
 
                           // The already-decoded bitmap, not `Image.file`: a
                           // keyed Image.file remounts on every revision bump
@@ -2413,27 +2428,109 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final t = SnipTheme.of(context);
 
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: t.surface,
-              shape: BoxShape.circle,
-              border: Border.all(color: t.border),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 460),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: t.border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: t.isDark ? 0.35 : 0.06),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
             ),
-            child: Icon(Icons.add_a_photo_rounded, size: 56, color: t.emphasis),
-          ),
-          const SizedBox(height: 16),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 14,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Image.asset(
+                  'assets/images/snipsnap_logo.png',
+                  fit: BoxFit.cover,
+                  errorBuilder: (ctx, err, stack) => Container(
+                    color: t.surfaceRaised,
+                    child: Icon(Icons.crop_free_rounded, size: 40, color: t.emphasis),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Welcome to SnipSnap',
+              style: TextStyle(
+                color: t.ink,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.3,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Capture any screen area or open an existing image to start annotating, framing, and extracting text.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: t.inkMuted, fontSize: 13.5, height: 1.45),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _emptyStatePill(t, Icons.crop_free_rounded, 'Snip Area', 'Cmd+Shift+1'),
+                const SizedBox(width: 8),
+                _emptyStatePill(t, Icons.file_open_rounded, 'Open Image', 'Cmd+O'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyStatePill(SnipTheme t, IconData icon, String label, String shortcut) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: t.surfaceRaised,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: t.border, width: 0.8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: t.emphasis),
+          const SizedBox(width: 6),
           Text(
-            'No Screenshot Selected',
-            style: TextStyle(color: t.ink, fontSize: 20, fontWeight: FontWeight.bold),
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: t.ink,
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(width: 6),
           Text(
-            'Click "Snip" in the top bar to capture screen area, or open an existing image.',
-            style: TextStyle(color: t.inkMuted, fontSize: 13),
+            shortcut,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w500,
+              color: t.inkFaint,
+            ),
           ),
         ],
       ),

@@ -12,7 +12,7 @@ Future<void> _pump(WidgetTester tester, {required SnipThemeMode mode}) {
   return tester.pumpWidget(
     SnipThemeScope(
       theme: SnipTheme.forMode(mode),
-      child: MaterialApp(
+      child: const MaterialApp(
         home: Scaffold(
           body: AboutSnipSnapDialog(),
         ),

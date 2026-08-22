@@ -64,7 +64,7 @@ void main() {
   });
 
   test('tolerates non-Map entries in lines array', () {
-    final result = OcrResult.fromChannelMap({
+    final result = OcrResult.fromChannelMap(const {
       'width': 100,
       'height': 100,
       'lines': [

@@ -10,36 +10,34 @@ class AboutSnipSnapDialog extends StatelessWidget {
 
     return Dialog(
       backgroundColor: t.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: t.border),
+      ),
       child: Container(
-        width: 400,
+        width: 420,
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // App Icon Logo
+            // App Icon Logo (Nano Banana / Gemini asset)
             Container(
-              width: 68,
-              height: 68,
+              width: 76,
+              height: 76,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  // Decorative elevation shadow under the app icon, sitting
-                  // on this dialog's own t.surface panel — ink is this
-                  // design's only "mark" tone, so the shadow now traces the
-                  // logo's own chrome fallback colour (ink) rather than an
-                  // accent hue that no longer exists.
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: const [
                   BoxShadow(
-                    color: t.ink.withValues(alpha: 0.25),
+                    color: Colors.black26,
                     blurRadius: 16,
-                    offset: const Offset(0, 6),
+                    offset: Offset(0, 4),
                   ),
                 ],
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(18),
                 child: Image.asset(
-                  'assets/images/app_logo.png',
+                  'assets/images/snipsnap_logo.png',
                   fit: BoxFit.cover,
                   errorBuilder: (ctx, err, stack) => Container(
                     color: t.ink,
@@ -73,12 +71,28 @@ class AboutSnipSnapDialog extends StatelessWidget {
               decoration: BoxDecoration(
                 color: t.surfaceRaised,
                 borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: t.border),
               ),
               child: Text(
                 'SnipSnap is a powerful, high-performance desktop screen capture & annotation tool built with Flutter & Drift SQLite.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: t.ink, fontSize: 13, height: 1.4),
               ),
+            ),
+
+            const SizedBox(height: 14),
+
+            // Feature Highlights Chips
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              alignment: WrapAlignment.center,
+              children: [
+                _featureChip(t, 'Vector Annotations', Icons.gesture_rounded),
+                _featureChip(t, 'OCR Extraction', Icons.document_scanner_rounded),
+                _featureChip(t, 'Drift SQLite', Icons.storage_rounded),
+                _featureChip(t, 'High-DPI Capture', Icons.hd_rounded),
+              ],
             ),
 
             const SizedBox(height: 16),
@@ -88,8 +102,6 @@ class AboutSnipSnapDialog extends StatelessWidget {
             ),
 
             const SizedBox(height: 20),
-            // The dialog's one CTA — emphasis is a border/text-only token,
-            // never a fill (Task 3's corrected precedent).
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: t.surfaceRaised,
@@ -104,6 +116,32 @@ class AboutSnipSnapDialog extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _featureChip(SnipTheme t, String label, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: t.surfaceRaised,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: t.border, width: 0.8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: t.emphasis),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: t.ink,
+            ),
+          ),
+        ],
       ),
     );
   }

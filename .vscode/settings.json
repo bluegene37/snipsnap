@@ -1,0 +1,23 @@
+{
+  "dart.flutterSdkPath": null,
+  "dart.hotReloadOnSave": "all",
+  "dart.previewFlutterUiGuides": true,
+  "dart.openDevTools": "flutter",
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "Dart-Code.dart-code",
+  "[dart]": {
+    "editor.formatOnSave": true,
+    "editor.formatOnType": true,
+    "editor.selectionHighlight": false,
+    "editor.suggest.snippetsPreventQuickSuggestions": false,
+    "editor.suggestSelection": "first",
+    "editor.tabCompletion": "onlySnippets",
+    "editor.wordBasedSuggestions": "off"
+  },
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.expand": false,
+  "explorer.fileNesting.patterns": {
+    "*.dart": "$(capture).g.dart, $(capture).freezed.dart, $(capture).drift.dart",
+    "pubspec.yaml": "pubspec.lock, .packages, .flutter-plugins*, analysis_options.yaml"
+  }
+}

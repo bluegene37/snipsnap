@@ -271,6 +271,17 @@ class _MainScreenState extends State<MainScreen> {
   DateTime _propertyUndoAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   CanvasTool _activeTool = CanvasTool.select;
+  CanvasTool _previousToolBeforeEyedropper = CanvasTool.pen;
+
+  void _setActiveTool(CanvasTool tool) {
+    if (tool == CanvasTool.colorPicker) {
+      if (_activeTool != CanvasTool.colorPicker && _activeTool != CanvasTool.select) {
+        _previousToolBeforeEyedropper = _activeTool;
+      }
+    }
+    setState(() => _activeTool = tool);
+  }
+
   final Map<CanvasTool, ToolProperties> _toolPropertiesMap = ToolProperties.createDefaults();
   double _rotation = 0.0;
   double _zoomScale = 1.0;
@@ -1453,6 +1464,43 @@ class _MainScreenState extends State<MainScreen> {
     _showToast('Canvas flattened! Annotations baked into image.');
   }
 
+  void _handleSampleColor(Color color) {
+    final targetTool = _selectedAnnotation?.tool ??
+        (_previousToolBeforeEyedropper != CanvasTool.colorPicker &&
+                _previousToolBeforeEyedropper != CanvasTool.select
+            ? _previousToolBeforeEyedropper
+            : CanvasTool.pen);
+
+    setState(() {
+      final t = _theme;
+      final currentProps =
+          _toolPropertiesMap[targetTool] ?? ToolProperties(activeColor: t.ink);
+
+      _toolPropertiesMap[targetTool] = currentProps.copyWith(activeColor: color);
+      _toolPropertiesMap[CanvasTool.colorPicker] =
+          (_toolPropertiesMap[CanvasTool.colorPicker] ?? ToolProperties(activeColor: t.ink))
+              .copyWith(activeColor: color);
+
+      _activeTool = targetTool;
+
+      if (_selectedAnnotationId != null) {
+        final idx = _annotations.indexWhere((a) => a.id == _selectedAnnotationId);
+        if (idx != -1) {
+          _annotations = List<Annotation>.of(_annotations);
+          _annotations[idx] = _annotations[idx].copyWith(color: color);
+        }
+      }
+    });
+
+    if (_selectedAnnotationId != null) {
+      _syncCurrentCaptureAnnotations();
+    }
+
+    _showToast(
+      'Sampled colour #${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
+    );
+  }
+
   Future<void> _handleApplyCrop(Rect cropRect) async {
     if (_activeCapture == null || !File(_activeCapture!.filePath).existsSync()) return;
     // Crop bakes the markup in before cutting, and rewrites the file. Checked
@@ -1637,7 +1685,7 @@ class _MainScreenState extends State<MainScreen> {
                         // Slim Left Sidebar Tools
                         ToolSidebar(
                           activeTool: _activeTool,
-                          onToolSelected: (tool) => setState(() => _activeTool = tool),
+                          onToolSelected: _setActiveTool,
                           shapeKind: _currentToolProperties.shapeKind,
                           onShapeKindSelected: (kind) => _updateActiveToolProperty(shapeKind: kind),
                           isSidebarOpen: _isSidebarOpen,
@@ -1650,7 +1698,7 @@ class _MainScreenState extends State<MainScreen> {
                             imagePath: _activeCapture?.filePath,
                             annotations: _annotations,
                             activeTool: _activeTool,
-                            onToolSelected: (tool) => setState(() => _activeTool = tool),
+                            onToolSelected: _setActiveTool,
                             onSelectAnnotation: (ann) {
                               setState(() {
                                 _selectedAnnotationId = ann?.id;
@@ -1706,12 +1754,7 @@ class _MainScreenState extends State<MainScreen> {
                             onAnnotationsLiveUpdated: _onAnnotationsLiveUpdated,
                             onStepCounterIncremented: (nextVal) => setState(() => _stepCounter = nextVal),
                             onApplyCrop: _handleApplyCrop,
-                            onSampleColor: (color) {
-                              _updateActiveToolProperty(activeColor: color);
-                              _showToast(
-                                'Sampled colour #${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
-                              );
-                            },
+                            onSampleColor: _handleSampleColor,
                             // Snapshot the bitmap *before* the flood fill
                             // overwrites the file, otherwise undo would restore
                             // the already-filled image.
@@ -1797,7 +1840,7 @@ class _MainScreenState extends State<MainScreen> {
                                   stepCounter: _stepCounter,
                                   onResetStepCounter: () => setState(() => _stepCounter = 1),
                                   onRenumberSteps: _renumberStepMarkers,
-                                  onActivateEyedropper: () => setState(() => _activeTool = CanvasTool.colorPicker),
+                                  onActivateEyedropper: () => _setActiveTool(CanvasTool.colorPicker),
                                   onFlattenCanvas: _annotations.isNotEmpty ? _handleFlattenCanvas : null,
                                   onCloseDrawer: () => setState(() => _isPropertiesOpen = false),
                                   selectedAnnotation: _selectedAnnotation,

@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Flutter: Build Runner (Build)",
+      "type": "shell",
+      "command": "dart run build_runner build --delete-conflicting-outputs",
+      "problemMatcher": ["$dart-build_runner"],
+      "group": "build"
+    },
+    {
+      "label": "Flutter: Build Runner (Watch)",
+      "type": "shell",
+      "command": "dart run build_runner watch --delete-conflicting-outputs",
+      "problemMatcher": ["$dart-build_runner"],
+      "isBackground": true
+    },
+    {
+      "label": "Flutter: Analyze Code",
+      "type": "shell",
+      "command": "flutter analyze",
+      "problemMatcher": ["$dart-analyze"]
+    },
+    {
+      "label": "Flutter: Run Tests",
+      "type": "shell",
+      "command": "flutter test",
+      "group": "test"
+    },
+    {
+      "label": "Flutter: Clean & Get Packages",
+      "type": "shell",
+      "command": "flutter clean && flutter pub get"
+    }
+  ]
+}

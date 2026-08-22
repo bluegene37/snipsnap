@@ -1,0 +1,52 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "SnipSnap (macOS Debug)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": [
+        "-d",
+        "macos"
+      ]
+    },
+    {
+      "name": "SnipSnap (macOS Profile)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "profile",
+      "args": [
+        "-d",
+        "macos"
+      ]
+    },
+    {
+      "name": "SnipSnap (Windows Debug)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": [
+        "-d",
+        "windows"
+      ]
+    },
+    {
+      "name": "SnipSnap (Linux Debug)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": [
+        "-d",
+        "linux"
+      ]
+    },
+    {
+      "name": "Run All Tests",
+      "request": "launch",
+      "type": "dart",
+      "program": "test/"
+    }
+  ]
+}

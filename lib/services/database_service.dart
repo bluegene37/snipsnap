@@ -200,7 +200,7 @@ class DatabaseService {
     List<Offset> points = [];
     if (a.pointsJson != null && a.pointsJson!.isNotEmpty) {
       try {
-        final List<dynamic> list = jsonDecode(a.pointsJson!);
+        final list = jsonDecode(a.pointsJson!) as List<dynamic>;
         points = list
             .map((p) => Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()))
             .toList();
