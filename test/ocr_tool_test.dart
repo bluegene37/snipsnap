@@ -208,11 +208,16 @@ void main() {
       expect(canvas, contains('final VoidCallback? onImageBytesChanged;'));
       for (final method in const [
         'Future<void> _extractFloatingSelection() async {',
-        'Future<void> _commitFloatingSelection() async {',
+        // Named-parameter form: the capture-switch path commits into the
+        // capture the cut came from rather than whichever one is on screen.
+        'Future<void> _commitFloatingSelection({',
       ]) {
         final start = canvas.indexOf(method);
         expect(start, isNot(-1), reason: 'could not find `$method`');
-        final end = canvas.indexOf('\n  }', start);
+        // `\n  }\n`, not `\n  }`: the latter also matches the `  }) async {`
+        // closing a multi-line parameter list, which would cut the search off
+        // before the body it is supposed to be searching.
+        final end = canvas.indexOf('\n  }\n', start);
         expect(
           canvas.substring(start, end),
           // Guarded form: the flag that suppresses the redundant reload is

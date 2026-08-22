@@ -152,7 +152,7 @@ class HeaderBar extends StatelessWidget {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Image.asset(
-              'assets/images/snipsnap_logo.png',
+              'assets/images/app_logo.png',
               fit: BoxFit.cover,
               errorBuilder: (ctx, err, stack) => Container(
                 color: t.ink,

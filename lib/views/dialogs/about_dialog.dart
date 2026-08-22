@@ -37,7 +37,7 @@ class AboutSnipSnapDialog extends StatelessWidget {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(18),
                 child: Image.asset(
-                  'assets/images/snipsnap_logo.png',
+                  'assets/images/app_logo.png',
                   fit: BoxFit.cover,
                   errorBuilder: (ctx, err, stack) => Container(
                     color: t.ink,

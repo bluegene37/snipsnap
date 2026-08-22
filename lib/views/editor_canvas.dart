@@ -238,6 +238,21 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   // Crop state
   Rect? _activeCropRect;
+
+  /// True while [_activeCropRect] is still the untouched default the crop tool
+  /// installs (the whole image), rather than a box the user has drawn.
+  ///
+  /// The default covers the entire image, so *every* press that lands on the
+  /// picture also lands inside the crop box — and the crop box's hit test
+  /// reads an interior press as "move me". The first drag after picking the
+  /// crop tool therefore slid the whole-image box off to one side instead of
+  /// drawing a region, and applying it kept only the part still over the
+  /// picture: the "it crops about half the image" bug. While pristine, an
+  /// interior drag starts a fresh box instead; once the user owns the box,
+  /// dragging its body moves it as before. Edge and corner handles are hit
+  /// tested first either way, so the drag-outward canvas expansion still
+  /// works straight from the default.
+  bool _cropRectIsPristine = false;
   bool _isDraggingCrop = false;
   _CropHandle _currentCropHandle = _CropHandle.none;
   Rect? _cropOrigin;
@@ -298,6 +313,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   void didUpdateWidget(covariant EditorCanvas oldWidget) {
     super.didUpdateWidget(oldWidget);
 
+    // A different capture invalidates everything this canvas holds about the
+    // one that just went away. Run before the reload below, which is what
+    // replaces `_cachedSourceImage` and `_baseImage` with the new bitmap.
+    if (oldWidget.imagePath != widget.imagePath) {
+      _discardStateForPreviousCapture(oldWidget.imagePath);
+    }
+
     if (oldWidget.imagePath != widget.imagePath ||
         oldWidget.imageRevision != widget.imageRevision) {
       _checkFileExists();
@@ -347,6 +369,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       _selectedAnnotationId = null;
       if (widget.activeTool != CanvasTool.crop) {
         _activeCropRect = null;
+        _cropRectIsPristine = false;
       }
       final callback = widget.onSelectAnnotation;
       if (callback != null) {
@@ -370,6 +393,91 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         oldWidget.rotation != widget.rotation) {
       _applyRotationToSelection(widget.rotation);
     }
+  }
+
+  /// Drops every piece of canvas state that describes the capture the editor
+  /// has just switched away from.
+  ///
+  /// All of it is keyed to one bitmap, and none of it used to be cleared: only
+  /// a *tool* change reset any of it, so switching captures with the same tool
+  /// still selected carried the previous capture's state onto the new one.
+  /// Three of those leaks were destructive rather than cosmetic:
+  ///
+  /// * A floating cut is already erased from the previous capture's file and
+  ///   lives only in `_cutSelectionImage`. Left in place, the next tool change
+  ///   pasted those pixels into the **newly selected** capture's file and the
+  ///   original capture kept the hole. Committed here against
+  ///   [previousPath] instead, which is what switching away should mean.
+  /// * An open inline text editor committed its text onto the new capture's
+  ///   annotation list — the parent had already swapped it.
+  /// * The crop box stayed at the old image's rectangle, so applying it cropped
+  ///   the new capture through the previous one's geometry (and, at a different
+  ///   aspect ratio, through its letterbox).
+  void _discardStateForPreviousCapture(String? previousPath) {
+    if (_hasExtractedSelection) {
+      // Fire-and-forget, like the tool-change path: the paste is a file write
+      // and this runs inside `didUpdateWidget`. `_imageRect` is still the old
+      // capture's here, because the reload that replaces `_baseImage` has not
+      // run yet — capture it now rather than letting the async body read a
+      // rect that by then describes the new bitmap.
+      _commitFloatingSelection(toPath: previousPath, throughImageRect: _imageRect);
+    } else {
+      _floatingSelectionUiImage?.dispose();
+      _floatingSelectionUiImage = null;
+      _cutSelectionImage = null;
+      _floatingSelectionRect = null;
+      _floatingSelectionOriginRect = null;
+      _hasExtractedSelection = false;
+    }
+    _selectionMarquee = null;
+    _ocrRegion = null;
+
+    // The typed text belongs to a capture that is no longer on screen and
+    // cannot be committed to it any more, so it is dropped rather than landing
+    // on the wrong one.
+    _inlineTextPos = null;
+    _editingAnnotationId = null;
+    _inlineTextController.clear();
+
+    _activeCropRect = null;
+    _cropRectIsPristine = false;
+    _isDraggingCrop = false;
+    _currentCropHandle = _CropHandle.none;
+    _cropOrigin = null;
+
+    _isDraggingSelection = false;
+    _currentSelectionHandle = _CropHandle.none;
+    _selectionGestureOriginRect = null;
+
+    _isDraggingAnnotation = false;
+    _isResizingAnnotation = false;
+    _isRotatingAnnotation = false;
+    _currentAnnHandle = _AnnHandle.none;
+    _gestureOrigin = null;
+    _currentAnnotation = null;
+    _drawStart = null;
+
+    // The loupe is showing a pixel colour read out of the old bitmap.
+    _hoverPos = null;
+    _hoverColor = null;
+    _hoverPixelPos = null;
+
+    final hadSelection = _selectedAnnotationId != null;
+    _selectedAnnotationId = null;
+    if (hadSelection && widget.onSelectAnnotation != null) {
+      // The parent's `_selectedAnnotationId` still points at an annotation
+      // belonging to the previous capture; post-frame because this runs during
+      // the parent's own build.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onSelectAnnotation!(null);
+      });
+    }
+
+    // Deliberately no `_ensureCropRectInitialized()` here: `_baseImage` still
+    // holds the *previous* capture's bitmap at this point (the reload below is
+    // async), so seeding a default now would hand the new capture the old
+    // image's rectangle — the very carry-over this method exists to stop.
+    // `_loadBaseImage` seeds it once the new decode lands.
   }
 
   Future<void> _loadBaseImage() async {
@@ -404,6 +512,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         _baseImage = image;
         _cachedSourceImage = decodedImg;
       });
+      // The crop tool's default box needs the decoded size; if the user picked
+      // crop before this landed, `_ensureCropRectInitialized` bailed out and
+      // this is the only other moment it can succeed.
+      _ensureCropRectInitialized();
       if (image != null) {
         // After the setState, never during it: the listener drives the
         // parent's own setState.
@@ -508,9 +620,19 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       if (!mounted || _activeCropRect != null) return;
       // Default the crop box to the image itself rather than the whole
       // viewport, so the first drag never includes empty letterbox area.
+      //
+      // `_imageRect` falls back to the whole canvas while the bitmap is still
+      // decoding, which is exactly the letterbox-inclusive box this is meant
+      // to avoid — pick the crop tool quickly enough and applying it padded
+      // the capture with transparent bars instead of cropping it. Wait for the
+      // decode instead; `_loadBaseImage`'s setState reruns this through build.
+      if (_baseImage == null) return;
       final rect = _imageRect;
       if (rect.width > 0 && rect.height > 0) {
-        setState(() => _activeCropRect = rect);
+        setState(() {
+          _activeCropRect = rect;
+          _cropRectIsPristine = true;
+        });
       }
     });
   }
@@ -743,6 +865,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   void _updateCropRect(Offset totalDelta) {
     final origin = _cropOrigin;
     if (origin == null) return;
+    _cropRectIsPristine = false;
 
     double left = origin.left;
     double top = origin.top;
@@ -1029,7 +1152,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   @override
-  void onActiveCropRectChanged(Rect? rect) => setState(() => _activeCropRect = rect);
+  void onActiveCropRectChanged(Rect? rect) => setState(() {
+        _activeCropRect = rect;
+        _cropRectIsPristine = false;
+      });
 
   @override
   void onCurrentAnnotationChanged(Annotation? annotation) =>
@@ -1157,11 +1283,17 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (widget.activeTool == CanvasTool.crop) {
       if (_activeCropRect != null) {
         final handle = _hitTestCropRect(pos, _activeCropRect!);
-        if (handle != _CropHandle.none) {
+        // An interior press on the untouched default box draws a new region
+        // rather than dragging the default around — see `_cropRectIsPristine`.
+        // Handles are unaffected, so expanding outward from the default still
+        // works on the first gesture.
+        final isPristineBodyDrag = handle == _CropHandle.move && _cropRectIsPristine;
+        if (handle != _CropHandle.none && !isPristineBodyDrag) {
           setState(() {
             _isDraggingCrop = true;
             _currentCropHandle = handle;
             _cropOrigin = _activeCropRect;
+            _cropRectIsPristine = false;
           });
           return;
         }
@@ -1170,6 +1302,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         _selectedAnnotationId = null;
         _drawStart = pos;
         _activeCropRect = Rect.fromPoints(pos, pos);
+        _cropRectIsPristine = false;
       });
       return;
     }
@@ -1412,7 +1545,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     if (widget.activeTool == CanvasTool.crop && _drawStart != null) {
       final end = _constrainCropEndPoint(_drawStart!, pos);
-      setState(() => _activeCropRect = Rect.fromPoints(_drawStart!, end));
+      setState(() {
+        _activeCropRect = Rect.fromPoints(_drawStart!, end);
+        _cropRectIsPristine = false;
+      });
       return;
     }
 
@@ -1492,7 +1628,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (widget.activeTool == CanvasTool.crop) {
       final rect = _activeCropRect;
       if (rect == null || rect.width < 15 || rect.height < 15) {
-        setState(() => _activeCropRect = _imageRect);
+        // Back to the default box, so the next drag draws rather than moves.
+        setState(() {
+          _activeCropRect = _imageRect;
+          _cropRectIsPristine = true;
+        });
       }
       _drawStart = null;
       return;
@@ -1779,7 +1919,18 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     }
   }
 
-  Future<void> _commitFloatingSelection() async {
+  /// Pastes the floating cut back into the bitmap and clears the selection.
+  ///
+  /// [toPath] and [throughImageRect] exist for the capture-switch path, which
+  /// has to write into the capture the region was cut *out* of — by then
+  /// `widget.imagePath` and `_imageRect` already describe the newly selected
+  /// capture, and using them would stamp one capture's pixels into another
+  /// capture's file. Every other caller wants the live values and passes
+  /// neither.
+  Future<void> _commitFloatingSelection({
+    String? toPath,
+    Rect? throughImageRect,
+  }) async {
     if (!_hasExtractedSelection || _cutSelectionImage == null || _floatingSelectionRect == null) {
       _floatingSelectionUiImage?.dispose();
       if (mounted) {
@@ -1794,19 +1945,23 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       return;
     }
 
-    final path = widget.imagePath;
+    final isForeignTarget = toPath != null && toPath != widget.imagePath;
+    final path = toPath ?? widget.imagePath;
     final currentRect = _floatingSelectionRect!;
     final cutImg = _cutSelectionImage!;
     var wroteBitmap = false;
 
     try {
-      img.Image? decoded = _cachedSourceImage;
+      // `_cachedSourceImage` tracks whatever the canvas is showing now, which
+      // is the wrong bitmap once the target is a capture we have switched
+      // away from — decode that file fresh instead, and leave the cache alone.
+      img.Image? decoded = isForeignTarget ? null : _cachedSourceImage;
       if (decoded == null && path != null && File(path).existsSync()) {
         decoded = img.decodeImage(await File(path).readAsBytes());
-        _cachedSourceImage = decoded;
+        if (!isForeignTarget) _cachedSourceImage = decoded;
       }
       if (decoded != null && path != null) {
-        final imageRect = _imageRect;
+        final imageRect = throughImageRect ?? _imageRect;
         final scaleX = decoded.width / imageRect.width;
         final scaleY = decoded.height / imageRect.height;
 
@@ -1851,7 +2006,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       // decode failure leaves the bitmap exactly as the parent already knows
       // it, and a spurious bump would throw away a valid OCR cache.
       if (wroteBitmap && mounted && widget.onImageBytesChanged != null) {
-        _suppressNextRevisionReload = true;
+        // The suppression only ever applies to a revision bump for the bitmap
+        // on screen. Claiming it for a write into a capture we just left would
+        // make the *next* legitimate reload of the current capture a no-op.
+        _suppressNextRevisionReload = !isForeignTarget;
         widget.onImageBytesChanged!.call();
       }
     }
@@ -2076,7 +2234,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final rect = _activeCropRect;
     if (rect == null) return;
     widget.onApplyCrop?.call(rect);
-    setState(() => _activeCropRect = null);
+    setState(() {
+      _activeCropRect = null;
+      _cropRectIsPristine = false;
+    });
     widget.onToolSelected?.call(CanvasTool.select);
   }
 
@@ -2462,7 +2623,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(20),
                 child: Image.asset(
-                  'assets/images/snipsnap_logo.png',
+                  'assets/images/app_logo.png',
                   fit: BoxFit.cover,
                   errorBuilder: (ctx, err, stack) => Container(
                     color: t.surfaceRaised,
@@ -2598,7 +2759,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 icon: const Icon(Icons.close_rounded, size: 16),
                 label: const Text('Cancel', style: TextStyle(fontSize: 12)),
                 onPressed: () {
-                  setState(() => _activeCropRect = null);
+                  setState(() {
+                    _activeCropRect = null;
+                    _cropRectIsPristine = false;
+                  });
                   widget.onToolSelected?.call(CanvasTool.select);
                 },
               ),

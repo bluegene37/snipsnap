@@ -1444,14 +1444,17 @@ class _MainScreenState extends State<MainScreen> {
     // an aborted flatten should leave no orphan undo entry behind.
     if (_blockedByPendingConversion('flatten')) return;
 
-    await _pushUndoState(captureImage: true);
-
+    // Render before the undo push, not after: rendering does not touch the
+    // file, and pushing first left an orphan checkpoint behind whenever the
+    // render came back null — an undo step that restores exactly what is
+    // already on screen.
     final bytes = await _renderAnnotatedBytes();
     if (bytes == null) {
       _showToast('Failed to flatten canvas');
       return;
     }
 
+    await _pushUndoState(captureImage: true);
     await _replaceActiveImageBytes(bytes);
 
     setState(() {
@@ -2021,6 +2024,13 @@ class _MainScreenState extends State<MainScreen> {
                         await file.delete();
                       }
                     } catch (_) {}
+                    // The row and its annotations, not just the file.
+                    // `saveHistory` below only rewrites the captures still in
+                    // the list; it never deletes, so without this the deleted
+                    // capture's rows lived on forever — and if the file delete
+                    // above failed (it is deliberately swallowed) the whole
+                    // capture reappeared, annotations and all, on next launch.
+                    await StorageService.deleteCaptureItem(item.id);
                     StorageService.saveHistory(_captures);
                   },
                   onOpenLibraryLocation: () async {

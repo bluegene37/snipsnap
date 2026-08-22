@@ -1,9 +1,9 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import '../../models/annotation.dart';
 import '../../utils/constants.dart';
 import '../../utils/snip_theme.dart';
+import '../dialogs/color_picker_dialog.dart';
 
 class StylePicker extends StatelessWidget {
   final Color selectedColor;
@@ -115,40 +115,12 @@ class StylePicker extends StatelessWidget {
   });
 
   void _showColorPickerDialog(BuildContext context) {
-    final t = SnipTheme.of(context);
-    // The dialog route does not rebuild with this (stateless) panel, so the
-    // colour being picked is tracked locally for the Save action.
-    var current = selectedColor;
-
-    showDialog(
+    showSnipColorPicker(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: t.surfaceRaised,
-        title: Text('Pick Color', style: TextStyle(color: t.ink)),
-        content: SingleChildScrollView(
-          child: ColorPicker(
-            pickerColor: selectedColor,
-            onColorChanged: (c) {
-              current = c;
-              onColorChanged(c);
-            },
-            pickerAreaHeightPercent: 0.7,
-          ),
-        ),
-        actions: [
-          if (onSaveColor != null)
-            TextButton.icon(
-              icon: Icon(Icons.bookmark_add_outlined, size: 16, color: t.ink),
-              label: Text('Save Color',
-                  style: TextStyle(color: t.ink, fontWeight: FontWeight.w600)),
-              onPressed: () => onSaveColor!(current),
-            ),
-          TextButton(
-            child: Text('Done', style: TextStyle(color: t.emphasis, fontWeight: FontWeight.bold)),
-            onPressed: () => Navigator.of(ctx).pop(),
-          ),
-        ],
-      ),
+      title: 'Pick Color',
+      initialColor: selectedColor,
+      onColorChanged: onColorChanged,
+      onSaveColor: onSaveColor,
     );
   }
 
@@ -181,30 +153,14 @@ class StylePicker extends StatelessWidget {
   }
 
   void _showBgColorPickerDialog(BuildContext context) {
-    final t = SnipTheme.of(context);
-
-    showDialog(
+    showSnipColorPicker(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: t.surfaceRaised,
-        title: Text('Pick Text Background Color', style: TextStyle(color: t.ink)),
-        content: SingleChildScrollView(
-          child: ColorPicker(
-            pickerColor: textBackgroundColor ?? Colors.black.withValues(alpha: 0.75),
-            onColorChanged: (c) {
-              onTextBackgroundColorChanged?.call(c);
-              onFillChanged(true);
-            },
-            pickerAreaHeightPercent: 0.7,
-          ),
-        ),
-        actions: [
-          TextButton(
-            child: Text('Done', style: TextStyle(color: t.emphasis, fontWeight: FontWeight.bold)),
-            onPressed: () => Navigator.of(ctx).pop(),
-          ),
-        ],
-      ),
+      title: 'Pick Text Background Color',
+      initialColor: textBackgroundColor ?? Colors.black.withValues(alpha: 0.75),
+      onColorChanged: (c) {
+        onTextBackgroundColorChanged?.call(c);
+        onFillChanged(true);
+      },
     );
   }
 
@@ -519,6 +475,15 @@ class StylePicker extends StatelessWidget {
                       '• Hover and click anywhere on the screenshot to sample the pixel color into your active tool.',
                       style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
                     ),
+                    const SizedBox(height: 10),
+                    // The sampled colour is almost never one of the preset
+                    // swatches, so without an explicit readout nothing in this
+                    // panel shows what the eyedropper just picked up.
+                    _CurrentColorReadout(
+                      color: selectedColor,
+                      label: 'SAMPLED',
+                      onTap: () => _showColorPickerDialog(context),
+                    ),
                   ],
                 ),
               ),
@@ -535,6 +500,11 @@ class StylePicker extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   letterSpacing: 0.8,
                 ),
+              ),
+              const SizedBox(height: 10),
+              _CurrentColorReadout(
+                color: selectedColor,
+                onTap: () => _showColorPickerDialog(context),
               ),
               const SizedBox(height: 10),
               Wrap(
@@ -840,6 +810,14 @@ class StylePicker extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   letterSpacing: 0.8,
                 ),
+              ),
+              const SizedBox(height: 10),
+              // A colour picked with the eyedropper or the custom picker is
+              // usually off-palette, so no swatch below reads as selected.
+              // This is the one place the active colour is always visible.
+              _CurrentColorReadout(
+                color: selectedColor,
+                onTap: () => _showColorPickerDialog(context),
               ),
               const SizedBox(height: 10),
               Wrap(
@@ -1868,3 +1846,92 @@ class _MiniCheckerPainter extends CustomPainter {
 }
 
 
+
+/// The active colour, shown as a swatch plus its hex value.
+///
+/// The swatch grid can only ever highlight a preset: a colour arriving from
+/// the eyedropper or the custom picker matches nothing there, so before this
+/// existed the panel gave no indication of what the current colour actually
+/// was. Tapping it reopens the custom picker on that colour.
+class _CurrentColorReadout extends StatelessWidget {
+  final Color color;
+  final String label;
+  final VoidCallback onTap;
+
+  const _CurrentColorReadout({
+    required this.color,
+    required this.onTap,
+    this.label = 'CURRENT',
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = SnipTheme.of(context);
+    final hex =
+        '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
+    final alphaPct = (color.a * 100).round();
+
+    return Tooltip(
+      message: 'Current color $hex — tap to open the custom picker',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(t.radius),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(t.radius),
+            border: Border.all(color: t.border, width: t.hairline),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: CustomPaint(
+                    painter: const CheckerboardPainter(),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: color,
+                        border: Border.all(color: t.border, width: t.hairline),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: t.inkMuted,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                    Text(
+                      alphaPct >= 100 ? hex : '$hex · $alphaPct%',
+                      style: TextStyle(
+                        color: t.ink,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.color_lens_rounded, size: 14, color: t.inkMuted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

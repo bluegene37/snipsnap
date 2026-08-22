@@ -166,7 +166,11 @@ class StorageService {
               int w = 0;
               int h = 0;
               try {
-                final decoded = img.decodeImage(await f.readAsBytes());
+                // Off the UI isolate, like every other decode in the app: this
+                // loop runs at startup over every file in the library folder,
+                // and a pure-Dart PNG decode of a Retina capture is long
+                // enough to be seen as a freeze once there are a few of them.
+                final decoded = await compute(img.decodeImage, await f.readAsBytes());
                 if (decoded != null) {
                   w = decoded.width;
                   h = decoded.height;
