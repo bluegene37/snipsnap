@@ -161,6 +161,27 @@ enum _CropHandle {
 
 const _freehandTools = {CanvasTool.pen, CanvasTool.highlight};
 
+/// Tools whose mark is a *stroke* rather than an area.
+///
+/// Their size and their thickness are the same property, so resizing one has to
+/// scale both — dragging a 2px line out to twice the length and leaving it 2px
+/// thick is not what "make it bigger" means. They also scale uniformly, which
+/// is what stops a vertical drag on a near-horizontal arrow from reading as a
+/// rotation: the bounding box of such an arrow is only a pixel or two tall, so
+/// per-axis scaling turned any vertical movement into a huge change of angle.
+const _strokeTools = {
+  CanvasTool.pen,
+  CanvasTool.line,
+  CanvasTool.arrow,
+  CanvasTool.highlight,
+  CanvasTool.ruler,
+};
+
+/// The stroke-width range the properties slider offers. Resizing stays inside
+/// it so a scaled annotation is still adjustable by the slider afterwards.
+const double _minStrokeWidth = 1.0;
+const double _maxStrokeWidth = 30.0;
+
 /// Tools whose annotation is created on tap-up, so a stray drag cannot spawn
 /// duplicates. Their handlers still own the placement — the canvas only
 /// declines to start a drag for them.
@@ -1062,6 +1083,70 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   // Resize
   // ---------------------------------------------------------------------------
 
+  /// Scales a stroke annotation uniformly about the corner opposite [handle],
+  /// carrying its thickness with it.
+  ///
+  /// The scale factor is the drag projected onto the original corner-to-anchor
+  /// vector, rather than a per-axis ratio of the bounding box. Two reasons, and
+  /// both of them are the bugs this replaces:
+  ///
+  /// * A near-horizontal line has a bounding box a pixel or two tall, so
+  ///   `newHeight / oldHeight` explodes on the smallest vertical movement —
+  ///   which is why dragging an arrow's handle downward span it around instead
+  ///   of resizing it.
+  /// * Scaling the axes independently changes the angle by definition. A
+  ///   projection cannot: movement perpendicular to the stroke contributes
+  ///   nothing, so the mark keeps pointing where the user drew it.
+  Annotation _resizeStroke(Annotation origin, _AnnHandle handle, Offset totalDelta) {
+    // `selectionRect`, not `boundingRect`: this is the rect the handles sit on,
+    // so the corner the user grabbed is the corner being scaled and dragging it
+    // twice as far from the anchor makes the mark twice the size.
+    final bounds = AnnotationRenderer.selectionRect(origin);
+    if (bounds == Rect.zero) return origin;
+
+    final Offset anchor;
+    final Offset corner;
+    switch (handle) {
+      case _AnnHandle.topLeft:
+        anchor = bounds.bottomRight;
+        corner = bounds.topLeft;
+      case _AnnHandle.topRight:
+        anchor = bounds.bottomLeft;
+        corner = bounds.topRight;
+      case _AnnHandle.bottomLeft:
+        anchor = bounds.topRight;
+        corner = bounds.bottomLeft;
+      case _AnnHandle.bottomRight:
+        anchor = bounds.topLeft;
+        corner = bounds.bottomRight;
+      default:
+        return origin;
+    }
+
+    final original = corner - anchor;
+    final lengthSquared = original.distanceSquared;
+    // A mark with no extent has no direction to scale along.
+    if (lengthSquared < 1.0) return origin;
+
+    final dragged = corner + totalDelta - anchor;
+    final factor =
+        ((dragged.dx * original.dx + dragged.dy * original.dy) / lengthSquared)
+            .clamp(0.05, 20.0);
+
+    Offset scaled(Offset p) => anchor + (p - anchor) * factor;
+
+    return origin.copyWith(
+      strokeWidth:
+          (origin.strokeWidth * factor).clamp(_minStrokeWidth, _maxStrokeWidth),
+      points: origin.points.isEmpty ? null : origin.points.map(scaled).toList(),
+      startPoint: origin.startPoint == null ? null : scaled(origin.startPoint!),
+      endPoint: origin.endPoint == null ? null : scaled(origin.endPoint!),
+      // The curve control point rides along, or a curved arrow straightens out.
+      controlPoint:
+          origin.controlPoint == null ? null : scaled(origin.controlPoint!),
+    );
+  }
+
   Annotation _resizeAnnotation(Annotation origin, _AnnHandle handle, Offset totalDelta) {
     if (origin.tool == CanvasTool.text || origin.tool == CanvasTool.stepMarker) {
       // Point-anchored items scale by their type size rather than by bounds.
@@ -1069,6 +1154,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           ? totalDelta.dx
           : -totalDelta.dx;
       return origin.copyWith(fontSize: (origin.fontSize + grow * 0.4).clamp(8.0, 120.0));
+    }
+
+    if (_strokeTools.contains(origin.tool)) {
+      return _resizeStroke(origin, handle, totalDelta);
     }
 
     final bounds = AnnotationRenderer.boundingRect(origin);
@@ -1125,20 +1214,6 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       math.max(left, right),
       math.max(top, bottom),
     );
-
-    if (_freehandTools.contains(origin.tool) && origin.points.length > 1) {
-      if (bounds.width <= 0 || bounds.height <= 0) return origin;
-      final scaleX = newBounds.width / bounds.width;
-      final scaleY = newBounds.height / bounds.height;
-      return origin.copyWith(
-        points: origin.points
-            .map((p) => Offset(
-                  newBounds.left + (p.dx - bounds.left) * scaleX,
-                  newBounds.top + (p.dy - bounds.top) * scaleY,
-                ))
-            .toList(),
-      );
-    }
 
     // Preserve the drag direction of the original shape so arrows/lines keep
     // pointing the same way after a resize.
@@ -1449,6 +1524,33 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       }
     }
 
+    // Transform the current selection when one of its handles is grabbed.
+    //
+    // Ahead of every per-tool branch, because the Select tool's own workflow
+    // below returns unconditionally: with Select active — the tool anyone would
+    // reach for to resize something — the handles were unreachable, and
+    // grabbing a corner fell through to `hitTestAnnotation`'s bounding-box
+    // fallback and *moved* the annotation instead of resizing it.
+    //
+    // A live floating selection outranks it: those two selections are mutually
+    // exclusive in practice, and the marquee's own handles share this space.
+    final selected = _floatingSelectionRect == null ? _selectedAnnotation : null;
+    if (selected != null) {
+      final handle = _hitTestAnnotationHandles(pos, selected);
+      if (handle != _AnnHandle.none && handle != _AnnHandle.body) {
+        _pushHistoryCheckpoint();
+        setState(() {
+          _gestureOrigin = selected;
+          _isDraggingAnnotation = false;
+          _isRotatingAnnotation = handle == _AnnHandle.rotate;
+          _isResizingAnnotation =
+              !_isRotatingAnnotation && handle != _AnnHandle.curve;
+          _currentAnnHandle = handle;
+        });
+        return;
+      }
+    }
+
     // Selection tool workflow
     if (widget.activeTool == CanvasTool.select) {
       // 1. If clicking active floating selection handle or body
@@ -1492,25 +1594,6 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       });
       widget.onSelectAnnotation?.call(null);
       return;
-    }
-
-    // Transform the current selection when its handles or body are grabbed.
-    final selected = _selectedAnnotation;
-    if (selected != null) {
-      final handle = _hitTestAnnotationHandles(pos, selected);
-      if (handle != _AnnHandle.none) {
-        _pushHistoryCheckpoint();
-        setState(() {
-          _gestureOrigin = selected;
-          _isDraggingAnnotation = handle == _AnnHandle.body;
-          _isRotatingAnnotation = handle == _AnnHandle.rotate;
-          _isResizingAnnotation = !_isDraggingAnnotation &&
-              !_isRotatingAnnotation &&
-              handle != _AnnHandle.curve;
-          _currentAnnHandle = handle;
-        });
-        return;
-      }
     }
 
     // Existing items can be grabbed directly with any tool active
