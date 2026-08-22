@@ -184,6 +184,14 @@ private func makeView(
           captureCount == 0, "cancel=\(cancelCount) capture=\(captureCount)")
   }
 
+  print("\n=== Activation: the first click must not be swallowed ===")
+  do {
+    let v = makeView(onCapture: { _ in }, onCancel: {})
+    check("the overlay acts on the click that activates the app",
+          v.acceptsFirstMouse(for: nil),
+          "a capture from the global hotkey always arrives with another app frontmost")
+  }
+
   print("\n=== Edge: mouse-up with no preceding mouse-down ===")
   do {
     var settled = false

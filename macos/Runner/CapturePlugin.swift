@@ -304,6 +304,18 @@ private class CaptureOverlayView: NSView {
     return true
   }
 
+  /// Act on the very first click, rather than swallowing it to activate.
+  ///
+  /// AppKit's default is to consume the click that brings an inactive app
+  /// forward. A capture triggered by its global hotkey is *always* that case —
+  /// the user is in some other app — so the press that started the selection
+  /// never reached `mouseDown`. Clicking captured nothing (the unpaired
+  /// mouse-up cancels) and dragging drew no region, which is to say the
+  /// shortcut only worked when SnipSnap already happened to be frontmost.
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    return true
+  }
+
   override func resetCursorRects() {
     addCursorRect(bounds, cursor: .crosshair)
   }

@@ -749,19 +749,38 @@ class _MainScreenState extends State<MainScreen> {
         'Pick another in Keyboard Shortcuts.');
   }
 
-  void _openShortcutSettingsDialog() {
-    showDialog(
-      context: _dialogContext!,
-      builder: (ctx) => ShortcutSettingsDialog(
-        initialShortcuts: _shortcuts,
-        onShortcutsSaved: (updatedShortcuts) {
-          setState(() {
-            _shortcuts = updatedShortcuts;
-          });
-          _registerGlobalHotKeys();
-        },
-      ),
-    );
+  Future<void> _openShortcutSettingsDialog() async {
+    // The OS-wide hotkeys come down for as long as this dialog is open.
+    //
+    // They are registered at system level, so they fire *before* Flutter sees
+    // the key: recording a chord that matched a live capture shortcut took a
+    // screenshot instead of being written into the field, and there was no way
+    // to type over an existing binding. Held down for the whole dialog rather
+    // than just while a row is being recorded, so the chord cannot fire on the
+    // way in or out of edit mode either.
+    await ShortcutService.unregisterGlobalHotKeys();
+    var saved = false;
+    try {
+      await showDialog<void>(
+        context: _dialogContext!,
+        builder: (ctx) => ShortcutSettingsDialog(
+          initialShortcuts: _shortcuts,
+          onShortcutsSaved: (updatedShortcuts) {
+            saved = true;
+            setState(() {
+              _shortcuts = updatedShortcuts;
+            });
+          },
+        ),
+      );
+    } finally {
+      // Whatever happened — saved, cancelled, or an error on the way — the
+      // hotkeys have to come back, or capture stays dead until a restart.
+      if (mounted) {
+        await _registerGlobalHotKeys();
+        if (saved) _showToast('Keyboard shortcuts updated');
+      }
+    }
   }
 
   VoidCallback? _getHandlerForAction(AppShortcutAction action) {
