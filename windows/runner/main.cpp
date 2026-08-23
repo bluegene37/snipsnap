@@ -1,6 +1,7 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <shobjidl.h>
 
 #include "flutter_window.h"
 #include "utils.h"
@@ -22,6 +23,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // reference. Note that being an STA is why ocr_handler.cpp does all of its
   // blocking WinRT work on its own multi-threaded worker instead.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
+  // The Windows counterpart to the macOS bundle identifier. Shell features that
+  // need a stable app identity - taskbar grouping and pinning, jump lists, toast
+  // notifications - key off this rather than the executable path, and the
+  // installer must declare the same string. Without it Windows derives an
+  // identity from the exe path, so a reinstall to a different directory looks
+  // like a different app.
+  ::SetCurrentProcessExplicitAppUserModelID(L"dev.genexis.snipsnap");
 
   flutter::DartProject project(L"data");
 

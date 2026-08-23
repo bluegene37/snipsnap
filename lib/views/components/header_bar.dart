@@ -106,17 +106,20 @@ class HeaderBar extends StatelessWidget {
                 _buildEditGroup(t),
                 if (onZoomScaleChanged != null && hasCapture) ...[
                   const SizedBox(width: 8),
+                  _divider(t.border),
+                  const SizedBox(width: 8),
                   _buildZoomGroup(t),
                 ],
                 const Spacer(),
               ] else
                 const Spacer(),
 
-              _buildExportGroup(t, showLabels),
+              _buildViewGroup(t, showLabels),
               const SizedBox(width: 10),
               _divider(t.border),
               const SizedBox(width: 6),
-              _buildViewGroup(t),
+              _buildExportGroup(t, showLabels),
+              const SizedBox(width: 6),
               _buildOverflowMenu(t),
             ],
           );
@@ -140,11 +143,6 @@ class HeaderBar extends StatelessWidget {
           height: 30,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            // A plain elevation shadow, not a theme role: like the rest of
-            // the app's drop shadows (editor_canvas.dart, ocr_result_panel.dart)
-            // this stays a literal dark value in both modes rather than
-            // following ink's inversion — a "shadow" that turned white in
-            // dark mode would read as a glow, not a shadow.
             boxShadow: const [
               BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2)),
             ],
@@ -177,14 +175,6 @@ class HeaderBar extends StatelessWidget {
     );
   }
 
-  /// Split button: the main half captures a region, the chevron picks a mode.
-  ///
-  /// The header's primary call-to-action, not a toggle — [SnipTheme.emphasis]
-  /// per the "CTA emphasis, not the active control" rule. Matches the
-  /// treatment `main_screen.dart`'s floating Properties pill already
-  /// established: [SnipTheme.emphasis] borrows ink's *strength* for a
-  /// border/icon/text, it is never a fill — [SnipTheme.activeFill] stays
-  /// reserved for the single exclusive active control (the selected tool).
   Widget _buildCaptureGroup(SnipTheme t, bool showLabels) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -324,81 +314,61 @@ class HeaderBar extends StatelessWidget {
   }
 
   Widget _buildEditGroup(SnipTheme t) {
-    return _Pill(
-      borderColor: t.border,
-      fillColor: t.surfaceRaised,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        _PillIconButton(
+        _HeaderButton(
           icon: Icons.undo_rounded,
           tooltip: 'Undo (${_shortcut(AppShortcutAction.undo, 'Cmd+Z')})',
-          color: canUndo ? t.ink : t.inkFaint,
+          enabled: canUndo,
           onPressed: canUndo ? onUndo : null,
         ),
-        _PillIconButton(
+        const SizedBox(width: 6),
+        _HeaderButton(
           icon: Icons.redo_rounded,
           tooltip: 'Redo (${_shortcut(AppShortcutAction.redo, 'Cmd+Shift+Z')})',
-          color: canRedo ? t.ink : t.inkFaint,
+          enabled: canRedo,
           onPressed: canRedo ? onRedo : null,
         ),
-        Container(height: 18, width: 1, color: t.border),
-        _PillIconButton(
+        const SizedBox(width: 6),
+        _HeaderButton(
           icon: Icons.delete_outline_rounded,
           tooltip: 'Clear All Annotations '
               '(${_shortcut(AppShortcutAction.clearAnnotations, 'Cmd+Shift+K')})',
-          color: canClear ? t.ink : t.inkFaint,
+          enabled: canClear,
           onPressed: canClear ? onClear : null,
         ),
       ],
     );
   }
 
-  /// Compact zoom stepper. The gallery tray carries a full slider, but that
-  /// tray can be hidden — zoom must stay reachable either way.
   Widget _buildZoomGroup(SnipTheme t) {
     final canZoomOut = zoomScale > 0.2;
     final canZoomIn = zoomScale < 4.0;
     final isDefaultZoom = (zoomScale - 1.0).abs() < 0.01;
 
-    return _Pill(
-      borderColor: t.border,
-      fillColor: t.surfaceRaised,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        _PillIconButton(
+        _HeaderButton(
           icon: Icons.remove_rounded,
           tooltip: 'Zoom Out',
-          color: canZoomOut ? t.ink : t.inkFaint,
+          enabled: canZoomOut,
           onPressed:
               canZoomOut ? () => onZoomScaleChanged!((zoomScale - 0.25).clamp(0.2, 4.0)) : null,
         ),
-        Tooltip(
-          message: 'Reset Zoom to 100%',
-          child: InkWell(
-            borderRadius: BorderRadius.circular(6),
-            onTap: () => onZoomScaleChanged!(1.0),
-            child: Container(
-              width: 46,
-              alignment: Alignment.center,
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Text(
-                '${(zoomScale * 100).round()}%',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  // Colour cannot carry this signal — emphasis is defined
-                  // equal to ink, so an ink-vs-emphasis branch would render
-                  // identically in both states. Weight is the only lever
-                  // skeleton has left for "this differs from default."
-                  fontWeight: isDefaultZoom ? FontWeight.w500 : FontWeight.w800,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                  color: t.ink,
-                ),
-              ),
-            ),
-          ),
+        const SizedBox(width: 6),
+        _HeaderButton(
+          label: '${(zoomScale * 100).round()}%',
+          isBold: !isDefaultZoom,
+          tooltip: 'Reset Zoom to 100%',
+          onPressed: () => onZoomScaleChanged!(1.0),
         ),
-        _PillIconButton(
+        const SizedBox(width: 6),
+        _HeaderButton(
           icon: Icons.add_rounded,
           tooltip: 'Zoom In',
-          color: canZoomIn ? t.ink : t.inkFaint,
+          enabled: canZoomIn,
           onPressed:
               canZoomIn ? () => onZoomScaleChanged!((zoomScale + 0.25).clamp(0.2, 4.0)) : null,
         ),
@@ -421,6 +391,16 @@ class HeaderBar extends StatelessWidget {
         ),
         const SizedBox(width: 6),
         _HeaderButton(
+          icon: Icons.layers_clear_rounded,
+          label: 'Flatten',
+          showLabel: showLabels,
+          tooltip: 'Bake Annotations into the Image '
+              '(${_shortcut(AppShortcutAction.flattenCanvas, 'Cmd+Shift+F')})',
+          onPressed: onFlattenCanvas,
+          enabled: onFlattenCanvas != null,
+        ),
+        const SizedBox(width: 6),
+        _HeaderButton(
           icon: Icons.download_rounded,
           label: 'Save As',
           showLabel: showLabels,
@@ -429,31 +409,17 @@ class HeaderBar extends StatelessWidget {
           enabled: hasCapture,
           isPrimary: true,
         ),
-        const SizedBox(width: 6),
-        _HeaderButton(
-          icon: Icons.layers_clear_rounded,
-          label: 'Flatten',
-          showLabel: showLabels,
-          tooltip: 'Bake Annotations into the Image '
-              '(${_shortcut(AppShortcutAction.flattenCanvas, 'Cmd+Shift+F')})',
-          onPressed: onFlattenCanvas ?? () {},
-          enabled: onFlattenCanvas != null,
-        ),
       ],
     );
   }
 
-  // Both toggles below are independently switchable — the gallery and the
-  // properties drawer can be open at once, neither excludes the other — so
-  // neither is the exclusive active control. selectedFill/ink, not
-  // activeFill/onActive; see _ToggleIconButton.
-  Widget _buildViewGroup(SnipTheme t) {
+  Widget _buildViewGroup(SnipTheme t, bool showLabels) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _ToggleIconButton(
+        _HeaderButton(
           icon: isSidebarOpen ? Icons.photo_library_rounded : Icons.photo_library_outlined,
-          active: isSidebarOpen,
+          isActive: isSidebarOpen,
           tooltip: isSidebarOpen
               ? 'Hide Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})'
               : 'Show Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})',
@@ -461,63 +427,51 @@ class HeaderBar extends StatelessWidget {
         ),
         if (onToggleProperties != null) ...[
           const SizedBox(width: 6),
-          _ToggleIconButton(
+          _HeaderButton(
             icon: isPropertiesOpen ? Icons.tune_rounded : Icons.tune_outlined,
-            active: isPropertiesOpen,
+            isActive: isPropertiesOpen,
             tooltip: isPropertiesOpen ? 'Hide Tool Properties' : 'Show Tool Properties',
             onPressed: onToggleProperties,
           ),
         ],
-        const SizedBox(width: 6),
-        _ToggleIconButton(
-          icon: t.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-          active: false,
-          tooltip: t.isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-          onPressed: onToggleThemeMode,
-        ),
       ],
     );
   }
 
-  /// Low-frequency app settings live behind one menu so they never compete
-  /// with the editing controls for space.
   Widget _buildOverflowMenu(SnipTheme t) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 6),
-      child: PopupMenuButton<String>(
-        tooltip: 'More Options',
-        position: PopupMenuPosition.under,
-        color: t.surfaceRaised,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: BorderSide(color: t.border),
+    return PopupMenuButton<String>(
+      tooltip: 'More Options',
+      position: PopupMenuPosition.under,
+      color: t.surfaceRaised,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: t.border),
+      ),
+      onSelected: (val) => switch (val) {
+        'shortcuts' => onOpenShortcutSettings(),
+        'theme' => onToggleThemeMode(),
+        'about' => onOpenAboutDialog(),
+        _ => null,
+      },
+      itemBuilder: (ctx) => [
+        _overflowItem(t, 'shortcuts', Icons.keyboard_rounded, 'Keyboard Shortcuts…'),
+        _overflowItem(
+          t,
+          'theme',
+          t.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+          t.isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
         ),
-        onSelected: (val) => switch (val) {
-          'shortcuts' => onOpenShortcutSettings(),
-          'theme' => onToggleThemeMode(),
-          'about' => onOpenAboutDialog(),
-          _ => null,
-        },
-        itemBuilder: (ctx) => [
-          _overflowItem(t, 'shortcuts', Icons.keyboard_rounded, 'Keyboard Shortcuts…'),
-          _overflowItem(
-            t,
-            'theme',
-            t.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-            t.isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-          ),
-          _overflowItem(t, 'about', Icons.info_outline_rounded, 'About SnipSnap'),
-        ],
-        child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: t.border),
-          ),
-          child: Icon(Icons.more_vert_rounded, color: t.ink, size: 18),
+        _overflowItem(t, 'about', Icons.info_outline_rounded, 'About SnipSnap'),
+      ],
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: t.border),
         ),
+        child: Icon(Icons.more_vert_rounded, color: t.ink, size: 18),
       ),
     );
   }
@@ -544,179 +498,107 @@ class HeaderBar extends StatelessWidget {
   }
 }
 
-/// Rounded container grouping related icon buttons.
-class _Pill extends StatelessWidget {
-  final List<Widget> children;
-  final Color borderColor;
-  final Color fillColor;
-
-  const _Pill({
-    required this.children,
-    required this.borderColor,
-    required this.fillColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 36,
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-      decoration: BoxDecoration(
-        color: fillColor,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: borderColor),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: children),
-    );
-  }
-}
-
-class _PillIconButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final Color color;
-  final VoidCallback? onPressed;
-
-  const _PillIconButton({
-    required this.icon,
-    required this.tooltip,
-    required this.color,
-    this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      icon: Icon(icon, size: 17),
-      color: color,
-      // Disabled buttons must keep the explicit colour above, otherwise the
-      // theme greys them a second time and they become nearly invisible.
-      disabledColor: color,
-      tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
-      padding: EdgeInsets.zero,
-      onPressed: onPressed,
-    );
-  }
-}
-
-/// A view-toggle icon button: independently switchable, so it renders
-/// through [SnipTheme.controlDecoration]/[SnipTheme.controlForeground] with
-/// `exclusive: false` — a [SnipTheme.selectedFill] highlight with ordinary
-/// [SnipTheme.ink] foreground when active, never the knocked-out
-/// [SnipTheme.activeFill] plate that's reserved for the sidebar's single
-/// selected tool. Shared by the gallery and properties toggles so the same
-/// three-state shape isn't hand-duplicated per call site.
-class _ToggleIconButton extends StatelessWidget {
-  final IconData icon;
-  final bool active;
-  final String tooltip;
-  final VoidCallback? onPressed;
-
-  const _ToggleIconButton({
-    required this.icon,
-    required this.active,
-    required this.tooltip,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = SnipTheme.of(context);
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onPressed,
-          child: Container(
-            width: 36,
-            height: 36,
-            alignment: Alignment.center,
-            decoration: t.controlDecoration(active: active, exclusive: false, radius: 8),
-            child: Icon(
-              icon,
-              size: 18,
-              color: t.controlForeground(active: active, exclusive: false),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Bordered header action button: hairline outline at rest; when [isPrimary]
-/// marks it as the zone's call to action, its border/icon/text step up to
-/// [SnipTheme.emphasis] strength (never a fill — see [SnipTheme.emphasis]'s
-/// doc comment, "a header CTA" is its own worked example).
 class _HeaderButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
+  final IconData? icon;
+  final String? label;
+  final VoidCallback? onPressed;
   final String tooltip;
   final bool showLabel;
   final bool enabled;
   final bool isPrimary;
+  final bool isActive;
+  final bool isBold;
 
   const _HeaderButton({
-    required this.icon,
-    required this.label,
+    this.icon,
+    this.label,
     required this.onPressed,
     required this.tooltip,
     this.showLabel = true,
     this.enabled = true,
     this.isPrimary = false,
+    this.isActive = false,
+    this.isBold = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final t = SnipTheme.of(context);
 
-    // isPrimary borrows SnipTheme.emphasis for border/icon/text weight only
-    // — never a fill. Matches main_screen.dart's floating Properties pill:
-    // emphasis signals "more weight than a resting hairline," activeFill
-    // stays reserved for the single exclusive active control.
-    final bgColor = isPrimary ? t.surfaceRaised : Colors.transparent;
-    final fgColor = isPrimary ? t.emphasis : (enabled ? t.ink : t.inkFaint);
-    final borderColor = isPrimary ? t.emphasis : t.border;
+    final bgColor = WidgetStateProperty.resolveWith((states) {
+      if (!enabled) return Colors.transparent;
+      if (isActive) return t.selectedFill;
+      if (isPrimary) return t.surfaceRaised;
+      return Colors.transparent;
+    });
+
+    final fgColor = WidgetStateProperty.resolveWith((states) {
+      if (!enabled) return t.inkFaint;
+      if (isPrimary) return t.emphasis;
+      return t.ink;
+    });
+
+    final border = WidgetStateProperty.resolveWith((states) {
+      if (!enabled) return BorderSide(color: t.border, width: t.hairline);
+      if (isPrimary) return BorderSide(color: t.emphasis, width: 1.2);
+      if (isActive) return BorderSide(color: t.selectedFill, width: t.hairline);
+      if (states.contains(WidgetState.hovered) || states.contains(WidgetState.pressed)) {
+        return BorderSide(color: t.borderStrong, width: t.hairline);
+      }
+      return BorderSide(color: t.border, width: t.hairline);
+    });
 
     final style = ElevatedButton.styleFrom(
-      backgroundColor: bgColor,
-      foregroundColor: fgColor,
-      disabledBackgroundColor: bgColor,
-      disabledForegroundColor: t.inkFaint,
       elevation: 0,
-      padding: EdgeInsets.symmetric(horizontal: showLabel ? 12 : 9, vertical: 8),
-      minimumSize: const Size(0, 36),
+      padding: EdgeInsets.symmetric(
+        horizontal: (showLabel && label != null) || icon == null ? 10 : 0,
+        vertical: 8
+      ),
+      minimumSize: const Size(36, 36),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: BorderSide(
-          color: enabled ? borderColor : t.border,
-          width: isPrimary ? 1.2 : t.hairline,
-        ),
       ),
+    ).copyWith(
+      backgroundColor: bgColor,
+      foregroundColor: fgColor,
+      side: border,
     );
+
+    Widget child;
+    if (icon != null && label != null && showLabel) {
+      child = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15),
+          const SizedBox(width: 6),
+          Text(
+            label!,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+          ),
+        ],
+      );
+    } else if (icon != null) {
+      child = Icon(icon, size: 16);
+    } else if (label != null) {
+      child = Text(
+        label!,
+        style: TextStyle(
+          fontSize: 12.0,
+          fontWeight: isBold ? FontWeight.w800 : FontWeight.w500,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
+      );
+    } else {
+      child = const SizedBox.shrink();
+    }
 
     return Tooltip(
       message: tooltip,
-      child: showLabel
-          ? ElevatedButton.icon(
-              style: style,
-              icon: Icon(icon, size: 15),
-              label: Text(
-                label,
-                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
-              ),
-              onPressed: enabled ? onPressed : null,
-            )
-          : ElevatedButton(
-              style: style,
-              onPressed: enabled ? onPressed : null,
-              child: Icon(icon, size: 16),
-            ),
+      child: ElevatedButton(
+        style: style,
+        onPressed: enabled ? onPressed : null,
+        child: child,
+      ),
     );
   }
 }
