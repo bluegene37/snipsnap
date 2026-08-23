@@ -468,33 +468,23 @@ class AnnotationRenderer {
     switch (ann.tool) {
       case CanvasTool.pen:
         _drawFreehand(canvas, ann, isHighlighter: false);
-        break;
       case CanvasTool.highlight:
         _drawFreehand(canvas, ann, isHighlighter: true);
-        break;
       case CanvasTool.arrow:
         _drawArrow(canvas, ann);
-        break;
       case CanvasTool.line:
         _drawLine(canvas, ann);
-        break;
       case CanvasTool.shape:
         _drawShape(canvas, ann);
-        break;
       case CanvasTool.ruler:
         _drawRuler(canvas, ann, pixelScale);
-        break;
       case CanvasTool.blur:
         _drawBlur(canvas, ann, baseImage: baseImage, imageRect: imageRect);
-        break;
       case CanvasTool.stepMarker:
         _drawStepMarker(canvas, ann);
-        break;
       case CanvasTool.text:
         _drawText(canvas, ann);
-        break;
       default:
-        break;
     }
 
     if (rotated) canvas.restore();
@@ -1252,22 +1242,18 @@ class AnnotationRenderer {
   /// Live size/angle readout shown while drawing or transforming, like the
   /// dimension HUD in Snagit and Shottr.
   static void paintMeasurementHud(Canvas canvas, Annotation ann) {
-    String? label;
+    final String label;
     switch (ann.tool) {
-      case CanvasTool.shape:
-      case CanvasTool.blur:
+      case CanvasTool.shape || CanvasTool.blur:
         final r = boundingRect(ann);
         if (r.width < 2 && r.height < 2) return;
         label = '${r.width.round()} × ${r.height.round()}';
-        break;
-      case CanvasTool.line:
-      case CanvasTool.arrow:
+      case CanvasTool.line || CanvasTool.arrow:
         if (ann.startPoint == null || ann.endPoint == null) return;
         final d = (ann.endPoint! - ann.startPoint!);
         if (d.distance < 2) return;
         final deg = (math.atan2(d.dy, d.dx) * 180 / math.pi);
         label = '${d.distance.round()} px  ${deg.round()}°';
-        break;
       default:
         return;
     }

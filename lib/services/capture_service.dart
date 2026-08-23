@@ -219,7 +219,7 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
     // after a delay — so the same button did two different things depending on
     // the OS, and neither matched the countdown toast ("Prepare your screen!")
     // the user was reading while it ran.
-    await Future.delayed(Duration(seconds: seconds));
+    await Future<void>.delayed(Duration(seconds: seconds));
     return await captureFullScreen();
   }
 

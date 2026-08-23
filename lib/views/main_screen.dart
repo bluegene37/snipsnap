@@ -573,7 +573,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _openAboutDialog() {
-    showDialog(
+    showDialog<void>(
       context: _dialogContext!,
       builder: (ctx) => const AboutSnipSnapDialog(),
     );
@@ -1515,12 +1515,12 @@ class _MainScreenState extends State<MainScreen> {
     if (!mounted) return;
 
     // Not awaited: the confirm callback owns everything that happens next.
-    unawaited(showDialog(
+    unawaited(showDialog<void>(
       context: _dialogContext!,
       builder: (ctx) => SaveAsDialog(
         initialName: capture.title,
         onConfirm: (options) async {
-          await Future.delayed(const Duration(milliseconds: 150));
+          await Future<void>.delayed(const Duration(milliseconds: 150));
           final gradient = (options.gradientIndex != null &&
                   options.gradientIndex! >= 0 &&
                   options.gradientIndex! < AppColors.framingGradients.length)
@@ -2097,10 +2097,10 @@ class _MainScreenState extends State<MainScreen> {
                     // and risk the white spinner/caption vanishing against it
                     // — see SnipTheme.scrim's own doc comment.
                     if (_isCapturing)
-                      Positioned.fill(
-                        child: Container(
+                      const Positioned.fill(
+                        child: ColoredBox(
                           color: SnipTheme.scrim,
-                          child: const Center(
+                          child: Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [

@@ -141,7 +141,7 @@ class ShortcutService {
   /// never told about any of it.
   static Future<Set<AppShortcutAction>> registerGlobalHotKeys({
     required Map<AppShortcutAction, CustomShortcut> shortcuts,
-    required Function(AppShortcutAction action) onHotKeyTriggered,
+    required void Function(AppShortcutAction action) onHotKeyTriggered,
   }) async {
     final failed = <AppShortcutAction>{};
     try {

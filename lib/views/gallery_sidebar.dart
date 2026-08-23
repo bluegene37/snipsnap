@@ -313,7 +313,7 @@ class GallerySidebar extends StatelessWidget {
                                         Positioned.fill(
                                           child: ClipRRect(
                                             borderRadius: BorderRadius.circular(4),
-                                            child: Container(
+                                            child: ColoredBox(
                                               color: t.canvas,
                                               child: fileExists
                                                   ? Image.file(

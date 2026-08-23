@@ -36,15 +36,15 @@ void main() {
       'width': 10,
       'height': 10,
       'lines': [
-        {'text': 'one', 'x': 0.0, 'y': 0.0, 'w': 1.0, 'h': 1.0, 'confidence': 1.0, 'words': []},
-        {'text': 'two', 'x': 0.0, 'y': 2.0, 'w': 1.0, 'h': 1.0, 'confidence': 1.0, 'words': []},
+        {'text': 'one', 'x': 0.0, 'y': 0.0, 'w': 1.0, 'h': 1.0, 'confidence': 1.0, 'words': <dynamic>[]},
+        {'text': 'two', 'x': 0.0, 'y': 2.0, 'w': 1.0, 'h': 1.0, 'confidence': 1.0, 'words': <dynamic>[]},
       ],
     });
     expect(result.plainText, 'one\ntwo');
   });
 
   test('tolerates a payload with no lines', () {
-    final result = OcrResult.fromChannelMap(const {'width': 5, 'height': 5, 'lines': []});
+    final result = OcrResult.fromChannelMap(const {'width': 5, 'height': 5, 'lines': <dynamic>[]});
     expect(result.lines, isEmpty);
     expect(result.plainText, isEmpty);
     expect(result.isEmpty, isTrue);
@@ -55,7 +55,7 @@ void main() {
       'width': 100,
       'height': 100,
       'lines': [
-        {'text': 'no coords', 'confidence': 0.9, 'words': []},
+        {'text': 'no coords', 'confidence': 0.9, 'words': <dynamic>[]},
       ],
     });
     expect(result.lines, hasLength(1));
@@ -68,7 +68,7 @@ void main() {
       'width': 100,
       'height': 100,
       'lines': [
-        {'text': 'valid', 'x': 10.0, 'y': 20.0, 'w': 30.0, 'h': 15.0, 'confidence': 0.95, 'words': []},
+        {'text': 'valid', 'x': 10.0, 'y': 20.0, 'w': 30.0, 'h': 15.0, 'confidence': 0.95, 'words': <dynamic>[]},
         'invalid string entry',
         null,
         {
@@ -78,7 +78,7 @@ void main() {
           'w': 40.0,
           'h': 15.0,
           'confidence': 0.92,
-          'words': [],
+          'words': <dynamic>[],
         },
       ],
     });
@@ -128,7 +128,7 @@ void main() {
     final result = OcrResult.fromChannelMap(const {
       'width': 'not a number',
       'height': 'also not a number',
-      'lines': [],
+      'lines': <dynamic>[],
     });
     expect(result.imageSize, const Size(0, 0));
   });
@@ -145,7 +145,7 @@ void main() {
           'w': true,
           'h': 15.0,
           'confidence': 0.9,
-          'words': [],
+          'words': <dynamic>[],
         },
       ],
     });

@@ -60,7 +60,7 @@ class OcrResult {
   /// Builds a result from the `snipsnap/ocr` channel payload. Natives emit
   /// top-left-origin pixel coordinates, so no flipping happens here.
   factory OcrResult.fromChannelMap(Map<Object?, Object?> map) {
-    final rawLines = map['lines'] is List ? map['lines'] as List : const [];
+    final rawLines = map['lines'] is List<Object?> ? map['lines'] as List<Object?> : const <Object?>[];
     final width = _num(map['width'], 0.0);
     final height = _num(map['height'], 0.0);
 
@@ -70,7 +70,7 @@ class OcrResult {
           .whereType<Map<Object?, Object?>>()
           .map((raw) {
             final l = raw;
-            final rawWords = l['words'] is List ? l['words'] as List : const [];
+            final rawWords = l['words'] is List<Object?> ? l['words'] as List<Object?> : const <Object?>[];
             return OcrLine(
               text: _str(l['text']),
               boundsPx: _rect(l),
@@ -112,7 +112,7 @@ class OcrAvailability {
 }
 
 /// Recognises text in an image. One implementation per platform.
-abstract class OcrEngine {
+abstract interface class OcrEngine {
   Future<OcrAvailability> availability();
 
   /// [pngBytes] is a complete PNG. Callers crop before calling, so engines

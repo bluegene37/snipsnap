@@ -3,73 +3,55 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 enum AppShortcutAction {
-  interactiveSnip,
-  fullScreenSnip,
-  timerSnip,
-  openImage,
-  copyToClipboard,
-  saveAs,
-  undo,
-  redo,
-  clearAnnotations,
-  toggleHistory,
-  flattenCanvas,
-}
+  interactiveSnip(
+    'Interactive Area Snip',
+    'Drag rectangle to capture portion of screen',
+  ),
+  fullScreenSnip(
+    'Full Screen Snip',
+    'Capture entire desktop display',
+  ),
+  timerSnip(
+    '3s Timer Snip',
+    'Wait 3 seconds then capture',
+  ),
+  openImage(
+    'Open Image File',
+    'Import external image into editor',
+  ),
+  copyToClipboard(
+    'Copy to Clipboard',
+    'Copy current annotated image to system clipboard',
+  ),
+  saveAs(
+    'Save Image As...',
+    'Export annotated image to local file',
+  ),
+  undo(
+    'Undo Annotation',
+    'Revert last drawing action',
+  ),
+  redo(
+    'Redo Annotation',
+    'Re-apply reverted drawing action',
+  ),
+  clearAnnotations(
+    'Clear All Annotations',
+    'Remove all drawings from canvas',
+  ),
+  toggleHistory(
+    'Toggle Screenshots Panel',
+    'Show or hide bottom recent captures bar',
+  ),
+  flattenCanvas(
+    'Flatten Annotations',
+    'Bake all annotations into background image',
+  );
 
-extension AppShortcutActionExtension on AppShortcutAction {
-  String get displayName {
-    switch (this) {
-      case AppShortcutAction.interactiveSnip:
-        return 'Interactive Area Snip';
-      case AppShortcutAction.fullScreenSnip:
-        return 'Full Screen Snip';
-      case AppShortcutAction.timerSnip:
-        return '3s Timer Snip';
-      case AppShortcutAction.openImage:
-        return 'Open Image File';
-      case AppShortcutAction.copyToClipboard:
-        return 'Copy to Clipboard';
-      case AppShortcutAction.saveAs:
-        return 'Save Image As...';
-      case AppShortcutAction.undo:
-        return 'Undo Annotation';
-      case AppShortcutAction.redo:
-        return 'Redo Annotation';
-      case AppShortcutAction.clearAnnotations:
-        return 'Clear All Annotations';
-      case AppShortcutAction.toggleHistory:
-        return 'Toggle Screenshots Panel';
-      case AppShortcutAction.flattenCanvas:
-        return 'Flatten Annotations';
-    }
-  }
+  final String displayName;
+  final String description;
 
-  String get description {
-    switch (this) {
-      case AppShortcutAction.interactiveSnip:
-        return 'Drag rectangle to capture portion of screen';
-      case AppShortcutAction.fullScreenSnip:
-        return 'Capture entire desktop display';
-      case AppShortcutAction.timerSnip:
-        return 'Wait 3 seconds then capture';
-      case AppShortcutAction.openImage:
-        return 'Import external image into editor';
-      case AppShortcutAction.copyToClipboard:
-        return 'Copy current annotated image to system clipboard';
-      case AppShortcutAction.saveAs:
-        return 'Export annotated image to local file';
-      case AppShortcutAction.undo:
-        return 'Revert last drawing action';
-      case AppShortcutAction.redo:
-        return 'Re-apply reverted drawing action';
-      case AppShortcutAction.clearAnnotations:
-        return 'Remove all drawings from canvas';
-      case AppShortcutAction.toggleHistory:
-        return 'Show or hide bottom recent captures bar';
-      case AppShortcutAction.flattenCanvas:
-        return 'Bake all annotations into background image';
-    }
-  }
+  const AppShortcutAction(this.displayName, this.description);
 }
 
 class CustomShortcut {

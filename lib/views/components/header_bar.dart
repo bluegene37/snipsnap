@@ -158,7 +158,7 @@ class HeaderBar extends StatelessWidget {
             child: Image.asset(
               'assets/images/app_logo.png',
               fit: BoxFit.cover,
-              errorBuilder: (ctx, err, stack) => Container(
+              errorBuilder: (ctx, err, stack) => ColoredBox(
                 color: t.ink,
                 child: Icon(Icons.camera_rounded, color: t.onActive, size: 18),
               ),

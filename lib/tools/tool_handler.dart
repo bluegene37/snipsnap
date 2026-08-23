@@ -16,7 +16,7 @@ import 'shape_tool.dart';
 import 'step_marker_tool.dart';
 import 'text_tool.dart';
 
-abstract class ToolDelegate {
+abstract interface class ToolDelegate {
   void onAnnotationAdded(Annotation annotation);
   void onActiveCropRectChanged(Rect? rect);
   void onCurrentAnnotationChanged(Annotation? annotation);
@@ -134,35 +134,19 @@ abstract class ToolHandler {
 ///
 /// `EditorCanvas` delegates to these rather than implementing gestures inline,
 /// so tool behaviour lives in one place (GEMINI.md 1.1).
-ToolHandler handlerFor(CanvasTool tool, ToolDelegate delegate) {
-  switch (tool) {
-    case CanvasTool.select:
-      return SelectToolHandler(delegate);
-    case CanvasTool.pen:
-      return PenToolHandler(delegate);
-    case CanvasTool.arrow:
-      return ArrowToolHandler(delegate);
-    case CanvasTool.line:
-      return LineToolHandler(delegate);
-    case CanvasTool.shape:
-      return ShapeToolHandler(delegate);
-    case CanvasTool.highlight:
-      return HighlighterToolHandler(delegate);
-    case CanvasTool.stepMarker:
-      return StepMarkerToolHandler(delegate);
-    case CanvasTool.text:
-      return TextToolHandler(delegate);
-    case CanvasTool.blur:
-      return BlurToolHandler(delegate);
-    case CanvasTool.ruler:
-      return RulerToolHandler(delegate);
-    case CanvasTool.crop:
-      return CropToolHandler(delegate);
-    case CanvasTool.fill:
-      return FillToolHandler(delegate);
-    case CanvasTool.colorPicker:
-      return ColorPickerToolHandler(delegate);
-    case CanvasTool.ocr:
-      return OcrToolHandler(delegate);
-  }
-}
+ToolHandler handlerFor(CanvasTool tool, ToolDelegate delegate) => switch (tool) {
+      CanvasTool.select => SelectToolHandler(delegate),
+      CanvasTool.pen => PenToolHandler(delegate),
+      CanvasTool.arrow => ArrowToolHandler(delegate),
+      CanvasTool.line => LineToolHandler(delegate),
+      CanvasTool.shape => ShapeToolHandler(delegate),
+      CanvasTool.highlight => HighlighterToolHandler(delegate),
+      CanvasTool.stepMarker => StepMarkerToolHandler(delegate),
+      CanvasTool.text => TextToolHandler(delegate),
+      CanvasTool.blur => BlurToolHandler(delegate),
+      CanvasTool.ruler => RulerToolHandler(delegate),
+      CanvasTool.crop => CropToolHandler(delegate),
+      CanvasTool.fill => FillToolHandler(delegate),
+      CanvasTool.colorPicker => ColorPickerToolHandler(delegate),
+      CanvasTool.ocr => OcrToolHandler(delegate),
+    };

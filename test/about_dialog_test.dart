@@ -72,7 +72,7 @@ void _runStateTests(SnipThemeMode mode) {
               body: Center(
                 child: ElevatedButton(
                   onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const AboutSnipSnapDialog()),
+                    MaterialPageRoute<void>(builder: (_) => const AboutSnipSnapDialog()),
                   ),
                   child: const Text('open'),
                 ),

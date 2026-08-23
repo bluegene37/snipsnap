@@ -1171,31 +1171,23 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       case _CropHandle.topLeft:
         left += totalDelta.dx;
         top += totalDelta.dy;
-        break;
       case _CropHandle.topRight:
         right += totalDelta.dx;
         top += totalDelta.dy;
-        break;
       case _CropHandle.bottomLeft:
         left += totalDelta.dx;
         bottom += totalDelta.dy;
-        break;
       case _CropHandle.bottomRight:
         right += totalDelta.dx;
         bottom += totalDelta.dy;
-        break;
       case _CropHandle.top:
         top += totalDelta.dy;
-        break;
       case _CropHandle.bottom:
         bottom += totalDelta.dy;
-        break;
       case _CropHandle.left:
         left += totalDelta.dx;
-        break;
       case _CropHandle.right:
         right += totalDelta.dx;
-        break;
       case _CropHandle.none:
         return;
     }
@@ -1438,19 +1430,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       case _AnnHandle.topLeft:
         left += totalDelta.dx;
         top += totalDelta.dy;
-        break;
       case _AnnHandle.topRight:
         right += totalDelta.dx;
         top += totalDelta.dy;
-        break;
       case _AnnHandle.bottomLeft:
         left += totalDelta.dx;
         bottom += totalDelta.dy;
-        break;
       case _AnnHandle.bottomRight:
         right += totalDelta.dx;
         bottom += totalDelta.dy;
-        break;
       default:
         return origin;
     }
@@ -1934,33 +1922,24 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           case _CropHandle.topLeft:
             left += totalDelta.dx;
             top += totalDelta.dy;
-            break;
           case _CropHandle.topRight:
             right += totalDelta.dx;
             top += totalDelta.dy;
-            break;
           case _CropHandle.bottomLeft:
             left += totalDelta.dx;
             bottom += totalDelta.dy;
-            break;
           case _CropHandle.bottomRight:
             right += totalDelta.dx;
             bottom += totalDelta.dy;
-            break;
           case _CropHandle.top:
             top += totalDelta.dy;
-            break;
           case _CropHandle.bottom:
             bottom += totalDelta.dy;
-            break;
           case _CropHandle.left:
             left += totalDelta.dx;
-            break;
           case _CropHandle.right:
             right += totalDelta.dx;
-            break;
           default:
-            break;
         }
         const minSize = 10.0;
         if (right - left < minSize) {
@@ -3169,7 +3148,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 child: Image.asset(
                   'assets/images/app_logo.png',
                   fit: BoxFit.cover,
-                  errorBuilder: (ctx, err, stack) => Container(
+                  errorBuilder: (ctx, err, stack) => ColoredBox(
                     color: t.surfaceRaised,
                     child: Icon(Icons.crop_free_rounded, size: 40, color: t.emphasis),
                   ),

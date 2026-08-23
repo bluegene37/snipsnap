@@ -74,7 +74,7 @@ void main() {
     expect(File(result!).existsSync(), isTrue);
     expect(methodCalls.length, 1);
     expect(methodCalls.first.method, 'captureInteractive');
-    expect(methodCalls.first.arguments, isA<Map>());
+    expect(methodCalls.first.arguments, isA<Map<dynamic, dynamic>>());
   });
 
   test('captureInteractive returns null when user presses any key to escape/cancel', () async {

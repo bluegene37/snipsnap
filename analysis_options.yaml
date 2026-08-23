@@ -15,6 +15,8 @@ analyzer:
     - "**/*.g.dart"
   language:
     strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
   errors:
     missing_required_param: error
     missing_return: error
@@ -33,6 +35,18 @@ linter:
     - use_build_context_synchronously
     # Fire-and-forget async work is how a failed write goes unnoticed.
     - unawaited_futures
+    - unnecessary_breaks
+    - use_super_parameters
+    - use_enums
+    - use_colored_box
+    - prefer_is_empty
+    - prefer_is_not_empty
+    - prefer_iterable_whereType
+    - type_literal_in_constant_pattern
+    - unnecessary_null_aware_operator_on_extension_on_nullable
+    - unnecessary_to_list_in_spreads
+    - prefer_null_aware_method_calls
+    - combinators_ordering
     # NOT avoid_slow_async_io: its fix is to swap async dart:io for the
     # synchronous variants, which would put blocking file reads back on the UI
     # isolate — the exact thing the capture and export paths were moved off.
