@@ -119,8 +119,11 @@ void main() {
 
     // Clear must be disabled when there is nothing to clear — previously it
     // was always enabled.
-    final clear = tester.widget<IconButton>(
-      find.widgetWithIcon(IconButton, Icons.delete_outline_rounded),
+    final clear = tester.widget<ElevatedButton>(
+      find.ancestor(
+        of: find.byIcon(Icons.delete_outline_rounded),
+        matching: find.byType(ElevatedButton),
+      ),
     );
     expect(clear.onPressed, isNull);
   });
@@ -132,8 +135,12 @@ void main() {
 
     await tester.pumpWidget(_harness(width: 1440, canUndo: true, canRedo: false));
 
-    IconButton button(IconData icon) =>
-        tester.widget<IconButton>(find.widgetWithIcon(IconButton, icon));
+    ElevatedButton button(IconData icon) => tester.widget<ElevatedButton>(
+          find.ancestor(
+            of: find.byIcon(icon),
+            matching: find.byType(ElevatedButton),
+          ),
+        );
 
     expect(button(Icons.undo_rounded).onPressed, isNotNull);
     expect(button(Icons.redo_rounded).onPressed, isNull);
@@ -178,7 +185,7 @@ void main() {
 
     expect(find.text('150%'), findsOneWidget);
 
-    await tester.tap(find.widgetWithIcon(IconButton, Icons.remove_rounded));
+    await tester.tap(find.byIcon(Icons.remove_rounded));
     expect(requested, closeTo(1.25, 0.001));
   });
 

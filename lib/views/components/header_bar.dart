@@ -120,6 +120,12 @@ class HeaderBar extends StatelessWidget {
               const SizedBox(width: 6),
               _buildExportGroup(t, showLabels),
               const SizedBox(width: 6),
+              _HeaderButton(
+                icon: t.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                tooltip: t.isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+                onPressed: onToggleThemeMode,
+              ),
+              const SizedBox(width: 6),
               _buildOverflowMenu(t),
             ],
           );
