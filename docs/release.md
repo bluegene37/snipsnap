@@ -85,33 +85,72 @@ spctl -a -vvv -t install SnipSnap.dmg
 
 ## Windows
 
-Must be built on Windows; there is no cross-compile.
+The installer is a single self-contained `.exe`. Building it needs Windows —
+there is no cross-compile from macOS.
 
-```bash
-flutter build windows --release
+### If you have a Windows machine
+
+One command, from the repo root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File windows\installer\build_installer.ps1
 ```
 
-Output is `build\windows\x64\runner\Release\` — `snipsnap.exe`, `flutter_windows.dll`,
-plugin DLLs, and `data\`. Ship the whole directory; the exe will not start alone.
+It builds the app, copies in the Visual C++ runtime, compiles the installer, and
+writes `dist\SnipSnap-<version>-windows-x64-setup.exe`. That file is the whole
+deliverable — send it to someone and they run it.
 
-Target machines also need the Visual C++ Redistributable (`msvcp140.dll`,
-`vcruntime140.dll`, `vcruntime140_1.dll`) — either bundle those DLLs alongside the exe or
-have the installer chain the redistributable.
+Prerequisites: Flutter with the Windows desktop toolchain (Visual Studio with
+"Desktop development with C++"), and Inno Setup 6.3+. If Inno Setup is missing
+the script offers to install it via winget.
 
-### Sign
+Pass `-SkipFlutterBuild` to repackage an existing build without recompiling.
+
+### If you don't have a Windows machine
+
+`.github/workflows/windows-installer.yml` runs the same script on a GitHub-hosted
+Windows runner. Trigger it from the repo's **Actions** tab → *Windows installer* →
+*Run workflow*, or push a `v*` tag. The installer appears as a downloadable
+artifact on the run summary.
+
+### What your friends will see
+
+The installer is **unsigned**, so Windows SmartScreen shows a blue
+"Windows protected your PC" screen on first run. They must click **More info**,
+then **Run anyway**. There is no way around this without a code-signing
+certificate — and an OV certificate still shows the warning until the download
+accumulates reputation, so only an EV certificate removes it outright.
+
+Once past that, the install itself is quiet: it is a **per-user** install to
+`%LOCALAPPDATA%\Programs\SnipSnap`, so there is no UAC/admin prompt. It adds a
+Start-menu entry, optionally a desktop icon, and a normal
+Add-or-Remove-Programs uninstall entry.
+
+### Signing it, if you ever get a certificate
 
 ```
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f cert.pfx /p PASS snipsnap.exe
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f cert.pfx /p PASS dist\SnipSnap-1.0.0-windows-x64-setup.exe
 ```
 
-An OV certificate starts with no SmartScreen reputation, so early users see a warning
-until enough installs accumulate; an EV certificate skips that.
+Sign `build\windows\x64\runner\Release\snipsnap.exe` before running the
+packaging script as well, so the installed binary is signed and not just the
+installer.
 
-### Installer
+### Installer internals
 
-Not yet configured. Whichever is chosen (Inno Setup, WiX, or MSIX), the shortcut's
-`AppUserModelID` must be `dev.genexis.snipsnap` to match what `main.cpp` sets — otherwise
-taskbar pinning and notifications bind to the wrong identity.
+`windows/installer/snipsnap.iss` is the Inno Setup script. Two values in it must
+not drift:
+
+- **`AppId`** — the GUID Windows matches upgrades and the uninstall entry on.
+  Changing it makes the next release install alongside the old one rather than
+  over it.
+- **`AppUserModelID`** — must stay equal to the string
+  `windows/runner/main.cpp` passes to `SetCurrentProcessExplicitAppUserModelID`
+  (`dev.genexis.snipsnap`), or taskbar pinning and notifications bind to a
+  different identity than the running process claims.
+
+The version is read from `pubspec.yaml` by the build script, so it never needs
+editing in the `.iss`.
 
 ## Checklist
 
@@ -119,5 +158,6 @@ taskbar pinning and notifications bind to the wrong identity.
 - [ ] Build number bumped and never previously published
 - [ ] macOS: signed with Developer ID, `get-task-allow` absent, notarized, stapled
 - [ ] macOS: launched from the DMG on a clean machine, screen-recording prompt appears
-- [ ] Windows: signed, installed from the installer, capture and OCR verified
+- [ ] Windows: installer built, run on a machine that has never had Visual Studio
+      or a VC++ redistributable on it, capture and OCR verified
 - [ ] Icons render at every size in Finder and the Windows taskbar

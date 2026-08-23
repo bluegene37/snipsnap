@@ -49,3 +49,6 @@ app.*.map.json
 .superpowers/
 .gemini/
 
+
+# Packaged installers
+/dist/
