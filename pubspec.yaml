@@ -1,7 +1,9 @@
 name: snipsnap
-description: "SnipSnap - Powerful screen capture & annotation desktop app."
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+description: "Screen capture, annotation, and OCR desktop app for Windows, macOS, and Linux."
+publish_to: 'none'
 
+# Single source of truth for the app version. When bumping, also update
+# msix_config.msix_version below (four segments: <version>.0).
 version: 1.0.0+1
 
 environment:
@@ -43,6 +45,31 @@ dev_dependencies:
   drift_dev: ^2.34.5
   build_runner: ^2.15.1
   dmg: ^0.1.10
+  flutter_launcher_icons: ^0.14.4
+  msix: ^3.16.7
+
+# Regenerate platform icons with `dart run flutter_launcher_icons` after
+# changing assets/icon/app_icon.png (1024x1024, transparent rounded corners,
+# processed from assets/images/app_logo.png).
+flutter_launcher_icons:
+  image_path: "assets/icon/app_icon.png"
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+
+# MSIX package for store/enterprise deployment. Build with `dart run msix:create`
+# after `flutter build windows --release`. msix_version must be bumped in lock
+# step with `version:` above.
+msix_config:
+  display_name: snipsnap
+  publisher_display_name: genexis.dev
+  identity_name: dev.genexis.snipsnap
+  msix_version: 1.0.0.0
+  logo_path: windows/runner/resources/app_icon.ico
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

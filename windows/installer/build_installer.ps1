@@ -36,7 +36,7 @@ $pubspec = Get-Content (Join-Path $RepoRoot 'pubspec.yaml') -Raw
 $match = [regex]::Match($pubspec, '(?m)^version:\s*(\d+\.\d+\.\d+)(?:\+(\d+))?')
 if (-not $match.Success) { throw 'Could not parse "version:" from pubspec.yaml' }
 $Version = $match.Groups[1].Value
-Write-Host "    SnipSnap $Version"
+Write-Host "    snipsnap $Version"
 
 # --- 2. Build ----------------------------------------------------------------
 if ($SkipFlutterBuild) {
@@ -145,7 +145,7 @@ New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
     $IssFile
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
 
-$installer = Join-Path $OutputDir "SnipSnap-$Version-windows-x64-setup.exe"
+$installer = Join-Path $OutputDir "snipsnap-$Version-windows-x64-setup.exe"
 $sizeMb = [math]::Round((Get-Item $installer).Length / 1MB, 1)
 
 Write-Host "`nInstaller ready:" -ForegroundColor Green

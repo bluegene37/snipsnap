@@ -5,13 +5,13 @@
 // 'flutter create' template.
 
 // The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = SnipSnap
+PRODUCT_NAME = snipsnap
 
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = dev.genexis.snipsnap
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 Genexis. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 genexis.dev. All rights reserved.
 
 // The Apple Developer Team ID used to sign the app. Leave empty for local, ad-hoc
 // signed builds; set it (or export DEVELOPMENT_TEAM in CI) before producing a

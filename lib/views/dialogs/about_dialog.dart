@@ -51,7 +51,7 @@ class AboutSnipSnapDialog extends StatelessWidget {
 
             // App Name & Version
             Text(
-              'SnipSnap',
+              'snipsnap',
               style: TextStyle(
                 color: t.ink,
                 fontSize: 24,
@@ -74,7 +74,7 @@ class AboutSnipSnapDialog extends StatelessWidget {
                 border: Border.all(color: t.border),
               ),
               child: Text(
-                'SnipSnap is a powerful, high-performance desktop screen capture & annotation tool built with Flutter & Drift SQLite.',
+                'snipsnap is a powerful, high-performance desktop screen capture & annotation tool built with Flutter & Drift SQLite.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: t.ink, fontSize: 13, height: 1.4),
               ),
@@ -97,7 +97,7 @@ class AboutSnipSnapDialog extends StatelessWidget {
 
             const SizedBox(height: 16),
             Text(
-              'Copyright © 2026 SnipSnap. All rights reserved.',
+              'Copyright © 2026 genexis.dev. All rights reserved.',
               style: TextStyle(color: t.inkMuted, fontSize: 11),
             ),
 

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=snipsnap
+Comment=Screen capture, annotation, and OCR
+Exec=snipsnap
+Icon=dev.genexis.snipsnap
+Terminal=false
+Categories=Utility;Graphics;
+StartupWMClass=snipsnap

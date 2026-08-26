@@ -1,4 +1,8 @@
-# Releasing SnipSnap
+# Releasing snipsnap — signing deep-dive
+
+> This document covers the signing/notarization deep-dive. The overall
+> release process (versioning, tag flow, CI, checklist) is in
+> [../RELEASING.md](../RELEASING.md).
 
 App identity is `dev.genexis.snipsnap` on every platform. It is set in three places and
 they must stay in sync:
@@ -21,7 +25,7 @@ than hand-editing.
 flutter build macos --release
 ```
 
-Produces `build/macos/Build/Products/Release/SnipSnap.app`, ad-hoc signed with the
+Produces `build/macos/Build/Products/Release/snipsnap.app`, ad-hoc signed with the
 hardened runtime enabled (`ENABLE_HARDENED_RUNTIME = YES` on the Runner Release config).
 
 ### Sign for Developer ID
@@ -34,7 +38,7 @@ wrong entitlements to nested code.
 
 ```bash
 IDENTITY="Developer ID Application: YOUR NAME (TEAMID)"
-APP=build/macos/Build/Products/Release/SnipSnap.app
+APP=build/macos/Build/Products/Release/snipsnap.app
 
 for fw in "$APP"/Contents/Frameworks/*.framework; do
   codesign --force --options runtime --timestamp --sign "$IDENTITY" "$fw"
@@ -49,7 +53,7 @@ Verify before going further — `flags` must show `runtime`, and `get-task-allow
 gone from the entitlements:
 
 ```bash
-codesign -dvvv --entitlements :- build/macos/Build/Products/Release/SnipSnap.app
+codesign -dvvv --entitlements :- build/macos/Build/Products/Release/snipsnap.app
 ```
 
 ### Notarize and staple
@@ -63,11 +67,11 @@ xcrun notarytool store-credentials snipsnap-notary --apple-id you@example.com --
 Then per release:
 
 ```bash
-hdiutil create -volname SnipSnap -srcfolder build/macos/Build/Products/Release/SnipSnap.app -ov -format UDZO SnipSnap.dmg
-codesign --force --timestamp --sign "$IDENTITY" SnipSnap.dmg
-xcrun notarytool submit SnipSnap.dmg --keychain-profile snipsnap-notary --wait
-xcrun stapler staple SnipSnap.dmg
-spctl -a -vvv -t install SnipSnap.dmg
+hdiutil create -volname snipsnap -srcfolder build/macos/Build/Products/Release/snipsnap.app -ov -format UDZO snipsnap.dmg
+codesign --force --timestamp --sign "$IDENTITY" snipsnap.dmg
+xcrun notarytool submit snipsnap.dmg --keychain-profile snipsnap-notary --wait
+xcrun stapler staple snipsnap.dmg
+spctl -a -vvv -t install snipsnap.dmg
 ```
 
 ### Before the first release
@@ -97,7 +101,7 @@ powershell -ExecutionPolicy Bypass -File windows\installer\build_installer.ps1
 ```
 
 It builds the app, copies in the Visual C++ runtime, compiles the installer, and
-writes `dist\SnipSnap-<version>-windows-x64-setup.exe`. That file is the whole
+writes `dist\snipsnap-<version>-windows-x64-setup.exe`. That file is the whole
 deliverable — send it to someone and they run it.
 
 Prerequisites: Flutter with the Windows desktop toolchain (Visual Studio with
@@ -108,10 +112,12 @@ Pass `-SkipFlutterBuild` to repackage an existing build without recompiling.
 
 ### If you don't have a Windows machine
 
-`.github/workflows/windows-installer.yml` runs the same script on a GitHub-hosted
-Windows runner. Trigger it from the repo's **Actions** tab → *Windows installer* →
-*Run workflow*, or push a `v*` tag. The installer appears as a downloadable
-artifact on the run summary.
+`.github/workflows/release.yml` runs the same script on a GitHub-hosted
+Windows runner (alongside the macOS and Linux jobs). Trigger it from the
+repo's **Actions** tab → *Release* → *Run workflow*, or push a `v*` tag —
+a tag also publishes a GitHub Release with all platform artifacts attached.
+On a manual run the installer appears as a downloadable artifact on the run
+summary.
 
 ### What your friends will see
 
@@ -122,14 +128,14 @@ certificate — and an OV certificate still shows the warning until the download
 accumulates reputation, so only an EV certificate removes it outright.
 
 Once past that, the install itself is quiet: it is a **per-user** install to
-`%LOCALAPPDATA%\Programs\SnipSnap`, so there is no UAC/admin prompt. It adds a
+`%LOCALAPPDATA%\Programs\snipsnap`, so there is no UAC/admin prompt. It adds a
 Start-menu entry, optionally a desktop icon, and a normal
 Add-or-Remove-Programs uninstall entry.
 
 ### Signing it, if you ever get a certificate
 
 ```
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f cert.pfx /p PASS dist\SnipSnap-1.0.0-windows-x64-setup.exe
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f cert.pfx /p PASS dist\snipsnap-1.0.0-windows-x64-setup.exe
 ```
 
 Sign `build\windows\x64\runner\Release\snipsnap.exe` before running the

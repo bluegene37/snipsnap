@@ -3,8 +3,8 @@
 ; Do not run this by hand - build_installer.ps1 compiles it and passes in the
 ; version and paths. See docs/release.md.
 
-#define MyAppName      "SnipSnap"
-#define MyAppPublisher "Genexis"
+#define MyAppName      "snipsnap"
+#define MyAppPublisher "genexis.dev"
 #define MyAppExeName   "snipsnap.exe"
 #define MyAppUserModelId "dev.genexis.snipsnap"
 
@@ -42,7 +42,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 OutputDir={#OutputDir}
-OutputBaseFilename=SnipSnap-{#MyAppVersion}-windows-x64-setup
+OutputBaseFilename=snipsnap-{#MyAppVersion}-windows-x64-setup
 SetupIconFile=..\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/max
