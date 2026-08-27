@@ -76,7 +76,10 @@ Future<({RenderBox box, Rect imageRect})> _pumpCropCanvas(
 /// a finger because this is a desktop app, and because touch slop would
 /// otherwise displace the start of the drawn box by 36 logical pixels.
 Future<void> _dragBy(WidgetTester tester, Offset from, Offset to) async {
-  final gesture = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+  final gesture = await tester.startGesture(
+    from,
+    kind: PointerDeviceKind.mouse,
+  );
   await tester.pump(const Duration(milliseconds: 16));
   // Nudge past the precise-pointer pan slop first, so the recognised start of
   // the drag is within a couple of pixels of the press.
@@ -106,50 +109,61 @@ void main() {
 
   tearDown(() => dir.deleteSync(recursive: true));
 
-  testWidgets('the first drag draws a crop region instead of sliding the default box',
-      (tester) async {
-    // The regression: the crop tool pre-fills its box with the whole image, so
-    // every press that lands on the picture also lands inside the box. Read as
-    // a body drag, the first gesture moved the image-sized box off to one side
-    // and applying it kept only the sliver still over the picture.
-    await tester.binding.setSurfaceSize(const Size(1200, 800));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+  testWidgets(
+    'the first drag draws a crop region instead of sliding the default box',
+    (tester) async {
+      // The regression: the crop tool pre-fills its box with the whole image, so
+      // every press that lands on the picture also lands inside the box. Read as
+      // a body drag, the first gesture moved the image-sized box off to one side
+      // and applying it kept only the sliver still over the picture.
+      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    final repaintKey = GlobalKey();
-    Rect? applied;
-    final pumped = await _pumpCropCanvas(
-      tester,
-      repaintKey: repaintKey,
-      imagePath: imagePath,
-      onApplyCrop: (rect) => applied = rect,
-    );
-    final imageRect = pumped.imageRect;
-    expect(imageRect.height, lessThan(pumped.box.size.height),
-        reason: 'the 16:9 capture must letterbox inside the taller canvas, '
-            'otherwise the bitmap never decoded and this test proves nothing');
+      final repaintKey = GlobalKey();
+      Rect? applied;
+      final pumped = await _pumpCropCanvas(
+        tester,
+        repaintKey: repaintKey,
+        imagePath: imagePath,
+        onApplyCrop: (rect) => applied = rect,
+      );
+      final imageRect = pumped.imageRect;
+      expect(
+        imageRect.height,
+        lessThan(pumped.box.size.height),
+        reason:
+            'the 16:9 capture must letterbox inside the taller canvas, '
+            'otherwise the bitmap never decoded and this test proves nothing',
+      );
 
-    Offset atFraction(double fx, double fy) => pumped.box.localToGlobal(
-          Offset(imageRect.left + imageRect.width * fx, imageRect.top + imageRect.height * fy),
-        );
+      Offset atFraction(double fx, double fy) => pumped.box.localToGlobal(
+        Offset(
+          imageRect.left + imageRect.width * fx,
+          imageRect.top + imageRect.height * fy,
+        ),
+      );
 
-    await _dragBy(tester, atFraction(0.25, 0.25), atFraction(0.75, 0.75));
-    await tester.tap(find.text('Apply Crop'));
-    await tester.pumpAndSettle();
+      await _dragBy(tester, atFraction(0.25, 0.25), atFraction(0.75, 0.75));
+      await tester.tap(find.text('Apply Crop'));
+      await tester.pumpAndSettle();
 
-    expect(applied, isNotNull);
-    final expected = Rect.fromLTRB(
-      imageRect.left + imageRect.width * 0.25,
-      imageRect.top + imageRect.height * 0.25,
-      imageRect.left + imageRect.width * 0.75,
-      imageRect.top + imageRect.height * 0.75,
-    );
-    expect(applied!.left, closeTo(expected.left, 3.0));
-    expect(applied!.top, closeTo(expected.top, 3.0));
-    expect(applied!.right, closeTo(expected.right, 3.0));
-    expect(applied!.bottom, closeTo(expected.bottom, 3.0));
-  });
+      expect(applied, isNotNull);
+      final expected = Rect.fromLTRB(
+        imageRect.left + imageRect.width * 0.25,
+        imageRect.top + imageRect.height * 0.25,
+        imageRect.left + imageRect.width * 0.75,
+        imageRect.top + imageRect.height * 0.75,
+      );
+      expect(applied!.left, closeTo(expected.left, 3.0));
+      expect(applied!.top, closeTo(expected.top, 3.0));
+      expect(applied!.right, closeTo(expected.right, 3.0));
+      expect(applied!.bottom, closeTo(expected.bottom, 3.0));
+    },
+  );
 
-  testWidgets('a box the user drew can still be moved by dragging its body', (tester) async {
+  testWidgets('a box the user drew can still be moved by dragging its body', (
+    tester,
+  ) async {
     // The fix must not cost the ordinary reposition: only the untouched
     // default redirects an interior drag into drawing a new region.
     await tester.binding.setSurfaceSize(const Size(1200, 800));
@@ -166,8 +180,11 @@ void main() {
     final imageRect = pumped.imageRect;
 
     Offset atFraction(double fx, double fy) => pumped.box.localToGlobal(
-          Offset(imageRect.left + imageRect.width * fx, imageRect.top + imageRect.height * fy),
-        );
+      Offset(
+        imageRect.left + imageRect.width * fx,
+        imageRect.top + imageRect.height * fy,
+      ),
+    );
 
     // Draw a box over the left half, then drag its middle to the right.
     await _dragBy(tester, atFraction(0.10, 0.20), atFraction(0.50, 0.80));
@@ -178,8 +195,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(applied, isNotNull);
-    expect(applied!.left, closeTo(imageRect.left + imageRect.width * 0.10 + shift, 4.0));
-    expect(applied!.width, closeTo(imageRect.width * 0.40, 4.0),
-        reason: 'a move must not resize the box');
+    expect(
+      applied!.left,
+      closeTo(imageRect.left + imageRect.width * 0.10 + shift, 4.0),
+    );
+    expect(
+      applied!.width,
+      closeTo(imageRect.width * 0.40, 4.0),
+      reason: 'a move must not resize the box',
+    );
   });
 }

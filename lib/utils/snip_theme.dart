@@ -169,23 +169,23 @@ class SnipTheme {
 
   /// Ink on paper.
   factory SnipTheme.light() => const SnipTheme(
-        mode: SnipThemeMode.light,
-        canvas: Color(0xFFF2F2F0),
-        surface: Color(0xFFFBFBFA),
-        surfaceRaised: Color(0xFFFFFFFF),
-        ink: Color(0xFF141414),
-        inkMuted: Color(0xFF5C5C5C),
-        inkFaint: Color(0xFF9A9A9A),
-        border: Color(0xFFD8D8D5),
-        borderStrong: Color(0xFF141414),
-        activeFill: Color(0xFF141414),
-        onActive: Color(0xFFFBFBFA),
-        selectedFill: Color(0xFFE8E8E8),
-        hoverFill: Color(0xFFEDEDED),
-        danger: Color(0xFFB3261E),
-        onDanger: Color(0xFFFBFBFA),
-        emphasis: Color(0xFF141414),
-      );
+    mode: SnipThemeMode.light,
+    canvas: Color(0xFFF2F2F0),
+    surface: Color(0xFFFBFBFA),
+    surfaceRaised: Color(0xFFFFFFFF),
+    ink: Color(0xFF141414),
+    inkMuted: Color(0xFF5C5C5C),
+    inkFaint: Color(0xFF9A9A9A),
+    border: Color(0xFFD8D8D5),
+    borderStrong: Color(0xFF141414),
+    activeFill: Color(0xFF141414),
+    onActive: Color(0xFFFBFBFA),
+    selectedFill: Color(0xFFE8E8E8),
+    hoverFill: Color(0xFFEDEDED),
+    danger: Color(0xFFB3261E),
+    onDanger: Color(0xFFFBFBFA),
+    emphasis: Color(0xFF141414),
+  );
 
   /// The inversion. Every role swaps; nothing is tinted.
   ///
@@ -202,23 +202,23 @@ class SnipTheme {
   /// `test/snip_theme_test.dart`'s "dark ink reuses light's paper tone"
   /// case pins this so a future "cleanup" doesn't quietly undo it.
   factory SnipTheme.dark() => const SnipTheme(
-        mode: SnipThemeMode.dark,
-        canvas: Color(0xFF0E0E0E),
-        surface: Color(0xFF161616),
-        surfaceRaised: Color(0xFF1E1E1E),
-        ink: Color(0xFFF2F2F0),
-        inkMuted: Color(0xFFA0A0A0),
-        inkFaint: Color(0xFF6A6A6A),
-        border: Color(0xFF343434),
-        borderStrong: Color(0xFFF2F2F0),
-        activeFill: Color(0xFFF2F2F0),
-        onActive: Color(0xFF141414),
-        selectedFill: Color(0xFF2A2A2A),
-        hoverFill: Color(0xFF202020),
-        danger: Color(0xFFFF6B6B),
-        onDanger: Color(0xFF141414),
-        emphasis: Color(0xFFF2F2F0),
-      );
+    mode: SnipThemeMode.dark,
+    canvas: Color(0xFF0E0E0E),
+    surface: Color(0xFF161616),
+    surfaceRaised: Color(0xFF1E1E1E),
+    ink: Color(0xFFF2F2F0),
+    inkMuted: Color(0xFFA0A0A0),
+    inkFaint: Color(0xFF6A6A6A),
+    border: Color(0xFF343434),
+    borderStrong: Color(0xFFF2F2F0),
+    activeFill: Color(0xFFF2F2F0),
+    onActive: Color(0xFF141414),
+    selectedFill: Color(0xFF2A2A2A),
+    hoverFill: Color(0xFF202020),
+    danger: Color(0xFFFF6B6B),
+    onDanger: Color(0xFF141414),
+    emphasis: Color(0xFFF2F2F0),
+  );
 
   static SnipTheme forMode(SnipThemeMode mode) =>
       mode == SnipThemeMode.dark ? SnipTheme.dark() : SnipTheme.light();
@@ -324,7 +324,9 @@ class SnipTheme {
     return BoxDecoration(
       color: fill,
       borderRadius: shape,
-      border: outline == null ? null : Border.all(color: outline, width: outlineWidth),
+      border: outline == null
+          ? null
+          : Border.all(color: outline, width: outlineWidth),
     );
   }
 
@@ -377,9 +379,12 @@ class SnipTheme {
   /// WCAG relative luminance. Shared by [ringOn] and [ringOnGradient] so
   /// both score contrast the same way `test/snip_theme_test.dart` does.
   static double _luminance(Color c) {
-    double channel(double v) =>
-        v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
-    return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+    double channel(double v) => v <= 0.03928
+        ? v / 12.92
+        : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+    return 0.2126 * channel(c.r) +
+        0.7152 * channel(c.g) +
+        0.0722 * channel(c.b);
   }
 
   /// WCAG contrast ratio between two **opaque** colours. Callers ([ringOn],
@@ -469,7 +474,9 @@ class SnipTheme {
   /// task-4 report).
   Color ringOn(Color swatchColor, {Color? backdrop}) {
     final resolved = _resolveOpaque(swatchColor, backdrop, 'SnipTheme.ringOn');
-    return _contrast(ink, resolved) >= _contrast(onActive, resolved) ? ink : onActive;
+    return _contrast(ink, resolved) >= _contrast(onActive, resolved)
+        ? ink
+        : onActive;
   }
 
   /// [ringOn]'s multi-stop counterpart, for chrome drawn over a gradient
@@ -492,7 +499,10 @@ class SnipTheme {
   /// should composite it before calling this rather than have that
   /// silently under-score here.
   Color ringOnGradient(List<Color> stops) {
-    assert(stops.isNotEmpty, 'SnipTheme.ringOnGradient: stops must not be empty.');
+    assert(
+      stops.isNotEmpty,
+      'SnipTheme.ringOnGradient: stops must not be empty.',
+    );
     for (final s in stops) {
       _resolveOpaque(s, null, 'SnipTheme.ringOnGradient');
     }
@@ -521,11 +531,7 @@ class SnipTheme {
 class SnipThemeScope extends InheritedWidget {
   final SnipTheme theme;
 
-  const SnipThemeScope({
-    super.key,
-    required this.theme,
-    required super.child,
-  });
+  const SnipThemeScope({super.key, required this.theme, required super.child});
 
   @override
   bool updateShouldNotify(SnipThemeScope oldWidget) => oldWidget.theme != theme;

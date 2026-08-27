@@ -15,9 +15,13 @@ class ChannelOcrEngine implements OcrEngine {
   @override
   Future<OcrAvailability> availability() async {
     try {
-      final result = await _channel.invokeMethod<Map<Object?, Object?>>('availability');
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'availability',
+      );
       if (result == null) {
-        return const OcrAvailability.unavailable('No response from the OCR engine.');
+        return const OcrAvailability.unavailable(
+          'No response from the OCR engine.',
+        );
       }
       return OcrAvailability(
         available: result['available'] as bool? ?? false,

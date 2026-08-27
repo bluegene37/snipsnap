@@ -58,10 +58,13 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
   @override
   void initState() {
     super.initState();
-    String clean = widget.initialName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '-').replaceAll(' ', '_');
+    String clean = widget.initialName
+        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '-')
+        .replaceAll(' ', '_');
     if (clean.toLowerCase().endsWith('.png')) {
       clean = clean.substring(0, clean.length - 4);
-    } else if (clean.toLowerCase().endsWith('.jpg') || clean.toLowerCase().endsWith('.jpeg')) {
+    } else if (clean.toLowerCase().endsWith('.jpg') ||
+        clean.toLowerCase().endsWith('.jpeg')) {
       clean = clean.substring(0, clean.length - 4);
     }
     _nameController = TextEditingController(text: clean);
@@ -114,7 +117,11 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                     const SizedBox(width: 8),
                     Text(
                       'Save Screenshot As',
-                      style: TextStyle(color: t.ink, fontSize: 16, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: t.ink,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
@@ -138,7 +145,10 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                           isDense: true,
                           filled: true,
                           fillColor: t.surfaceRaised,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(6),
                             borderSide: BorderSide(color: t.border),
@@ -147,7 +157,10 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                           // and the emphasis token, not a colour swap.
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(6),
-                            borderSide: BorderSide(color: t.borderStrong, width: 1.5),
+                            borderSide: BorderSide(
+                              color: t.borderStrong,
+                              width: 1.5,
+                            ),
                           ),
                         ),
                       ),
@@ -163,7 +176,9 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                           Expanded(
                             child: Container(
                               height: 34,
-                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
                               decoration: BoxDecoration(
                                 color: t.surfaceRaised,
                                 borderRadius: BorderRadius.circular(6),
@@ -173,7 +188,11 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                 child: DropdownButton<String>(
                                   value: _selectedLocationKey,
                                   isExpanded: true,
-                                  icon: Icon(Icons.unfold_more_rounded, size: 16, color: t.inkMuted),
+                                  icon: Icon(
+                                    Icons.unfold_more_rounded,
+                                    size: 16,
+                                    color: t.inkMuted,
+                                  ),
                                   dropdownColor: t.surfaceRaised,
                                   style: TextStyle(color: t.ink, fontSize: 13),
                                   items: [
@@ -206,9 +225,16 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                           // same pairing computed generally;
                                           // save_as_dialog_test.dart pins
                                           // these three specific icons).
-                                          Icon(Icons.folder_rounded, size: 16, color: t.ink),
+                                          Icon(
+                                            Icons.folder_rounded,
+                                            size: 16,
+                                            color: t.ink,
+                                          ),
                                           const SizedBox(width: 8),
-                                          Text('Downloads', style: TextStyle(color: t.ink)),
+                                          Text(
+                                            'Downloads',
+                                            style: TextStyle(color: t.ink),
+                                          ),
                                         ],
                                       ),
                                     ),
@@ -216,9 +242,16 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                       value: 'desktop',
                                       child: Row(
                                         children: [
-                                          Icon(Icons.desktop_windows_rounded, size: 16, color: t.ink),
+                                          Icon(
+                                            Icons.desktop_windows_rounded,
+                                            size: 16,
+                                            color: t.ink,
+                                          ),
                                           const SizedBox(width: 8),
-                                          Text('Desktop', style: TextStyle(color: t.ink)),
+                                          Text(
+                                            'Desktop',
+                                            style: TextStyle(color: t.ink),
+                                          ),
                                         ],
                                       ),
                                     ),
@@ -226,9 +259,16 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                       value: 'documents',
                                       child: Row(
                                         children: [
-                                          Icon(Icons.description_rounded, size: 16, color: t.ink),
+                                          Icon(
+                                            Icons.description_rounded,
+                                            size: 16,
+                                            color: t.ink,
+                                          ),
                                           const SizedBox(width: 8),
-                                          Text('Documents', style: TextStyle(color: t.ink)),
+                                          Text(
+                                            'Documents',
+                                            style: TextStyle(color: t.ink),
+                                          ),
                                         ],
                                       ),
                                     ),
@@ -237,7 +277,11 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                         value: 'custom',
                                         child: Row(
                                           children: [
-                                            Icon(Icons.folder_special_rounded, size: 16, color: t.ink),
+                                            Icon(
+                                              Icons.folder_special_rounded,
+                                              size: 16,
+                                              color: t.ink,
+                                            ),
                                             const SizedBox(width: 8),
                                             Expanded(
                                               child: Text(
@@ -252,7 +296,9 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                   ],
                                   onChanged: (val) {
                                     if (val != null) {
-                                      setState(() => _selectedLocationKey = val);
+                                      setState(
+                                        () => _selectedLocationKey = val,
+                                      );
                                     }
                                   },
                                 ),
@@ -270,7 +316,11 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                               padding: const EdgeInsets.all(8),
                               minimumSize: const Size(34, 34),
                             ),
-                            icon: Icon(Icons.folder_open_rounded, size: 16, color: t.ink),
+                            icon: Icon(
+                              Icons.folder_open_rounded,
+                              size: 16,
+                              color: t.ink,
+                            ),
                             tooltip: 'Choose Custom Folder...',
                             onPressed: _pickCustomFolder,
                           ),
@@ -288,7 +338,14 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Image Format:', style: TextStyle(color: t.inkMuted, fontSize: 13, fontWeight: FontWeight.w600)),
+                    Text(
+                      'Image Format:',
+                      style: TextStyle(
+                        color: t.inkMuted,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -297,7 +354,9 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                             label: 'PNG (.png)',
                             subtitle: 'Lossless quality',
                             isSelected: _selectedFormat == SaveFormat.png,
-                            onTap: () => setState(() => _selectedFormat = SaveFormat.png),
+                            onTap: () => setState(
+                              () => _selectedFormat = SaveFormat.png,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -306,7 +365,9 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                             label: 'JPEG (.jpg)',
                             subtitle: 'Smaller file size',
                             isSelected: _selectedFormat == SaveFormat.jpg,
-                            onTap: () => setState(() => _selectedFormat = SaveFormat.jpg),
+                            onTap: () => setState(
+                              () => _selectedFormat = SaveFormat.jpg,
+                            ),
                           ),
                         ),
                       ],
@@ -318,8 +379,22 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('JPEG Quality:', style: TextStyle(color: t.inkMuted, fontSize: 13, fontWeight: FontWeight.w600)),
-                          Text('${_jpgQuality.round()}%', style: TextStyle(color: t.ink, fontWeight: FontWeight.bold, fontSize: 13)),
+                          Text(
+                            'JPEG Quality:',
+                            style: TextStyle(
+                              color: t.inkMuted,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            '${_jpgQuality.round()}%',
+                            style: TextStyle(
+                              color: t.ink,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
                         ],
                       ),
                       Slider(
@@ -344,23 +419,33 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     InkWell(
-                      onTap: () => setState(() => _isFramingExpanded = !_isFramingExpanded),
+                      onTap: () => setState(
+                        () => _isFramingExpanded = !_isFramingExpanded,
+                      ),
                       child: Row(
                         children: [
                           Icon(Icons.palette_rounded, size: 16, color: t.ink),
                           const SizedBox(width: 8),
                           Text(
                             'Social Framing & Padding',
-                            style: TextStyle(color: t.ink, fontSize: 13, fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                              color: t.ink,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                           const Spacer(),
                           Text(
-                            _framingPadding > 0 ? '${_framingPadding.toInt()}px framed' : 'None',
+                            _framingPadding > 0
+                                ? '${_framingPadding.toInt()}px framed'
+                                : 'None',
                             style: TextStyle(color: t.inkMuted, fontSize: 11),
                           ),
                           const SizedBox(width: 4),
                           Icon(
-                            _isFramingExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                            _isFramingExpanded
+                                ? Icons.expand_less_rounded
+                                : Icons.expand_more_rounded,
                             size: 18,
                             color: t.inkMuted,
                           ),
@@ -372,7 +457,10 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('Padding:', style: TextStyle(color: t.inkMuted, fontSize: 12)),
+                          Text(
+                            'Padding:',
+                            style: TextStyle(color: t.inkMuted, fontSize: 12),
+                          ),
                           Wrap(
                             spacing: 6,
                             children: [0.0, 32.0, 64.0].map((pVal) {
@@ -387,20 +475,29 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                   pVal == 0 ? 'None' : '${pVal.toInt()}px',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: t.controlForeground(active: isSelected, exclusive: true),
+                                    color: t.controlForeground(
+                                      active: isSelected,
+                                      exclusive: true,
+                                    ),
                                   ),
                                 ),
                                 selected: isSelected,
                                 selectedColor: t.activeFill,
                                 backgroundColor: Colors.transparent,
-                                side: BorderSide(color: isSelected ? t.activeFill : t.border),
+                                side: BorderSide(
+                                  color: isSelected ? t.activeFill : t.border,
+                                ),
                                 showCheckmark: false,
                                 onSelected: (sel) {
                                   if (sel) {
                                     setState(() {
                                       _framingPadding = pVal;
-                                      if (pVal > 0 && _cornerRadius == 0) _cornerRadius = 16.0;
-                                      if (pVal > 0) _enableShadow = true;
+                                      if (pVal > 0 && _cornerRadius == 0) {
+                                        _cornerRadius = 16.0;
+                                      }
+                                      if (pVal > 0) {
+                                        _enableShadow = true;
+                                      }
                                     });
                                   }
                                 },
@@ -414,7 +511,10 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Corner Radius:', style: TextStyle(color: t.inkMuted, fontSize: 12)),
+                            Text(
+                              'Corner Radius:',
+                              style: TextStyle(color: t.inkMuted, fontSize: 12),
+                            ),
                             Wrap(
                               spacing: 6,
                               children: [0.0, 12.0, 24.0].map((rVal) {
@@ -424,16 +524,23 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                     rVal == 0 ? 'Sharp' : '${rVal.toInt()}px',
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: t.controlForeground(active: isSelected, exclusive: true),
+                                      color: t.controlForeground(
+                                        active: isSelected,
+                                        exclusive: true,
+                                      ),
                                     ),
                                   ),
                                   selected: isSelected,
                                   selectedColor: t.activeFill,
                                   backgroundColor: Colors.transparent,
-                                  side: BorderSide(color: isSelected ? t.activeFill : t.border),
+                                  side: BorderSide(
+                                    color: isSelected ? t.activeFill : t.border,
+                                  ),
                                   showCheckmark: false,
                                   onSelected: (sel) {
-                                    if (sel) setState(() => _cornerRadius = rVal);
+                                    if (sel) {
+                                      setState(() => _cornerRadius = rVal);
+                                    }
                                   },
                                 );
                               }).toList(),
@@ -444,56 +551,84 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('Drop Shadow:', style: TextStyle(color: t.inkMuted, fontSize: 12)),
+                            Text(
+                              'Drop Shadow:',
+                              style: TextStyle(color: t.inkMuted, fontSize: 12),
+                            ),
                             Switch(
                               value: _enableShadow,
                               activeTrackColor: t.activeFill,
-                              onChanged: (v) => setState(() => _enableShadow = v),
+                              onChanged: (v) =>
+                                  setState(() => _enableShadow = v),
                             ),
                           ],
                         ),
                         const SizedBox(height: 8),
-                        Text('Background Gradient:', style: TextStyle(color: t.inkMuted, fontSize: 12)),
+                        Text(
+                          'Background Gradient:',
+                          style: TextStyle(color: t.inkMuted, fontSize: 12),
+                        ),
                         const SizedBox(height: 8),
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
-                          children: List.generate(AppColors.framingGradients.length, (idx) {
-                            final isSel = _selectedGradientIndex == idx;
-                            // The gradient preview itself keeps its real,
-                            // unconverted colour — same rule as the
-                            // annotation swatches. Only the chrome around it
-                            // (the selected ring, the check glyph) is
-                            // monochrome, and since a gradient has more than
-                            // one stop, a single-colour ringOn isn't enough:
-                            // a ring picked against just one endpoint can
-                            // still vanish against the other, so this uses
-                            // ringOnGradient, which is guaranteed safe
-                            // against every stop.
-                            final stops = (AppColors.framingGradients[idx] as LinearGradient).colors;
-                            final ring = t.ringOnGradient(stops);
-                            return GestureDetector(
-                              onTap: () => setState(() => _selectedGradientIndex = idx),
-                              child: Container(
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  gradient: AppColors.framingGradients[idx],
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: isSel ? ring : Colors.transparent,
-                                    width: 2.5,
-                                  ),
-                                  // Elevation shadow on the selected tile —
-                                  // decorative, mode-invariant, matching the
-                                  // other incidental drop shadows in this
-                                  // file's dialogs.
-                                  boxShadow: isSel ? const [BoxShadow(color: Colors.black45, blurRadius: 4)] : null,
+                          children: List.generate(
+                            AppColors.framingGradients.length,
+                            (idx) {
+                              final isSel = _selectedGradientIndex == idx;
+                              // The gradient preview itself keeps its real,
+                              // unconverted colour — same rule as the
+                              // annotation swatches. Only the chrome around it
+                              // (the selected ring, the check glyph) is
+                              // monochrome, and since a gradient has more than
+                              // one stop, a single-colour ringOn isn't enough:
+                              // a ring picked against just one endpoint can
+                              // still vanish against the other, so this uses
+                              // ringOnGradient, which is guaranteed safe
+                              // against every stop.
+                              final stops =
+                                  (AppColors.framingGradients[idx]
+                                          as LinearGradient)
+                                      .colors;
+                              final ring = t.ringOnGradient(stops);
+                              return GestureDetector(
+                                onTap: () => setState(
+                                  () => _selectedGradientIndex = idx,
                                 ),
-                                child: isSel ? Icon(Icons.check_rounded, size: 16, color: ring) : null,
-                              ),
-                            );
-                          }),
+                                child: Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    gradient: AppColors.framingGradients[idx],
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: isSel ? ring : Colors.transparent,
+                                      width: 2.5,
+                                    ),
+                                    // Elevation shadow on the selected tile —
+                                    // decorative, mode-invariant, matching the
+                                    // other incidental drop shadows in this
+                                    // file's dialogs.
+                                    boxShadow: isSel
+                                        ? const [
+                                            BoxShadow(
+                                              color: Colors.black45,
+                                              blurRadius: 4,
+                                            ),
+                                          ]
+                                        : null,
+                                  ),
+                                  child: isSel
+                                      ? Icon(
+                                          Icons.check_rounded,
+                                          size: 16,
+                                          color: ring,
+                                        )
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
                         ),
                       ],
                     ],
@@ -504,7 +639,10 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
 
               // Bottom Actions: Cancel & Save
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 14,
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -512,11 +650,19 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                       style: OutlinedButton.styleFrom(
                         foregroundColor: t.ink,
                         side: BorderSide(color: t.border),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                       onPressed: () => Navigator.pop(context),
-                      child: const Text('Cancel', style: TextStyle(fontSize: 13)),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(fontSize: 13),
+                      ),
                     ),
                     const SizedBox(width: 10),
                     // The dialog's one CTA — emphasis is a border/text-only
@@ -526,28 +672,43 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                         backgroundColor: t.surfaceRaised,
                         foregroundColor: t.emphasis,
                         side: BorderSide(color: t.emphasis, width: 1.2),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                         elevation: 0,
                       ),
                       onPressed: () {
                         final rawName = _nameController.text.trim();
                         final name = rawName.isEmpty ? 'screenshot' : rawName;
                         Navigator.pop(context);
-                        widget.onConfirm(SaveOptions(
-                          fileName: name,
-                          format: _selectedFormat,
-                          quality: _jpgQuality.round(),
-                          customFolderPath: _selectedLocationKey == 'custom'
-                              ? _customFolderPath
-                              : _selectedLocationKey,
-                          framingPadding: _framingPadding,
-                          cornerRadius: _cornerRadius,
-                          shadowBlur: _enableShadow ? 24.0 : 0.0,
-                          gradientIndex: _framingPadding > 0 ? _selectedGradientIndex : null,
-                        ));
+                        widget.onConfirm(
+                          SaveOptions(
+                            fileName: name,
+                            format: _selectedFormat,
+                            quality: _jpgQuality.round(),
+                            customFolderPath: _selectedLocationKey == 'custom'
+                                ? _customFolderPath
+                                : _selectedLocationKey,
+                            framingPadding: _framingPadding,
+                            cornerRadius: _cornerRadius,
+                            shadowBlur: _enableShadow ? 24.0 : 0.0,
+                            gradientIndex: _framingPadding > 0
+                                ? _selectedGradientIndex
+                                : null,
+                          ),
+                        );
                       },
-                      child: const Text('Save', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      child: const Text(
+                        'Save',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -571,7 +732,11 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
           width: 70,
           child: Text(
             label,
-            style: TextStyle(color: textColor, fontSize: 13, fontWeight: FontWeight.w500),
+            style: TextStyle(
+              color: textColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
         Expanded(child: child),
@@ -601,12 +766,20 @@ class _FormatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = SnipTheme.of(context);
-    final decoration = t.controlDecoration(active: isSelected, exclusive: true, radius: 10);
+    final decoration = t.controlDecoration(
+      active: isSelected,
+      exclusive: true,
+      radius: 10,
+    );
     final titleColor = t.controlForeground(active: isSelected, exclusive: true);
     // dim only changes the resting (unselected) answer to inkMuted — a
     // knocked-out active tile stays onActive regardless, since that's the
     // colour guaranteed legible against the activeFill plate.
-    final subColor = t.controlForeground(active: isSelected, exclusive: true, dim: true);
+    final subColor = t.controlForeground(
+      active: isSelected,
+      exclusive: true,
+      dim: true,
+    );
 
     return Material(
       color: Colors.transparent,
@@ -619,7 +792,14 @@ class _FormatTile extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: TextStyle(color: titleColor, fontSize: 13, fontWeight: FontWeight.bold)),
+              Text(
+                label,
+                style: TextStyle(
+                  color: titleColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 2),
               Text(subtitle, style: TextStyle(color: subColor, fontSize: 11)),
             ],

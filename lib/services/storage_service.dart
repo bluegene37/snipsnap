@@ -33,7 +33,9 @@ class StorageService {
         .replaceAll(' ', '_')
         .trim();
     if (cleanName.isEmpty) cleanName = 'screenshot';
-    final targetFileName = cleanName.toLowerCase().endsWith('.$ext') ? cleanName : '$cleanName.$ext';
+    final targetFileName = cleanName.toLowerCase().endsWith('.$ext')
+        ? cleanName
+        : '$cleanName.$ext';
 
     List<int> bytesToSave = bytes;
 
@@ -42,10 +44,10 @@ class StorageService {
         // Decode + re-encode of a full-resolution capture, so it runs on a
         // worker isolate: on the UI isolate this blocked the frame that opened
         // the save dialog.
-        bytesToSave = await compute(
-          _transcodeToJpg,
-          (bytes: Uint8List.fromList(bytes), quality: jpgQuality),
-        );
+        bytesToSave = await compute(_transcodeToJpg, (
+          bytes: Uint8List.fromList(bytes),
+          quality: jpgQuality,
+        ));
       } catch (e) {
         debugPrint('SnipSnap JPG encode error: $e');
       }
@@ -58,7 +60,9 @@ class StorageService {
         if (customFolderPath == 'downloads') {
           targetDir = await getDownloadsDirectory();
         } else if (customFolderPath == 'desktop') {
-          final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+          final home =
+              Platform.environment['HOME'] ??
+              Platform.environment['USERPROFILE'];
           if (home != null) targetDir = Directory(p.join(home, 'Desktop'));
         } else if (customFolderPath == 'documents') {
           targetDir = await getApplicationDocumentsDirectory();
@@ -125,12 +129,15 @@ class StorageService {
     return null;
   }
 
-
-
   /// Write image bytes to temporary or cache file
   static Future<String> saveTempImage(List<int> bytes) async {
     final tempDir = await Directory.systemTemp.createTemp('snipsnap_');
-    final file = File(p.join(tempDir.path, 'edited_${DateTime.now().millisecondsSinceEpoch}.png'));
+    final file = File(
+      p.join(
+        tempDir.path,
+        'edited_${DateTime.now().millisecondsSinceEpoch}.png',
+      ),
+    );
     await file.writeAsBytes(bytes);
     return file.path;
   }
@@ -153,7 +160,10 @@ class StorageService {
         final existingPaths = items.map((i) => i.filePath).toSet();
         final files = await snapDir.list().toList();
         for (final f in files) {
-          if (f is File && (f.path.endsWith('.png') || f.path.endsWith('.jpg') || f.path.endsWith('.jpeg'))) {
+          if (f is File &&
+              (f.path.endsWith('.png') ||
+                  f.path.endsWith('.jpg') ||
+                  f.path.endsWith('.jpeg'))) {
             if (!existingPaths.contains(f.path)) {
               final stat = await f.stat();
               int w = 0;
@@ -163,7 +173,10 @@ class StorageService {
                 // loop runs at startup over every file in the library folder,
                 // and a pure-Dart PNG decode of a Retina capture is long
                 // enough to be seen as a freeze once there are a few of them.
-                final decoded = await compute(img.decodeImage, await f.readAsBytes());
+                final decoded = await compute(
+                  img.decodeImage,
+                  await f.readAsBytes(),
+                );
                 if (decoded != null) {
                   w = decoded.width;
                   h = decoded.height;
@@ -174,7 +187,8 @@ class StorageService {
               final newItem = CaptureItem(
                 id: '${stat.modified.millisecondsSinceEpoch}_${p.basename(f.path)}',
                 filePath: f.path,
-                title: 'Snap ${stat.modified.hour.toString().padLeft(2, '0')}:${stat.modified.minute.toString().padLeft(2, '0')}:${stat.modified.second.toString().padLeft(2, '0')}',
+                title:
+                    'Snap ${stat.modified.hour.toString().padLeft(2, '0')}:${stat.modified.minute.toString().padLeft(2, '0')}:${stat.modified.second.toString().padLeft(2, '0')}',
                 createdAt: stat.modified,
                 width: w,
                 height: h,
@@ -266,8 +280,9 @@ class StorageService {
         // One argument, not two: `explorer /select,C:\path` is a single token
         // and splitting it left explorer opening Documents instead of
         // selecting the file. Exit code ignored for the reason above.
-        await Process.run(
-            'explorer.exe', ['/select,${filePath.replaceAll('/', '\\')}']);
+        await Process.run('explorer.exe', [
+          '/select,${filePath.replaceAll('/', '\\')}',
+        ]);
         return true;
       } else if (Platform.isLinux) {
         final dir = p.dirname(filePath);

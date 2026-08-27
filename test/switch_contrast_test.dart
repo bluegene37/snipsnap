@@ -10,9 +10,12 @@ import 'package:snipsnap/views/main_screen.dart';
 /// for themselves.
 double _contrast(Color a, Color b) {
   double luminance(Color c) {
-    double channel(double v) =>
-        v <= 0.03928 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
-    return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+    double channel(double v) => v <= 0.03928
+        ? v / 12.92
+        : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+    return 0.2126 * channel(c.r) +
+        0.7152 * channel(c.g) +
+        0.0722 * channel(c.b);
   }
 
   final la = luminance(a);
@@ -66,10 +69,14 @@ void main() {
       final track = resolve(sw.trackColor, const {}, 'trackColor');
 
       final ratio = _contrast(thumb, track);
-      expect(ratio, greaterThanOrEqualTo(minRatio),
-          reason: '$label: off thumb $thumb on off track $track only clears '
-              '${ratio.toStringAsFixed(2)}:1 — the M3 default measured 1.43:1 light / '
-              '1.34:1 dark, which is the bug this pins');
+      expect(
+        ratio,
+        greaterThanOrEqualTo(minRatio),
+        reason:
+            '$label: off thumb $thumb on off track $track only clears '
+            '${ratio.toStringAsFixed(2)}:1 — the M3 default measured 1.43:1 light / '
+            '1.34:1 dark, which is the bug this pins',
+      );
     });
 
     test('[$label] the ON thumb clears $minRatio:1 against its own track', () {
@@ -78,71 +85,122 @@ void main() {
       final track = resolve(sw.trackColor, on, 'trackColor');
 
       final ratio = _contrast(thumb, track);
-      expect(ratio, greaterThanOrEqualTo(minRatio),
-          reason: '$label: on thumb $thumb on on track $track only clears '
-              '${ratio.toStringAsFixed(2)}:1');
+      expect(
+        ratio,
+        greaterThanOrEqualTo(minRatio),
+        reason:
+            '$label: on thumb $thumb on on track $track only clears '
+            '${ratio.toStringAsFixed(2)}:1',
+      );
     });
 
-    test('[$label] the OFF switch is findable at all — outline against the panel', () {
-      // The off track deliberately carries no fill of its own (t.surface on a
-      // t.surface panel), per the skeleton convention that a resting control
-      // is a hairline, not a plate. That makes the outline the *only* thing
-      // delineating the control, so it has to clear on its own — this is the
-      // measurement the old t.border outline failed at 1.38:1.
-      final outline = resolve(sw.trackOutlineColor, const {}, 'trackOutlineColor');
+    test(
+      '[$label] the OFF switch is findable at all — outline against the panel',
+      () {
+        // The off track deliberately carries no fill of its own (t.surface on a
+        // t.surface panel), per the skeleton convention that a resting control
+        // is a hairline, not a plate. That makes the outline the *only* thing
+        // delineating the control, so it has to clear on its own — this is the
+        // measurement the old t.border outline failed at 1.38:1.
+        final outline = resolve(
+          sw.trackOutlineColor,
+          const {},
+          'trackOutlineColor',
+        );
 
-      for (final panel in <String, Color>{'surface': t.surface, 'surfaceRaised': t.surfaceRaised}
-          .entries) {
-        final ratio = _contrast(outline, panel.value);
-        expect(ratio, greaterThanOrEqualTo(minRatio),
-            reason: '$label: off track outline $outline on ${panel.key} '
-                '${panel.value} only clears ${ratio.toStringAsFixed(2)}:1');
-      }
-    });
+        for (final panel in <String, Color>{
+          'surface': t.surface,
+          'surfaceRaised': t.surfaceRaised,
+        }.entries) {
+          final ratio = _contrast(outline, panel.value);
+          expect(
+            ratio,
+            greaterThanOrEqualTo(minRatio),
+            reason:
+                '$label: off track outline $outline on ${panel.key} '
+                '${panel.value} only clears ${ratio.toStringAsFixed(2)}:1',
+          );
+        }
+      },
+    );
 
     test('[$label] the ON track reads as a plate against the panel', () {
-      final track = resolve(sw.trackColor, const {WidgetState.selected}, 'trackColor');
+      final track = resolve(sw.trackColor, const {
+        WidgetState.selected,
+      }, 'trackColor');
       final ratio = _contrast(track, t.surface);
-      expect(ratio, greaterThanOrEqualTo(minRatio),
-          reason: '$label: on track $track on panel ${t.surface} only clears '
-              '${ratio.toStringAsFixed(2)}:1');
+      expect(
+        ratio,
+        greaterThanOrEqualTo(minRatio),
+        reason:
+            '$label: on track $track on panel ${t.surface} only clears '
+            '${ratio.toStringAsFixed(2)}:1',
+      );
     });
 
-    test('[$label] on and off are distinguishable from each other, not just visible', () {
-      // Two states that each clear 3:1 against their own backdrop could still
-      // look identical to each other. The design distinguishes them by
-      // inversion, so the thumbs must land on opposite sides.
-      final offThumb = resolve(sw.thumbColor, const {}, 'thumbColor');
-      final onThumb = resolve(sw.thumbColor, const {WidgetState.selected}, 'thumbColor');
-      final ratio = _contrast(offThumb, onThumb);
-      expect(ratio, greaterThanOrEqualTo(minRatio),
-          reason: '$label: off thumb $offThumb and on thumb $onThumb are only '
-              '${ratio.toStringAsFixed(2)}:1 apart — the states would read alike');
-    });
+    test(
+      '[$label] on and off are distinguishable from each other, not just visible',
+      () {
+        // Two states that each clear 3:1 against their own backdrop could still
+        // look identical to each other. The design distinguishes them by
+        // inversion, so the thumbs must land on opposite sides.
+        final offThumb = resolve(sw.thumbColor, const {}, 'thumbColor');
+        final onThumb = resolve(sw.thumbColor, const {
+          WidgetState.selected,
+        }, 'thumbColor');
+        final ratio = _contrast(offThumb, onThumb);
+        expect(
+          ratio,
+          greaterThanOrEqualTo(minRatio),
+          reason:
+              '$label: off thumb $offThumb and on thumb $onThumb are only '
+              '${ratio.toStringAsFixed(2)}:1 apart — the states would read alike',
+        );
+      },
+    );
 
-    test('[$label] the M3 defaults this replaces really were below $minRatio:1', () {
-      // The other half of the assertion: without this, the thresholds above
-      // could be met by a theme that had simply never been broken, and the
-      // "pre-existing, not a regression" misdiagnosis could recur.
-      final scheme = snipColorScheme(t);
-      // _SwitchDefaultsM3: unselected thumb and track outline = outline,
-      // unselected track = surfaceContainerHighest.
-      expect(_contrast(scheme.outline, scheme.surfaceContainerHighest), lessThan(minRatio),
-          reason: '$label: M3 default off thumb-vs-track');
-      expect(_contrast(scheme.outline, t.surface), lessThan(minRatio),
-          reason: '$label: M3 default off outline-vs-panel');
-    });
+    test(
+      '[$label] the M3 defaults this replaces really were below $minRatio:1',
+      () {
+        // The other half of the assertion: without this, the thresholds above
+        // could be met by a theme that had simply never been broken, and the
+        // "pre-existing, not a regression" misdiagnosis could recur.
+        final scheme = snipColorScheme(t);
+        // _SwitchDefaultsM3: unselected thumb and track outline = outline,
+        // unselected track = surfaceContainerHighest.
+        expect(
+          _contrast(scheme.outline, scheme.surfaceContainerHighest),
+          lessThan(minRatio),
+          reason: '$label: M3 default off thumb-vs-track',
+        );
+        expect(
+          _contrast(scheme.outline, t.surface),
+          lessThan(minRatio),
+          reason: '$label: M3 default off outline-vs-panel',
+        );
+      },
+    );
 
     test('[$label] a disabled switch never claims to be interactive', () {
       const disabledOn = {WidgetState.selected, WidgetState.disabled};
-      final thumb = resolve(sw.thumbColor, const {WidgetState.disabled}, 'thumbColor');
+      final thumb = resolve(sw.thumbColor, const {
+        WidgetState.disabled,
+      }, 'thumbColor');
       final onTrack = resolve(sw.trackColor, disabledOn, 'trackColor');
 
-      expect(thumb, t.inkFaint,
-          reason: '$label: disabled foregrounds are inkFaint everywhere else in this design');
-      expect(onTrack, t.selectedFill,
-          reason: '$label: a disabled-and-on switch must downgrade off the full activeFill '
-              'plate, same as SnipTheme.controlDecoration does');
+      expect(
+        thumb,
+        t.inkFaint,
+        reason:
+            '$label: disabled foregrounds are inkFaint everywhere else in this design',
+      );
+      expect(
+        onTrack,
+        t.selectedFill,
+        reason:
+            '$label: a disabled-and-on switch must downgrade off the full activeFill '
+            'plate, same as SnipTheme.controlDecoration does',
+      );
     });
   }
 
@@ -155,7 +213,9 @@ void main() {
   for (final mode in SnipThemeMode.values) {
     final t = SnipTheme.forMode(mode);
 
-    testWidgets('[${mode.name}] a mounted Switch resolves these colours', (tester) async {
+    testWidgets('[${mode.name}] a mounted Switch resolves these colours', (
+      tester,
+    ) async {
       late SwitchThemeData seen;
       await tester.pumpWidget(
         SnipThemeScope(
@@ -163,25 +223,34 @@ void main() {
           child: MaterialApp(
             theme: snipThemeData(t),
             home: Scaffold(
-              body: Builder(builder: (context) {
-                seen = Theme.of(context).switchTheme;
-                // Mirrors the four real call sites, which set only this.
-                return Switch(
-                  value: false,
-                  activeTrackColor: t.activeFill,
-                  onChanged: (_) {},
-                );
-              }),
+              body: Builder(
+                builder: (context) {
+                  seen = Theme.of(context).switchTheme;
+                  // Mirrors the four real call sites, which set only this.
+                  return Switch(
+                    value: false,
+                    activeTrackColor: t.activeFill,
+                    onChanged: (_) {},
+                  );
+                },
+              ),
             ),
           ),
         ),
       );
 
       expect(find.byType(Switch), findsOneWidget);
-      expect(seen.thumbColor?.resolve(const {}), t.ink,
-          reason: '${mode.name}: a mounted Switch must see the ink off-thumb');
-      expect(seen.trackOutlineColor?.resolve(const {}), t.inkMuted,
-          reason: '${mode.name}: a mounted Switch must see the inkMuted off-outline');
+      expect(
+        seen.thumbColor?.resolve(const {}),
+        t.ink,
+        reason: '${mode.name}: a mounted Switch must see the ink off-thumb',
+      );
+      expect(
+        seen.trackOutlineColor?.resolve(const {}),
+        t.inkMuted,
+        reason:
+            '${mode.name}: a mounted Switch must see the inkMuted off-outline',
+      );
     });
   }
 }

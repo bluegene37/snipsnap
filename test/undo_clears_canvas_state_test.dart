@@ -22,14 +22,14 @@ Future<Directory> _bootApp(WidgetTester tester) async {
   final dir = Directory.systemTemp.createTempSync('snipsnap_undo');
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(
-    const MethodChannel('plugins.flutter.io/path_provider'),
-    (call) async => dir.path,
-  );
+        const MethodChannel('plugins.flutter.io/path_provider'),
+        (call) async => dir.path,
+      );
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(
-    const MethodChannel('dev.leanflutter.plugins/hotkey_manager'),
-    (call) async => null,
-  );
+        const MethodChannel('dev.leanflutter.plugins/hotkey_manager'),
+        (call) async => null,
+      );
   final db = AppDatabase(NativeDatabase.memory());
   DatabaseService.db = db;
   addTearDown(db.close);
@@ -100,7 +100,10 @@ Future<void> _settle(WidgetTester tester) async {
 }
 
 Future<void> _drag(WidgetTester tester, Offset from, Offset to) async {
-  final gesture = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+  final gesture = await tester.startGesture(
+    from,
+    kind: PointerDeviceKind.mouse,
+  );
   await tester.pump(const Duration(milliseconds: 16));
   for (var i = 1; i <= 40; i++) {
     await gesture.moveTo(Offset.lerp(from, to, i / 40)!);
@@ -115,15 +118,18 @@ Future<void> _undo(WidgetTester tester) async {
   await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
   await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
   await _settle(tester);
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+  await tester.runAsync(
+    () => Future<void>.delayed(const Duration(milliseconds: 300)),
+  );
   await _settle(tester);
 }
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('undo leaves nothing of the gesture it reversed on screen',
-      (tester) async {
+  testWidgets('undo leaves nothing of the gesture it reversed on screen', (
+    tester,
+  ) async {
     // The report: undo ran, but the shape that had just been dragged stayed on
     // screen. The annotation list was restored correctly — what stayed was the
     // canvas's own selection chrome, which lives outside the undo snapshot and
@@ -134,31 +140,51 @@ void main() {
     final dir = await _bootApp(tester);
     addTearDown(() => dir.deleteSync(recursive: true));
 
-    final origin = tester.renderObject<RenderBox>(_canvas).localToGlobal(Offset.zero);
+    final origin = tester
+        .renderObject<RenderBox>(_canvas)
+        .localToGlobal(Offset.zero);
 
     // Click first: the app's outer Focus otherwise swallows the tool shortcut.
-    await tester.tapAt(origin + const Offset(600, 400), kind: PointerDeviceKind.mouse);
+    await tester.tapAt(
+      origin + const Offset(600, 400),
+      kind: PointerDeviceKind.mouse,
+    );
     await _settle(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyR); // shape
     await _settle(tester);
 
-    await _drag(tester, origin + const Offset(200, 200), origin + const Offset(420, 340));
+    await _drag(
+      tester,
+      origin + const Offset(200, 200),
+      origin + const Offset(420, 340),
+    );
     expect(tester.widget<EditorCanvas>(_canvas).annotations, hasLength(1));
 
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV); // select
     await _settle(tester);
     final placed = await _snapshot(tester);
 
-    await _drag(tester, origin + const Offset(310, 270), origin + const Offset(520, 430));
+    await _drag(
+      tester,
+      origin + const Offset(310, 270),
+      origin + const Offset(520, 430),
+    );
     final moved = await _snapshot(tester);
-    expect(_differingPixels(moved, placed), greaterThan(1000),
-        reason: 'the move must actually have changed the picture');
+    expect(
+      _differingPixels(moved, placed),
+      greaterThan(1000),
+      reason: 'the move must actually have changed the picture',
+    );
 
     await _undo(tester);
 
-    expect(_differingPixels(await _snapshot(tester), placed), 0,
-        reason: 'every pixel must return to the pre-drag state — including the '
-            'handles drawn around the shape that was being dragged');
+    expect(
+      _differingPixels(await _snapshot(tester), placed),
+      0,
+      reason:
+          'every pixel must return to the pre-drag state — including the '
+          'handles drawn around the shape that was being dragged',
+    );
   });
 
   testWidgets('undo clears a live marquee', (tester) async {
@@ -168,13 +194,22 @@ void main() {
     final dir = await _bootApp(tester);
     addTearDown(() => dir.deleteSync(recursive: true));
 
-    final origin = tester.renderObject<RenderBox>(_canvas).localToGlobal(Offset.zero);
+    final origin = tester
+        .renderObject<RenderBox>(_canvas)
+        .localToGlobal(Offset.zero);
 
-    await tester.tapAt(origin + const Offset(600, 400), kind: PointerDeviceKind.mouse);
+    await tester.tapAt(
+      origin + const Offset(600, 400),
+      kind: PointerDeviceKind.mouse,
+    );
     await _settle(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
     await _settle(tester);
-    await _drag(tester, origin + const Offset(200, 200), origin + const Offset(420, 340));
+    await _drag(
+      tester,
+      origin + const Offset(200, 200),
+      origin + const Offset(420, 340),
+    );
 
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
     await _settle(tester);
@@ -184,19 +219,32 @@ void main() {
     // 20px below the canvas origin (the viewer's vertical padding), so the
     // region is the drag rectangle shifted up by that much and inflated to
     // take in the handles drawn on its corners.
-    await _drag(tester, origin + const Offset(650, 200), origin + const Offset(860, 380));
-    final surfaceWidth = tester.renderObject<RenderRepaintBoundary>(_boundary).size.width.toInt();
+    await _drag(
+      tester,
+      origin + const Offset(650, 200),
+      origin + const Offset(860, 380),
+    );
+    final surfaceWidth = tester
+        .renderObject<RenderRepaintBoundary>(_boundary)
+        .size
+        .width
+        .toInt();
     final region = const Rect.fromLTRB(650, 180, 860, 360).inflate(24);
 
-    expect(_differingIn(await _snapshot(tester), clean, surfaceWidth, region),
-        greaterThan(500),
-        reason: 'the marquee must be visible before undo');
+    expect(
+      _differingIn(await _snapshot(tester), clean, surfaceWidth, region),
+      greaterThan(500),
+      reason: 'the marquee must be visible before undo',
+    );
 
     await _undo(tester);
 
     // Only the marquee's own region: the same undo also removes the shape,
     // which is correct and lives elsewhere on the surface.
-    expect(_differingIn(await _snapshot(tester), clean, surfaceWidth, region), 0,
-        reason: 'the dragged marquee must not outlive the undo');
+    expect(
+      _differingIn(await _snapshot(tester), clean, surfaceWidth, region),
+      0,
+      reason: 'the dragged marquee must not outlive the undo',
+    );
   });
 }

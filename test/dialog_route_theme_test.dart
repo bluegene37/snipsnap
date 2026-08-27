@@ -139,7 +139,9 @@ void main() {
     // The real tree shape: every dialog opens and renders.
     // ---------------------------------------------------------------
 
-    testWidgets('[$label] About opens through showDialog and renders', (tester) async {
+    testWidgets('[$label] About opens through showDialog and renders', (
+      tester,
+    ) async {
       await _openDialog(
         tester,
         _AppShell(mode: mode, child: (_) => const AboutSnipSnapDialog()),
@@ -149,33 +151,40 @@ void main() {
       expect(find.text('snipsnap'), findsOneWidget);
       // Proof it resolved the scope rather than merely mounting: this colour
       // can only have come from SnipTheme.of inside the route.
-      expect(tester.widget<Dialog>(find.byType(Dialog)).backgroundColor, t.surface);
-    });
-
-    testWidgets('[$label] Keyboard Shortcuts opens through showDialog and renders',
-        (tester) async {
-      await _openDialog(
-        tester,
-        _AppShell(
-          mode: mode,
-          child: (_) => ShortcutSettingsDialog(
-            initialShortcuts: ShortcutService.getDefaultShortcuts(),
-            onShortcutsSaved: (_) {},
-          ),
-        ),
+      expect(
+        tester.widget<Dialog>(find.byType(Dialog)).backgroundColor,
+        t.surface,
       );
-
-      // Rendered content, not `findsOneWidget` on the dialog type: a widget
-      // whose build() threw still leaves its own element in the tree, so
-      // byType would pass against the very crash this file exists to catch.
-      // (Verified — that assertion was the one arm of this file that stayed
-      // green when the whole shell was flipped to the pre-fix shape.)
-      expect(find.byType(ShortcutSettingsDialog), findsOneWidget);
-      expect(find.text('Keyboard Shortcuts'), findsOneWidget);
-      expect(find.text('Save Shortcuts'), findsOneWidget);
     });
 
-    testWidgets('[$label] Save As opens through showDialog and renders', (tester) async {
+    testWidgets(
+      '[$label] Keyboard Shortcuts opens through showDialog and renders',
+      (tester) async {
+        await _openDialog(
+          tester,
+          _AppShell(
+            mode: mode,
+            child: (_) => ShortcutSettingsDialog(
+              initialShortcuts: ShortcutService.getDefaultShortcuts(),
+              onShortcutsSaved: (_) {},
+            ),
+          ),
+        );
+
+        // Rendered content, not `findsOneWidget` on the dialog type: a widget
+        // whose build() threw still leaves its own element in the tree, so
+        // byType would pass against the very crash this file exists to catch.
+        // (Verified — that assertion was the one arm of this file that stayed
+        // green when the whole shell was flipped to the pre-fix shape.)
+        expect(find.byType(ShortcutSettingsDialog), findsOneWidget);
+        expect(find.text('Keyboard Shortcuts'), findsOneWidget);
+        expect(find.text('Save Shortcuts'), findsOneWidget);
+      },
+    );
+
+    testWidgets('[$label] Save As opens through showDialog and renders', (
+      tester,
+    ) async {
       await _openDialog(
         tester,
         _AppShell(
@@ -185,7 +194,10 @@ void main() {
       );
 
       expect(find.byType(SaveAsDialog), findsOneWidget);
-      expect(tester.widget<AlertDialog>(find.byType(AlertDialog)).backgroundColor, t.surface);
+      expect(
+        tester.widget<AlertDialog>(find.byType(AlertDialog)).backgroundColor,
+        t.surface,
+      );
     });
 
     // ---------------------------------------------------------------
@@ -193,47 +205,55 @@ void main() {
     // chrome inside a dialog route resolving the wrong ThemeData.
     // ---------------------------------------------------------------
 
-    testWidgets('[$label] Material chrome inside a dialog route resolves the snip theme, '
-        'not a stock M3 baseline', (tester) async {
-      late ColorScheme scheme;
-      await _openDialog(
-        tester,
-        _AppShell(
-          mode: mode,
-          child: (ctx) {
-            scheme = Theme.of(ctx).colorScheme;
-            return const AlertDialog(content: Text('probe'));
-          },
-        ),
-      );
-
-      expect(find.text('probe'), findsOneWidget);
-      // style_picker.dart's two colour-picker dialogs capture SnipTheme
-      // before showDialog, so they survived the crash — but their
-      // AlertDialogs and the third-party ColorPicker inside them read
-      // Theme.of, which used to reach the outer stock M3 app and come back
-      // baseline purple. That was the one violet surface left in the app.
-      expect(scheme.primary, t.ink, reason: '$label: dialog-route primary');
-      expect(scheme.surface, t.surface, reason: '$label: dialog-route surface');
-      // Monochrome, to the same <0.04 channel spread
-      // `main_screen_color_scheme_test.dart` uses — the palette's two paper
-      // tones are a hair warm on purpose (see SnipTheme.dark's doc comment),
-      // so an exact R==G==B check would be wrong, not stricter.
-      for (final entry in <String, Color>{
-        'primary': scheme.primary,
-        'secondary': scheme.secondary,
-        'surface': scheme.surface,
-        'surfaceContainerHigh': scheme.surfaceContainerHigh,
-        'outline': scheme.outline,
-      }.entries) {
-        expect(
-          _isNeutral(entry.value),
-          isTrue,
-          reason: '$label: ${entry.key} carries chroma inside a dialog route '
-              '(${entry.value}) — a stock M3 scheme leaked in',
+    testWidgets(
+      '[$label] Material chrome inside a dialog route resolves the snip theme, '
+      'not a stock M3 baseline',
+      (tester) async {
+        late ColorScheme scheme;
+        await _openDialog(
+          tester,
+          _AppShell(
+            mode: mode,
+            child: (ctx) {
+              scheme = Theme.of(ctx).colorScheme;
+              return const AlertDialog(content: Text('probe'));
+            },
+          ),
         );
-      }
-    });
+
+        expect(find.text('probe'), findsOneWidget);
+        // style_picker.dart's two colour-picker dialogs capture SnipTheme
+        // before showDialog, so they survived the crash — but their
+        // AlertDialogs and the third-party ColorPicker inside them read
+        // Theme.of, which used to reach the outer stock M3 app and come back
+        // baseline purple. That was the one violet surface left in the app.
+        expect(scheme.primary, t.ink, reason: '$label: dialog-route primary');
+        expect(
+          scheme.surface,
+          t.surface,
+          reason: '$label: dialog-route surface',
+        );
+        // Monochrome, to the same <0.04 channel spread
+        // `main_screen_color_scheme_test.dart` uses — the palette's two paper
+        // tones are a hair warm on purpose (see SnipTheme.dark's doc comment),
+        // so an exact R==G==B check would be wrong, not stricter.
+        for (final entry in <String, Color>{
+          'primary': scheme.primary,
+          'secondary': scheme.secondary,
+          'surface': scheme.surface,
+          'surfaceContainerHigh': scheme.surfaceContainerHigh,
+          'outline': scheme.outline,
+        }.entries) {
+          expect(
+            _isNeutral(entry.value),
+            isTrue,
+            reason:
+                '$label: ${entry.key} carries chroma inside a dialog route '
+                '(${entry.value}) — a stock M3 scheme leaked in',
+          );
+        }
+      },
+    );
   }
 
   // ---------------------------------------------------------------
@@ -286,7 +306,9 @@ void main() {
     });
 
     testWidgets('the navigatorKey alone does not save it either, because '
-        'useRootNavigator still resolves past it to the outer app', (tester) async {
+        'useRootNavigator still resolves past it to the outer app', (
+      tester,
+    ) async {
       final error = await _openDialog(
         tester,
         _preFixOuterApp(
@@ -307,11 +329,11 @@ Widget _aboutBuilder(BuildContext _) => const AboutSnipSnapDialog();
 /// The `SnipSnapApp` that `lib/main.dart` used to hand to `runApp`, verbatim,
 /// wrapping [child] the way it wrapped `MainScreen`.
 Widget _preFixOuterApp(Widget child) => MaterialApp(
-      title: 'SnipSnap',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
-      home: child,
-    );
+  title: 'SnipSnap',
+  debugShowCheckedModeBanner: false,
+  theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
+  home: child,
+);
 
 /// Same <0.04 channel-spread definition of "neutral" that
 /// `main_screen_color_scheme_test.dart` uses.

@@ -42,22 +42,37 @@ void main() {
     final handler = OcrToolHandler(delegate);
 
     handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
-    handler.onPanUpdate(_dragUpdate(const Offset(120, 90)), const Offset(120, 90));
+    handler.onPanUpdate(
+      _dragUpdate(const Offset(120, 90)),
+      const Offset(120, 90),
+    );
     handler.onPanEnd(_dragEnd());
 
     expect(delegate.extractTextRegions, hasLength(1));
-    expect(delegate.extractTextRegions.single, const Rect.fromLTRB(10, 10, 120, 90));
+    expect(
+      delegate.extractTextRegions.single,
+      const Rect.fromLTRB(10, 10, 120, 90),
+    );
   });
 
   test('a drag up and to the left still yields a normalised region', () {
     final delegate = MockToolDelegate();
     final handler = OcrToolHandler(delegate);
 
-    handler.onPanStart(_dragStart(const Offset(200, 160)), const Offset(200, 160));
-    handler.onPanUpdate(_dragUpdate(const Offset(40, 20)), const Offset(40, 20));
+    handler.onPanStart(
+      _dragStart(const Offset(200, 160)),
+      const Offset(200, 160),
+    );
+    handler.onPanUpdate(
+      _dragUpdate(const Offset(40, 20)),
+      const Offset(40, 20),
+    );
     handler.onPanEnd(_dragEnd());
 
-    expect(delegate.extractTextRegions.single, const Rect.fromLTRB(40, 20, 200, 160));
+    expect(
+      delegate.extractTextRegions.single,
+      const Rect.fromLTRB(40, 20, 200, 160),
+    );
   });
 
   test('a tap with no drag requests whole-image extraction', () {
@@ -75,7 +90,10 @@ void main() {
     final handler = OcrToolHandler(delegate);
 
     handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
-    handler.onPanUpdate(_dragUpdate(const Offset(12, 11)), const Offset(12, 11));
+    handler.onPanUpdate(
+      _dragUpdate(const Offset(12, 11)),
+      const Offset(12, 11),
+    );
     handler.onPanEnd(_dragEnd());
 
     expect(delegate.extractTextRegions.single, isNull);
@@ -88,7 +106,10 @@ void main() {
     final handler = OcrToolHandler(delegate);
 
     handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
-    handler.onPanUpdate(_dragUpdate(const Offset(400, 13)), const Offset(400, 13));
+    handler.onPanUpdate(
+      _dragUpdate(const Offset(400, 13)),
+      const Offset(400, 13),
+    );
     handler.onPanEnd(_dragEnd());
 
     expect(delegate.extractTextRegions.single, isNull);
@@ -108,7 +129,10 @@ void main() {
     final handler = OcrToolHandler(delegate);
 
     handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
-    handler.onPanUpdate(_dragUpdate(const Offset(120, 90)), const Offset(120, 90));
+    handler.onPanUpdate(
+      _dragUpdate(const Offset(120, 90)),
+      const Offset(120, 90),
+    );
     handler.onPanEnd(_dragEnd());
     handler.onPanEnd(_dragEnd());
 
@@ -228,7 +252,9 @@ void main() {
       }
       // Delete reaches the bitmap through _extractFloatingSelection, so it is
       // covered by the same notification rather than a second one.
-      final del = canvas.indexOf('Future<void> _deleteFloatingSelection() async {');
+      final del = canvas.indexOf(
+        'Future<void> _deleteFloatingSelection() async {',
+      );
       expect(del, isNot(-1));
       expect(
         canvas.substring(del, canvas.indexOf('\n  }', del)),
@@ -242,7 +268,9 @@ void main() {
       // floating-selection handle, press a tool shortcut mid-drag, release:
       // the flag stays set and the next drag rebuilds `_floatingSelectionRect`
       // from a stale origin, conjuring a phantom selection box.
-      final start = canvas.indexOf('if (oldWidget.activeTool != widget.activeTool) {');
+      final start = canvas.indexOf(
+        'if (oldWidget.activeTool != widget.activeTool) {',
+      );
       expect(start, isNot(-1));
       final end = canvas.indexOf('_selectedAnnotationId = null;', start);
       expect(end, isNot(-1));
@@ -266,7 +294,8 @@ void main() {
       expect(
         body,
         contains(r'$_imageRevision'),
-        reason: 'OcrService caches full-image results under whatever key it is '
+        reason:
+            'OcrService caches full-image results under whatever key it is '
             'given and cannot see the bitmap change. _imageRevision is bumped '
             'by crop, flatten, flood fill and undo/redo — without it, OCR '
             'after a crop returns the pre-crop text.',
@@ -291,12 +320,19 @@ void main() {
       final body = _bodyOf(source, 'Future<void> _handleExtractText(');
       final probe = body.indexOf('_ocrService.availability()');
       final call = body.indexOf('_ocrService.recognizeCapture(');
-      expect(probe, isNot(-1),
-          reason: 'an unavailable engine and a blank region both return '
-              'OcrResult.empty; only availability() separates them');
+      expect(
+        probe,
+        isNot(-1),
+        reason:
+            'an unavailable engine and a blank region both return '
+            'OcrResult.empty; only availability() separates them',
+      );
       expect(call, isNot(-1));
       expect(probe, lessThan(call));
-      expect(body, contains('_ocrUnavailableReason = availability.reason'));
+      expect(
+        body,
+        matches(RegExp(r'_ocrUnavailableReason\s*=\s*availability\.reason')),
+      );
     });
 
     test('switching captures drops the cache and closes the panel', () {
@@ -308,8 +344,11 @@ void main() {
       final reset = source.indexOf('_resetOcr();', selection);
       final assigned = source.indexOf('_activeCapture = item;', selection);
       expect(reset, isNot(-1));
-      expect(reset, lessThan(assigned),
-          reason: 'stale results must not survive the switch');
+      expect(
+        reset,
+        lessThan(assigned),
+        reason: 'stale results must not survive the switch',
+      );
     });
 
     test('the canvas callback is wired to the handler', () {
@@ -323,7 +362,8 @@ void main() {
       expect(
         body,
         contains('withCanvasSpaceScalars('),
-        reason: 'ToolProperties values are canvas units and the annotation is '
+        reason:
+            'ToolProperties values are canvas units and the annotation is '
             'image space; storing fontSize raw renders the inserted text at '
             'a fraction of its size on any downscaled capture',
       );
@@ -332,7 +372,8 @@ void main() {
       expect(
         body,
         contains('if (projection == null || !projection.isValid)'),
-        reason: 'withCanvasSpaceScalars silently returns the annotation '
+        reason:
+            'withCanvasSpaceScalars silently returns the annotation '
             'untouched on a degenerate projection, which would look like a '
             'successful insert at the model default size',
       );
@@ -348,11 +389,15 @@ void main() {
       // The cache key stops matching only because _imageRevision moved, and
       // the open panel stops showing pre-edit text only because _resetOcr ran.
       // A call site that does one and forgets the other is the bug.
-      expect(_bodyOf(source, 'void _bumpImageRevision('), contains('_resetOcr()'));
+      expect(
+        _bodyOf(source, 'void _bumpImageRevision('),
+        contains('_resetOcr()'),
+      );
       expect(
         '_imageRevision++'.allMatches(source).length,
         1,
-        reason: 'the only bare increment must be the one inside '
+        reason:
+            'the only bare increment must be the one inside '
             '_bumpImageRevision; every other site goes through it',
       );
       expect(source, contains('onImageBytesChanged: () {'));

@@ -8,20 +8,32 @@ class ClipboardService {
     try {
       if (Platform.isMacOS) {
         final escapedPath = filePath.replaceAll('"', '\\"');
-        final script = 'set the clipboard to (read (POSIX file "$escapedPath") as «class PNGf»)';
+        final script =
+            'set the clipboard to (read (POSIX file "$escapedPath") as «class PNGf»)';
         final result = await Process.run('osascript', ['-e', script]);
         return result.exitCode == 0;
       } else if (Platform.isWindows) {
         final winPath = filePath.replaceAll('/', '\\').replaceAll('"', '\\"');
-        final script = 'Add-Type -AssemblyName System.Windows.Forms,System.Drawing; [System.Windows.Forms.Clipboard]::SetImage([System.Drawing.Image]::FromFile("$winPath"))';
+        final script =
+            'Add-Type -AssemblyName System.Windows.Forms,System.Drawing; [System.Windows.Forms.Clipboard]::SetImage([System.Drawing.Image]::FromFile("$winPath"))';
         // `-Sta`: the clipboard APIs need a single-threaded apartment, and
         // without it the copy throws instead of copying.
-        final result = await Process.run(
-            'powershell', ['-NoProfile', '-Sta', '-Command', script]);
+        final result = await Process.run('powershell', [
+          '-NoProfile',
+          '-Sta',
+          '-Command',
+          script,
+        ]);
         return result.exitCode == 0;
       } else if (Platform.isLinux) {
-        final result = await Process.run(
-            'xclip', ['-selection', 'clipboard', '-t', 'image/png', '-i', filePath]);
+        final result = await Process.run('xclip', [
+          '-selection',
+          'clipboard',
+          '-t',
+          'image/png',
+          '-i',
+          filePath,
+        ]);
         if (result.exitCode == 0) return true;
 
         // Wayland fallback. `wl-copy` reads the image from stdin, so the file

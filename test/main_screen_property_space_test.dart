@@ -21,7 +21,11 @@ String _bodyOf(String source, String signature) {
   final bodyStart = signature.contains('(')
       ? source.indexOf(') {\n', start)
       : start + signature.length;
-  expect(bodyStart, isNot(-1), reason: 'could not find the body of `$signature`');
+  expect(
+    bodyStart,
+    isNot(-1),
+    reason: 'could not find the body of `$signature`',
+  );
   final end = source.indexOf('\n  }', bodyStart);
   expect(end, isNot(-1), reason: 'could not find the end of `$signature`');
   return source.substring(bodyStart, end);
@@ -39,16 +43,16 @@ void main() {
   );
 
   Annotation arrow({double strokeWidth = 10.0}) => Annotation(
-        id: 'a',
-        tool: CanvasTool.arrow,
-        color: const Color(0xFFFF0000),
-        strokeWidth: strokeWidth,
-        fontSize: 20.0,
-        borderRadius: 16.0,
-        blurStrength: 20.0,
-        startPoint: const Offset(100, 100),
-        endPoint: const Offset(900, 700),
-      );
+    id: 'a',
+    tool: CanvasTool.arrow,
+    color: const Color(0xFFFF0000),
+    strokeWidth: strokeWidth,
+    fontSize: 20.0,
+    borderRadius: 16.0,
+    blurStrength: 20.0,
+    startPoint: const Offset(100, 100),
+    endPoint: const Offset(900, 700),
+  );
 
   group('toolbar property writes', () {
     test('slider values land in the stored annotation as image pixels', () {
@@ -100,7 +104,10 @@ void main() {
       // everything the user picked above ~24 rendered back identically while
       // the readout kept showing their number. Half the slider's travel was
       // dead on the app's most common capture type.
-      final stored = arrow().withCanvasSpaceScalars(projection, blurStrength: 50);
+      final stored = arrow().withCanvasSpaceScalars(
+        projection,
+        blurStrength: 50,
+      );
       expect(stored.blurStrength, closeTo(126.0, 1e-9));
 
       // ...and it must survive the trip back out to the toolbar and the
@@ -118,19 +125,21 @@ void main() {
       expect(tiny.blurStrength, 1.0);
     });
 
-    test('a degenerate projection declines the write instead of corrupting it',
-        () {
-      final stored = arrow();
-      // Canvas not laid out yet: canvas units cannot be converted, so the
-      // stored image-space values must survive unchanged rather than be
-      // overwritten with display numbers.
-      final noCanvas = CanvasProjection(
-        imageSize: const Size(3024, 1890),
-        canvasSize: Size.zero,
-      );
-      expect(stored.withCanvasSpaceScalars(noCanvas, strokeWidth: 6), stored);
-      expect(stored.withCanvasSpaceScalars(null, strokeWidth: 6), stored);
-    });
+    test(
+      'a degenerate projection declines the write instead of corrupting it',
+      () {
+        final stored = arrow();
+        // Canvas not laid out yet: canvas units cannot be converted, so the
+        // stored image-space values must survive unchanged rather than be
+        // overwritten with display numbers.
+        final noCanvas = CanvasProjection(
+          imageSize: const Size(3024, 1890),
+          canvasSize: Size.zero,
+        );
+        expect(stored.withCanvasSpaceScalars(noCanvas, strokeWidth: 6), stored);
+        expect(stored.withCanvasSpaceScalars(null, strokeWidth: 6), stored);
+      },
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -158,7 +167,8 @@ void main() {
       expect(
         body,
         contains('withCanvasSpaceScalars('),
-        reason: 'the toolbar sliders are in canvas units and _annotations is '
+        reason:
+            'the toolbar sliders are in canvas units and _annotations is '
             'in image pixels; writing them directly stores display numbers',
       );
       expect(body, contains('_activeProjection'));
@@ -183,7 +193,8 @@ void main() {
         expect(
           unconverted,
           isNot(contains('$scalar:')),
-          reason: '$scalar is a length: passing it to copyWith stores a canvas '
+          reason:
+              '$scalar is a length: passing it to copyWith stores a canvas '
               'value in image-pixel storage',
         );
       });
@@ -218,7 +229,8 @@ void main() {
       expect(
         body,
         isNot(contains('capture.width')),
-        reason: 'CaptureItem.width is a persisted copy that undo can leave '
+        reason:
+            'CaptureItem.width is a persisted copy that undo can leave '
             'stale; a projection built from it rescales every later edit',
       );
       expect(body, isNot(contains('capture.height')));
@@ -230,7 +242,8 @@ void main() {
       expect(
         body,
         contains('decoded.path != capture.filePath'),
-        reason: 'a decode left over from a capture the user switched away '
+        reason:
+            'a decode left over from a capture the user switched away '
             'from would project at the wrong scale',
       );
     });

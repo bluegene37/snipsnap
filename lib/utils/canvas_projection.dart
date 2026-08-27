@@ -57,11 +57,15 @@ class CanvasProjection {
     );
   }
 
-  Rect toImageRect(Rect canvasRect) =>
-      Rect.fromPoints(toImage(canvasRect.topLeft), toImage(canvasRect.bottomRight));
+  Rect toImageRect(Rect canvasRect) => Rect.fromPoints(
+    toImage(canvasRect.topLeft),
+    toImage(canvasRect.bottomRight),
+  );
 
-  Rect toCanvasRect(Rect imagePixelRect) =>
-      Rect.fromPoints(toCanvas(imagePixelRect.topLeft), toCanvas(imagePixelRect.bottomRight));
+  Rect toCanvasRect(Rect imagePixelRect) => Rect.fromPoints(
+    toCanvas(imagePixelRect.topLeft),
+    toCanvas(imagePixelRect.bottomRight),
+  );
 
   double toImageLength(double canvasLength) => canvasLength * scale;
 
@@ -109,18 +113,23 @@ CoordSpace coordSpaceByName(String? name) {
 /// leave the pending-conversion state as-is and let a later attempt (with a
 /// laid-out canvas) retry, rather than permanently mislabeling still-viewport
 /// data as image pixels.
-({List<Annotation> annotations, bool converted}) convertLegacyAnnotationsChecked({
+({List<Annotation> annotations, bool converted})
+convertLegacyAnnotationsChecked({
   required List<Annotation> annotations,
   required Size imageSize,
   required Size canvasSize,
 }) {
-  final projection =
-      CanvasProjection(imageSize: imageSize, canvasSize: canvasSize);
+  final projection = CanvasProjection(
+    imageSize: imageSize,
+    canvasSize: canvasSize,
+  );
   if (!projection.isValid) {
     return (annotations: annotations, converted: false);
   }
   return (
-    annotations: annotations.map((a) => a.mappedToImageSpace(projection)).toList(),
+    annotations: annotations
+        .map((a) => a.mappedToImageSpace(projection))
+        .toList(),
     converted: true,
   );
 }

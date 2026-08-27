@@ -33,7 +33,14 @@ Future<void> showSnipColorPicker({
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: t.surfaceRaised,
-      title: Text(title, style: TextStyle(color: t.ink, fontSize: 16, fontWeight: FontWeight.bold)),
+      title: Text(
+        title,
+        style: TextStyle(
+          color: t.ink,
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
       content: SnipColorPicker(
         initialColor: initialColor,
         onColorChanged: (c) {
@@ -45,13 +52,18 @@ Future<void> showSnipColorPicker({
         if (onSaveColor != null)
           TextButton.icon(
             icon: Icon(Icons.bookmark_add_outlined, size: 16, color: t.ink),
-            label: Text('Save Color',
-                style: TextStyle(color: t.ink, fontWeight: FontWeight.w600)),
+            label: Text(
+              'Save Color',
+              style: TextStyle(color: t.ink, fontWeight: FontWeight.w600),
+            ),
             onPressed: () => onSaveColor(current),
           ),
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(),
-          child: Text('Done', style: TextStyle(color: t.emphasis, fontWeight: FontWeight.bold)),
+          child: Text(
+            'Done',
+            style: TextStyle(color: t.emphasis, fontWeight: FontWeight.bold),
+          ),
         ),
       ],
     ),
@@ -209,7 +221,11 @@ class _SnipColorPickerState extends State<SnipColorPicker> {
               Expanded(
                 child: TextField(
                   controller: _hexController,
-                  style: TextStyle(color: t.ink, fontSize: 13, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    color: t.ink,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                   inputFormatters: [
                     LengthLimitingTextInputFormatter(9),
                     FilteringTextInputFormatter.allow(RegExp(r'[#0-9a-fA-F]')),
@@ -218,14 +234,23 @@ class _SnipColorPickerState extends State<SnipColorPicker> {
                     isDense: true,
                     labelText: 'Hex',
                     labelStyle: TextStyle(color: t.inkMuted, fontSize: 12),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(t.radius),
-                      borderSide: BorderSide(color: t.border, width: t.hairline),
+                      borderSide: BorderSide(
+                        color: t.border,
+                        width: t.hairline,
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(t.radius),
-                      borderSide: BorderSide(color: t.borderStrong, width: t.hairline),
+                      borderSide: BorderSide(
+                        color: t.borderStrong,
+                        width: t.hairline,
+                      ),
                     ),
                   ),
                   onTap: () => _editingHex = true,
@@ -272,12 +297,13 @@ class _PickerSurface extends StatelessWidget {
     return Builder(
       builder: (inner) => RawGestureDetector(
         gestures: {
-          _EagerPanRecognizer: GestureRecognizerFactoryWithHandlers<_EagerPanRecognizer>(
-            _EagerPanRecognizer.new,
-            (instance) => instance
-              ..onDown = ((d) => _handle(inner, d.globalPosition))
-              ..onUpdate = ((d) => _handle(inner, d.globalPosition)),
-          ),
+          _EagerPanRecognizer:
+              GestureRecognizerFactoryWithHandlers<_EagerPanRecognizer>(
+                _EagerPanRecognizer.new,
+                (instance) => instance
+                  ..onDown = ((d) => _handle(inner, d.globalPosition))
+                  ..onUpdate = ((d) => _handle(inner, d.globalPosition)),
+              ),
         },
         child: child,
       ),
@@ -332,7 +358,8 @@ class _SaturationValuePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_SaturationValuePainter oldDelegate) => oldDelegate.hsv != hsv;
+  bool shouldRepaint(_SaturationValuePainter oldDelegate) =>
+      oldDelegate.hsv != hsv;
 }
 
 /// The 0-360° hue rail with its position ring.
@@ -349,7 +376,8 @@ class _HueRailPainter extends CustomPainter {
       Paint()
         ..shader = LinearGradient(
           colors: [
-            for (var i = 0; i <= 6; i++) HSVColor.fromAHSV(1, i * 60.0 % 360, 1, 1).toColor(),
+            for (var i = 0; i <= 6; i++)
+              HSVColor.fromAHSV(1, i * 60.0 % 360, 1, 1).toColor(),
           ],
         ).createShader(rect),
     );
@@ -362,7 +390,8 @@ class _HueRailPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_HueRailPainter oldDelegate) => oldDelegate.hsv.hue != hsv.hue;
+  bool shouldRepaint(_HueRailPainter oldDelegate) =>
+      oldDelegate.hsv.hue != hsv.hue;
 }
 
 /// The transparent -> opaque rail for the current hue, over a checkerboard.
@@ -375,7 +404,12 @@ class _AlphaRailPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     paintCheckerboard(canvas, size);
-    final opaque = HSVColor.fromAHSV(1, hsv.hue, hsv.saturation, hsv.value).toColor();
+    final opaque = HSVColor.fromAHSV(
+      1,
+      hsv.hue,
+      hsv.saturation,
+      hsv.value,
+    ).toColor();
     canvas.drawRect(
       rect,
       Paint()
@@ -383,8 +417,12 @@ class _AlphaRailPainter extends CustomPainter {
           colors: [opaque.withValues(alpha: 0), opaque],
         ).createShader(rect),
     );
-    _drawThumb(canvas, Offset(size.width * hsv.alpha, size.height / 2), opaque,
-        radius: size.height / 2 - 1);
+    _drawThumb(
+      canvas,
+      Offset(size.width * hsv.alpha, size.height / 2),
+      opaque,
+      radius: size.height / 2 - 1,
+    );
   }
 
   @override
@@ -393,7 +431,12 @@ class _AlphaRailPainter extends CustomPainter {
 
 /// The position ring, drawn as a black hairline inside a white one so it stays
 /// visible over any part of the gradient it lands on.
-void _drawThumb(Canvas canvas, Offset center, Color under, {double radius = 8}) {
+void _drawThumb(
+  Canvas canvas,
+  Offset center,
+  Color under, {
+  double radius = 8,
+}) {
   canvas.drawCircle(
     center,
     radius,
@@ -425,7 +468,12 @@ void paintCheckerboard(Canvas canvas, Size size) {
     var col = 0;
     for (var x = 0.0; x < size.width; x += cell) {
       canvas.drawRect(
-        Rect.fromLTWH(x, y, math.min(cell, size.width - x), math.min(cell, size.height - y)),
+        Rect.fromLTWH(
+          x,
+          y,
+          math.min(cell, size.width - x),
+          math.min(cell, size.height - y),
+        ),
         (row + col) % 2 == 0 ? light : dark,
       );
       col++;

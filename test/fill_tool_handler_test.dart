@@ -45,12 +45,12 @@ class _RecordingDelegate implements ToolDelegate {
 TapUpDetails _tap() => TapUpDetails(kind: PointerDeviceKind.mouse);
 
 Annotation _annotation(CanvasTool tool) => Annotation(
-      id: 'a1',
-      tool: tool,
-      color: const Color(0xFFEF4444),
-      startPoint: const Offset(10, 10),
-      endPoint: const Offset(90, 90),
-    );
+  id: 'a1',
+  tool: tool,
+  color: const Color(0xFFEF4444),
+  startPoint: const Offset(10, 10),
+  endPoint: const Offset(90, 90),
+);
 
 void main() {
   test('tapping a closed shape fills that shape', () {

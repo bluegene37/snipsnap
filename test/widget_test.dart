@@ -14,8 +14,8 @@ void main() {
   const channel = MethodChannel('plugins.flutter.io/path_provider');
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-    return Directory.systemTemp.path;
-  });
+        return Directory.systemTemp.path;
+      });
 
   test('CustomShortcut model and JSON serialization', () {
     final shortcut = CustomShortcut(
@@ -93,19 +93,28 @@ void main() {
   test('every tool in the sidebar has default properties', () {
     final defaults = ToolProperties.createDefaults();
     for (final item in ToolSidebar.tools) {
-      expect(defaults.containsKey(item.tool), isTrue,
-          reason: '${item.tool} is offered in the sidebar but has no defaults');
+      expect(
+        defaults.containsKey(item.tool),
+        isTrue,
+        reason: '${item.tool} is offered in the sidebar but has no defaults',
+      );
     }
   });
 
   test('Flatten shortcut display properties', () {
     expect(AppShortcutAction.flattenCanvas.displayName, 'Flatten Annotations');
-    expect(AppShortcutAction.flattenCanvas.description, contains('Bake all annotations'));
+    expect(
+      AppShortcutAction.flattenCanvas.description,
+      contains('Bake all annotations'),
+    );
   });
 
-  test('StorageService library directory contains SnipSnap/Captures path', () async {
-    final dir = await StorageService.getLibraryDirectory();
-    expect(dir.path, contains('SnipSnap'));
-    expect(dir.path, contains('Captures'));
-  });
+  test(
+    'StorageService library directory contains SnipSnap/Captures path',
+    () async {
+      final dir = await StorageService.getLibraryDirectory();
+      expect(dir.path, contains('SnipSnap'));
+      expect(dir.path, contains('Captures'));
+    },
+  );
 }

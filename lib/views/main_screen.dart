@@ -191,7 +191,9 @@ SwitchThemeData snipSwitchTheme(SnipTheme t) {
     }),
     trackColor: WidgetStateProperty.resolveWith((states) {
       if (states.contains(WidgetState.selected)) {
-        return states.contains(WidgetState.disabled) ? t.selectedFill : t.activeFill;
+        return states.contains(WidgetState.disabled)
+            ? t.selectedFill
+            : t.activeFill;
       }
       // No fill when off — the outline is the control, per the resting-state
       // convention in SnipTheme.controlDecoration.
@@ -199,12 +201,15 @@ SwitchThemeData snipSwitchTheme(SnipTheme t) {
     }),
     trackOutlineColor: WidgetStateProperty.resolveWith((states) {
       if (states.contains(WidgetState.selected)) {
-        return states.contains(WidgetState.disabled) ? t.selectedFill : t.activeFill;
+        return states.contains(WidgetState.disabled)
+            ? t.selectedFill
+            : t.activeFill;
       }
       if (states.contains(WidgetState.disabled)) return t.border;
       // Hover strengthens the hairline, matching controlDecoration's
       // border -> borderStrong hover step.
-      return states.contains(WidgetState.hovered) || states.contains(WidgetState.pressed)
+      return states.contains(WidgetState.hovered) ||
+              states.contains(WidgetState.pressed)
           ? t.borderStrong
           : t.inkMuted;
     }),
@@ -220,10 +225,7 @@ class CanvasSnapshot {
   final Uint8List? imageBytes;
   final List<Annotation> annotations;
 
-  CanvasSnapshot({
-    this.imageBytes,
-    required this.annotations,
-  });
+  CanvasSnapshot({this.imageBytes, required this.annotations});
 }
 
 class MainScreen extends StatefulWidget {
@@ -291,14 +293,16 @@ class _MainScreenState extends State<MainScreen> {
 
   void _setActiveTool(CanvasTool tool) {
     if (tool == CanvasTool.colorPicker) {
-      if (_activeTool != CanvasTool.colorPicker && _activeTool != CanvasTool.select) {
+      if (_activeTool != CanvasTool.colorPicker &&
+          _activeTool != CanvasTool.select) {
         _previousToolBeforeEyedropper = _activeTool;
       }
     }
     setState(() => _activeTool = tool);
   }
 
-  final Map<CanvasTool, ToolProperties> _toolPropertiesMap = ToolProperties.createDefaults();
+  final Map<CanvasTool, ToolProperties> _toolPropertiesMap =
+      ToolProperties.createDefaults();
   double _zoomScale = 1.0;
   int _stepCounter = 1;
   bool _isSidebarOpen = true;
@@ -443,7 +447,8 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
 
   /// Handed to the [MaterialApp] below, and the **only** context this State
   /// may pass to `showDialog`.
@@ -469,7 +474,8 @@ class _MainScreenState extends State<MainScreen> {
   /// first frame, which no dialog trigger can precede.
   BuildContext? get _dialogContext => _navigatorKey.currentContext;
 
-  Map<AppShortcutAction, CustomShortcut> _shortcuts = ShortcutService.getDefaultShortcuts();
+  Map<AppShortcutAction, CustomShortcut> _shortcuts =
+      ShortcutService.getDefaultShortcuts();
 
   /// User-saved custom colours, shown as extra swatches in every colour
   /// palette (fill bucket included) and persisted across sessions.
@@ -523,7 +529,9 @@ class _MainScreenState extends State<MainScreen> {
       // Oldest out first once the strip is full — a bounded strip stays
       // scannable, and the newest save is always present.
       if (_savedColors.length > _maxSavedColors) {
-        _savedColors = _savedColors.sublist(_savedColors.length - _maxSavedColors);
+        _savedColors = _savedColors.sublist(
+          _savedColors.length - _maxSavedColors,
+        );
       }
     });
     _persistSavedColors();
@@ -532,8 +540,9 @@ class _MainScreenState extends State<MainScreen> {
 
   void _handleRemoveSavedColor(Color color) {
     setState(() {
-      _savedColors =
-          _savedColors.where((c) => c.toARGB32() != color.toARGB32()).toList();
+      _savedColors = _savedColors
+          .where((c) => c.toARGB32() != color.toARGB32())
+          .toList();
     });
     _persistSavedColors();
   }
@@ -607,7 +616,9 @@ class _MainScreenState extends State<MainScreen> {
     // nothing — the pending conversion will persist them once it runs.
     if (_activeCapture!.annotationsNeedConversion) return;
 
-    final updatedItem = _activeCapture!.copyWith(annotations: List.from(_annotations));
+    final updatedItem = _activeCapture!.copyWith(
+      annotations: List.from(_annotations),
+    );
     _activeCapture = updatedItem;
 
     final idx = _captures.indexWhere((c) => c.id == updatedItem.id);
@@ -635,7 +646,9 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _loadHistory() async {
     final items = await StorageService.loadHistory();
-    final savedSelectedId = await DatabaseService.getSetting('active_capture_id');
+    final savedSelectedId = await DatabaseService.getSetting(
+      'active_capture_id',
+    );
 
     if (mounted) {
       setState(() {
@@ -675,10 +688,15 @@ class _MainScreenState extends State<MainScreen> {
     // common case for existing installs. Decode once to recover them.
     if (!capture.hasDimensions) {
       try {
-        final decoded =
-            await compute(img.decodeImage, await File(capture.filePath).readAsBytes());
+        final decoded = await compute(
+          img.decodeImage,
+          await File(capture.filePath).readAsBytes(),
+        );
         if (decoded == null) return;
-        capture = capture.copyWith(width: decoded.width, height: decoded.height);
+        capture = capture.copyWith(
+          width: decoded.width,
+          height: decoded.height,
+        );
       } catch (e) {
         debugPrint('SnipSnap legacy dimension read error: $e');
         return;
@@ -745,8 +763,10 @@ class _MainScreenState extends State<MainScreen> {
     // presses it and nothing happens, forever. Say so once, when it is set.
     if (!mounted || failed.isEmpty) return;
     final names = failed.map((a) => a.displayName).join(', ');
-    _showToast('The system already owns the shortcut for $names. '
-        'Pick another in Keyboard Shortcuts.');
+    _showToast(
+      'The system already owns the shortcut for $names. '
+      'Pick another in Keyboard Shortcuts.',
+    );
   }
 
   Future<void> _openShortcutSettingsDialog() async {
@@ -871,7 +891,10 @@ class _MainScreenState extends State<MainScreen> {
   /// the image file (crop, flatten, flood fill). Vector-only edits store just
   /// the annotation list, which keeps the history cheap — a full-resolution
   /// screenshot copy per annotation would exhaust memory in a long session.
-  Future<void> _pushUndoState({Uint8List? imageBytes, bool captureImage = false}) async {
+  Future<void> _pushUndoState({
+    Uint8List? imageBytes,
+    bool captureImage = false,
+  }) async {
     _propertyUndoAnnotationId = null;
 
     Uint8List? bytes = imageBytes;
@@ -882,10 +905,9 @@ class _MainScreenState extends State<MainScreen> {
       bytes = await File(_activeCapture!.filePath).readAsBytes();
     }
 
-    _undoStack.add(CanvasSnapshot(
-      imageBytes: bytes,
-      annotations: List.from(_annotations),
-    ));
+    _undoStack.add(
+      CanvasSnapshot(imageBytes: bytes, annotations: List.from(_annotations)),
+    );
     _trimUndoStack();
     _redoStack.clear();
   }
@@ -969,7 +991,8 @@ class _MainScreenState extends State<MainScreen> {
     if (!availability.available) {
       setState(() {
         _isOcrRunning = false;
-        _ocrUnavailableReason = availability.reason ??
+        _ocrUnavailableReason =
+            availability.reason ??
             'Text extraction is not available on this system.';
         _ocrResult = OcrResult.empty;
       });
@@ -1041,25 +1064,27 @@ class _MainScreenState extends State<MainScreen> {
     // The Text tool's own defaults, not `_currentToolProperties` — that would
     // read the OCR tool's placeholder style and drop an accent-coloured
     // caption at the wrong size.
-    final style = _toolPropertiesMap[CanvasTool.text] ??
+    final style =
+        _toolPropertiesMap[CanvasTool.text] ??
         const ToolProperties(activeColor: Colors.white);
 
-    final annotation = Annotation(
-      id: const Uuid().v4(),
-      tool: CanvasTool.text,
-      color: style.activeColor,
-      backgroundColor: style.textBackgroundColor,
-      fill: style.isFilled,
-      opacity: style.opacity,
-      text: text,
-      startPoint: const Offset(40, 40),
-    ).withCanvasSpaceScalars(
-      projection,
-      strokeWidth: style.strokeWidth,
-      fontSize: style.fontSize,
-      borderRadius: style.borderRadius,
-      blurStrength: style.blurStrength,
-    );
+    final annotation =
+        Annotation(
+          id: const Uuid().v4(),
+          tool: CanvasTool.text,
+          color: style.activeColor,
+          backgroundColor: style.textBackgroundColor,
+          fill: style.isFilled,
+          opacity: style.opacity,
+          text: text,
+          startPoint: const Offset(40, 40),
+        ).withCanvasSpaceScalars(
+          projection,
+          strokeWidth: style.strokeWidth,
+          fontSize: style.fontSize,
+          borderRadius: style.borderRadius,
+          blurStrength: style.blurStrength,
+        );
 
     _onAnnotationAdded(annotation);
     setState(() {
@@ -1095,8 +1120,12 @@ class _MainScreenState extends State<MainScreen> {
   void _deleteSelectedAnnotation() {
     if (_selectedAnnotationId == null) return;
     _pushUndoState();
-    final deletingAnn = _annotations.where((a) => a.id == _selectedAnnotationId).firstOrNull;
-    final remaining = _annotations.where((a) => a.id != _selectedAnnotationId).toList();
+    final deletingAnn = _annotations
+        .where((a) => a.id == _selectedAnnotationId)
+        .firstOrNull;
+    final remaining = _annotations
+        .where((a) => a.id != _selectedAnnotationId)
+        .toList();
 
     // Auto re-sequence step markers if a step marker was deleted
     if (deletingAnn != null && deletingAnn.tool == CanvasTool.stepMarker) {
@@ -1196,16 +1225,21 @@ class _MainScreenState extends State<MainScreen> {
         File(capture.filePath).existsSync()) {
       currentBytes = await File(capture.filePath).readAsBytes();
     }
-    pushTo.add(CanvasSnapshot(
-      imageBytes: currentBytes,
-      annotations: List.from(_annotations),
-    ));
+    pushTo.add(
+      CanvasSnapshot(
+        imageBytes: currentBytes,
+        annotations: List.from(_annotations),
+      ),
+    );
     // This is the one push that does not go through `_pushUndoState`, so it is
     // also the one that could grow a stack past the budget unchecked.
     _trimUndoStack();
 
     if (snapshot.imageBytes != null && capture != null) {
-      await _replaceActiveImageBytes(snapshot.imageBytes!, targetPath: capture.filePath);
+      await _replaceActiveImageBytes(
+        snapshot.imageBytes!,
+        targetPath: capture.filePath,
+      );
     }
 
     // The selection can move during the file read and write above; applying
@@ -1253,8 +1287,10 @@ class _MainScreenState extends State<MainScreen> {
   Future<bool> _ensureCapturePermission() async {
     if (await _captureService.hasScreenCapturePermission()) return true;
     if (!mounted) return false;
-    _showToast('snipsnap needs Screen Recording access. Grant it in System '
-        'Settings > Privacy & Security, then relaunch the app.');
+    _showToast(
+      'snipsnap needs Screen Recording access. Grant it in System '
+      'Settings > Privacy & Security, then relaunch the app.',
+    );
     return false;
   }
 
@@ -1324,7 +1360,10 @@ class _MainScreenState extends State<MainScreen> {
     int width = 0;
     int height = 0;
     try {
-      final decoded = await compute(img.decodeImage, await File(path).readAsBytes());
+      final decoded = await compute(
+        img.decodeImage,
+        await File(path).readAsBytes(),
+      );
       if (decoded != null) {
         width = decoded.width;
         height = decoded.height;
@@ -1337,7 +1376,8 @@ class _MainScreenState extends State<MainScreen> {
     final newItem = CaptureItem(
       id: '${now.millisecondsSinceEpoch}_${_captures.length}',
       filePath: path,
-      title: 'Snap ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}',
+      title:
+          'Snap ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}',
       createdAt: now,
       width: width,
       height: height,
@@ -1386,7 +1426,9 @@ class _MainScreenState extends State<MainScreen> {
     final decoded = _decodedImage;
     // The path check rejects a decode left over from a capture the user has
     // since switched away from.
-    if (capture == null || decoded == null || decoded.path != capture.filePath) {
+    if (capture == null ||
+        decoded == null ||
+        decoded.path != capture.filePath) {
       return null;
     }
     final projection = CanvasProjection(
@@ -1411,7 +1453,8 @@ class _MainScreenState extends State<MainScreen> {
     // with it is repaired here rather than left to rot. This is what makes an
     // undo that restores a pre-crop bitmap also restore the recorded row.
     final isActive = capture != null && capture.filePath == imagePath;
-    final needsRepair = isActive &&
+    final needsRepair =
+        isActive &&
         (capture.width != imageSize.width.round() ||
             capture.height != imageSize.height.round());
 
@@ -1440,8 +1483,10 @@ class _MainScreenState extends State<MainScreen> {
   /// for a degenerate canvas.
   bool _blockedByPendingConversion(String action) {
     if (!(_activeCapture?.annotationsNeedConversion ?? false)) return false;
-    _showToast('Cannot $action yet: this capture is still being upgraded. '
-        'Try again in a moment.');
+    _showToast(
+      'Cannot $action yet: this capture is still being upgraded. '
+      'Try again in a moment.',
+    );
     return true;
   }
 
@@ -1515,62 +1560,69 @@ class _MainScreenState extends State<MainScreen> {
     if (!mounted) return;
 
     // Not awaited: the confirm callback owns everything that happens next.
-    unawaited(showDialog<void>(
-      context: _dialogContext!,
-      builder: (ctx) => SaveAsDialog(
-        initialName: capture.title,
-        onConfirm: (options) async {
-          await Future<void>.delayed(const Duration(milliseconds: 150));
-          final gradient = (options.gradientIndex != null &&
-                  options.gradientIndex! >= 0 &&
-                  options.gradientIndex! < AppColors.framingGradients.length)
-              ? AppColors.framingGradients[options.gradientIndex!]
-              : null;
+    unawaited(
+      showDialog<void>(
+        context: _dialogContext!,
+        builder: (ctx) => SaveAsDialog(
+          initialName: capture.title,
+          onConfirm: (options) async {
+            await Future<void>.delayed(const Duration(milliseconds: 150));
+            final gradient =
+                (options.gradientIndex != null &&
+                    options.gradientIndex! >= 0 &&
+                    options.gradientIndex! < AppColors.framingGradients.length)
+                ? AppColors.framingGradients[options.gradientIndex!]
+                : null;
 
-          final wantsFraming = options.framingPadding > 0 ||
-              options.cornerRadius > 0 ||
-              options.shadowBlur > 0 ||
-              gradient != null;
+            final wantsFraming =
+                options.framingPadding > 0 ||
+                options.cornerRadius > 0 ||
+                options.shadowBlur > 0 ||
+                gradient != null;
 
-          Uint8List exportBytes = bytes;
-          if (wantsFraming) {
-            // Re-renders from scratch because framing changes the output
-            // dimensions. The canvas can have gone away since the dialog
-            // opened, so this call carries the same loud-failure contract as
-            // the one in _renderAnnotatedBytes.
-            try {
-              exportBytes = await RenderService.renderFlattenedPng(
-                    imagePath: capture.filePath,
-                    annotations: _annotations,
-                    canvasSize: _canvasSize,
-                    framingPadding: options.framingPadding,
-                    cornerRadius: options.cornerRadius,
-                    shadowBlur: options.shadowBlur,
-                    framingGradient: gradient,
-                  ) ??
-                  bytes;
-            } on StateError catch (e) {
-              debugPrint('SnipSnap export error: $e');
-              _showToast('Could not export: the editor is not ready. Try again.');
-              return;
+            Uint8List exportBytes = bytes;
+            if (wantsFraming) {
+              // Re-renders from scratch because framing changes the output
+              // dimensions. The canvas can have gone away since the dialog
+              // opened, so this call carries the same loud-failure contract as
+              // the one in _renderAnnotatedBytes.
+              try {
+                exportBytes =
+                    await RenderService.renderFlattenedPng(
+                      imagePath: capture.filePath,
+                      annotations: _annotations,
+                      canvasSize: _canvasSize,
+                      framingPadding: options.framingPadding,
+                      cornerRadius: options.cornerRadius,
+                      shadowBlur: options.shadowBlur,
+                      framingGradient: gradient,
+                    ) ??
+                    bytes;
+              } on StateError catch (e) {
+                debugPrint('SnipSnap export error: $e');
+                _showToast(
+                  'Could not export: the editor is not ready. Try again.',
+                );
+                return;
+              }
             }
-          }
 
-          final savedPath = await StorageService.exportImageDialogWithFormat(
-            bytes: exportBytes,
-            fileName: options.fileName,
-            isJpg: options.format == SaveFormat.jpg,
-            jpgQuality: options.quality,
-            customFolderPath: options.customFolderPath,
-          );
-          if (savedPath != null) {
-            _showToast('Saved screenshot to: ${p.basename(savedPath)}');
-          } else {
-            _showToast('Save cancelled');
-          }
-        },
+            final savedPath = await StorageService.exportImageDialogWithFormat(
+              bytes: exportBytes,
+              fileName: options.fileName,
+              isJpg: options.format == SaveFormat.jpg,
+              jpgQuality: options.quality,
+              customFolderPath: options.customFolderPath,
+            );
+            if (savedPath != null) {
+              _showToast('Saved screenshot to: ${p.basename(savedPath)}');
+            } else {
+              _showToast('Save cancelled');
+            }
+          },
+        ),
       ),
-    ));
+    );
   }
 
   /// Writes [bytes] over the active capture's file and evicts that file's
@@ -1585,7 +1637,10 @@ class _MainScreenState extends State<MainScreen> {
   /// every caller reaches this after several awaits, by which point the
   /// selection may have moved on — writing into whatever is selected *now*
   /// would rewrite the wrong capture's file.
-  Future<void> _replaceActiveImageBytes(Uint8List bytes, {required String targetPath}) async {
+  Future<void> _replaceActiveImageBytes(
+    Uint8List bytes, {
+    required String targetPath,
+  }) async {
     await File(targetPath).writeAsBytes(bytes);
     await evictImageFileFromCaches(targetPath);
   }
@@ -1633,7 +1688,8 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _handleSampleColor(Color color) {
-    final targetTool = _selectedAnnotation?.tool ??
+    final targetTool =
+        _selectedAnnotation?.tool ??
         (_previousToolBeforeEyedropper != CanvasTool.colorPicker &&
                 _previousToolBeforeEyedropper != CanvasTool.select
             ? _previousToolBeforeEyedropper
@@ -1644,15 +1700,20 @@ class _MainScreenState extends State<MainScreen> {
       final currentProps =
           _toolPropertiesMap[targetTool] ?? ToolProperties(activeColor: t.ink);
 
-      _toolPropertiesMap[targetTool] = currentProps.copyWith(activeColor: color);
+      _toolPropertiesMap[targetTool] = currentProps.copyWith(
+        activeColor: color,
+      );
       _toolPropertiesMap[CanvasTool.colorPicker] =
-          (_toolPropertiesMap[CanvasTool.colorPicker] ?? ToolProperties(activeColor: t.ink))
+          (_toolPropertiesMap[CanvasTool.colorPicker] ??
+                  ToolProperties(activeColor: t.ink))
               .copyWith(activeColor: color);
 
       _activeTool = targetTool;
 
       if (_selectedAnnotationId != null) {
-        final idx = _annotations.indexWhere((a) => a.id == _selectedAnnotationId);
+        final idx = _annotations.indexWhere(
+          (a) => a.id == _selectedAnnotationId,
+        );
         if (idx != -1) {
           _annotations = List<Annotation>.of(_annotations);
           _annotations[idx] = _annotations[idx].copyWith(color: color);
@@ -1756,13 +1817,16 @@ class _MainScreenState extends State<MainScreen> {
       });
       _syncCurrentCaptureAnnotations();
 
-      final isExpanded = targetLeft < 0 ||
+      final isExpanded =
+          targetLeft < 0 ||
           targetTop < 0 ||
           targetLeft + targetWidth > decoded.width ||
           targetTop + targetHeight > decoded.height;
-      _showToast(isExpanded
-          ? 'Canvas expanded to ${result.width} × ${result.height} px (Cmd+Z to undo)'
-          : 'Cropped to ${result.width} × ${result.height} px (Cmd+Z to undo)');
+      _showToast(
+        isExpanded
+            ? 'Canvas expanded to ${result.width} × ${result.height} px (Cmd+Z to undo)'
+            : 'Cropped to ${result.width} × ${result.height} px (Cmd+Z to undo)',
+      );
     } catch (e) {
       debugPrint('SnipSnap crop error: $e');
       _showToast('Failed to crop image');
@@ -1778,7 +1842,10 @@ class _MainScreenState extends State<MainScreen> {
     _scaffoldMessengerKey.currentState?.hideCurrentSnackBar();
     _scaffoldMessengerKey.currentState?.showSnackBar(
       SnackBar(
-        content: Text(message, style: TextStyle(color: textColor, fontWeight: FontWeight.w600)),
+        content: Text(
+          message,
+          style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
+        ),
         backgroundColor: toastBg,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
@@ -1810,416 +1877,559 @@ class _MainScreenState extends State<MainScreen> {
     return SnipThemeScope(
       theme: theme,
       child: MaterialApp(
-      navigatorKey: _navigatorKey,
-      scaffoldMessengerKey: _scaffoldMessengerKey,
-      title: 'snipsnap - Screen Capture & Markup',
-      debugShowCheckedModeBanner: false,
-      theme: snipThemeData(theme),
-      home: Scaffold(
-        backgroundColor: theme.canvas,
-        body: CallbackShortcuts(
-        bindings: _buildShortcutBindings(),
-        child: Focus(
-          autofocus: true,
-          child: Column(
-            children: [
-              // Top Header Bar
-              HeaderBar(
-                onSnipInteractive: _handleInteractiveCapture,
-                onSnipFullScreen: _handleFullScreenCapture,
-                onSnipTimer: _handleTimerCapture,
-                onImportImage: _handleImportImage,
-                onUndo: _undo,
-                onRedo: _redo,
-                onClear: _clearAnnotations,
-                onCopyToClipboard: _handleCopyToClipboard,
-                onSaveAs: _handleSaveAs,
-                onFlattenCanvas: _annotations.isNotEmpty ? _handleFlattenCanvas : null,
-                onToggleSidebar: () => setState(() => _isSidebarOpen = !_isSidebarOpen),
-                onToggleProperties: () => setState(() => _isPropertiesOpen = !_isPropertiesOpen),
-                isPropertiesOpen: _isPropertiesOpen,
-                onOpenShortcutSettings: _openShortcutSettingsDialog,
-                onToggleThemeMode: _toggleThemeMode,
-                onOpenAboutDialog: _openAboutDialog,
-                canUndo: _undoStack.isNotEmpty,
-                canRedo: _redoStack.isNotEmpty,
-                canClear: _annotations.isNotEmpty,
-                hasCapture: _activeCapture != null,
-                isSidebarOpen: _isSidebarOpen,
-                shortcuts: _shortcuts,
-                zoomScale: _zoomScale,
-                onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
-              ),
+        navigatorKey: _navigatorKey,
+        scaffoldMessengerKey: _scaffoldMessengerKey,
+        title: 'snipsnap - Screen Capture & Markup',
+        debugShowCheckedModeBanner: false,
+        theme: snipThemeData(theme),
+        home: Scaffold(
+          backgroundColor: theme.canvas,
+          body: CallbackShortcuts(
+            bindings: _buildShortcutBindings(),
+            child: Focus(
+              autofocus: true,
+              child: Column(
+                children: [
+                  // Top Header Bar
+                  HeaderBar(
+                    onSnipInteractive: _handleInteractiveCapture,
+                    onSnipFullScreen: _handleFullScreenCapture,
+                    onSnipTimer: _handleTimerCapture,
+                    onImportImage: _handleImportImage,
+                    onUndo: _undo,
+                    onRedo: _redo,
+                    onClear: _clearAnnotations,
+                    onCopyToClipboard: _handleCopyToClipboard,
+                    onSaveAs: _handleSaveAs,
+                    onFlattenCanvas: _annotations.isNotEmpty
+                        ? _handleFlattenCanvas
+                        : null,
+                    onToggleSidebar: () =>
+                        setState(() => _isSidebarOpen = !_isSidebarOpen),
+                    onToggleProperties: () =>
+                        setState(() => _isPropertiesOpen = !_isPropertiesOpen),
+                    isPropertiesOpen: _isPropertiesOpen,
+                    onOpenShortcutSettings: _openShortcutSettingsDialog,
+                    onToggleThemeMode: _toggleThemeMode,
+                    onOpenAboutDialog: _openAboutDialog,
+                    canUndo: _undoStack.isNotEmpty,
+                    canRedo: _redoStack.isNotEmpty,
+                    canClear: _annotations.isNotEmpty,
+                    hasCapture: _activeCapture != null,
+                    isSidebarOpen: _isSidebarOpen,
+                    shortcuts: _shortcuts,
+                    zoomScale: _zoomScale,
+                    onZoomScaleChanged: (val) =>
+                        setState(() => _zoomScale = val),
+                  ),
 
-              // Main Work Area (Canvas + Right Properties Sidebar)
-              Expanded(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Row(
+                  // Main Work Area (Canvas + Right Properties Sidebar)
+                  Expanded(
+                    child: Stack(
+                      alignment: Alignment.center,
                       children: [
-                        // Slim Left Sidebar Tools
-                        ToolSidebar(
-                          activeTool: _activeTool,
-                          onToolSelected: _setActiveTool,
-                          shapeKind: _currentToolProperties.shapeKind,
-                          onShapeKindSelected: (kind) => _updateActiveToolProperty(shapeKind: kind),
-                          isSidebarOpen: _isSidebarOpen,
-                          onToggleSidebar: () => setState(() => _isSidebarOpen = !_isSidebarOpen),
-                        ),
-
-                        // Editor Canvas
-                        Expanded(
-                          child: EditorCanvas(
-                            imagePath: _activeCapture?.filePath,
-                            annotations: _annotations,
-                            activeTool: _activeTool,
-                            onToolSelected: _setActiveTool,
-                            onSelectAnnotation: (ann) {
-                              setState(() {
-                                _selectedAnnotationId = ann?.id;
-                                if (ann != null) {
-                                  _isPropertiesOpen = true;
-                                }
-                              });
-                              if (ann != null) {
-                                // Adopt the item's style into the tool defaults
-                                // without rewriting the item or logging undo.
-                                _updateActiveToolProperty(
-                                  syncOnly: true,
-                                  activeColor: ann.color,
-                                  textBackgroundColor: ann.backgroundColor,
-                                  fillColor: ann.fillColor,
-                                  strokeWidth: ann.strokeWidth,
-                                  fontSize: ann.fontSize,
-                                  opacity: ann.opacity,
-                                  isFilled: ann.fill,
-                                  borderRadius: ann.borderRadius,
-                                  shapeKind: ann.shapeKind,
-                                  lineStyle: ann.lineStyle,
-                                  blurType: ann.blurType,
-                                  blurStrength: ann.blurStrength,
-                                  hasShadow: ann.hasShadow,
-                                  isDoubleArrow: ann.isDoubleArrow,
-                                );
-                              }
-                            },
-                            activeColor: _currentToolProperties.activeColor,
-                            textBackgroundColor: _currentToolProperties.textBackgroundColor,
-                            fillColor: _currentToolProperties.fillColor,
-                            strokeWidth: _currentToolProperties.strokeWidth,
-                            opacity: _currentToolProperties.opacity,
-                            fontSize: _currentToolProperties.fontSize,
-                            isFilled: _currentToolProperties.isFilled,
-                            borderRadius: _currentToolProperties.borderRadius,
-                            shapeKind: _currentToolProperties.shapeKind,
-                            lineStyle: _currentToolProperties.lineStyle,
-                            blurType: _currentToolProperties.blurType,
-                            blurStrength: _currentToolProperties.blurStrength,
-                            hasShadow: _currentToolProperties.hasShadow,
-                            isDoubleArrow: _currentToolProperties.isDoubleArrow,
-                            fillTolerance: _currentToolProperties.fillTolerance,
-                            isGlobalFill: _currentToolProperties.isGlobalFill,
-                            stepCounter: _stepCounter,
-                            onAnnotationAdded: _onAnnotationAdded,
-                            onAnnotationsUpdated: _onAnnotationsUpdated,
-                            onAnnotationsLiveUpdated: _onAnnotationsLiveUpdated,
-                            onStepCounterIncremented: (nextVal) => setState(() => _stepCounter = nextVal),
-                            onApplyCrop: _handleApplyCrop,
-                            onSampleColor: _handleSampleColor,
-                            // Snapshot the bitmap *before* the flood fill
-                            // overwrites the file, otherwise undo would restore
-                            // the already-filled image.
-                            onBeforeCanvasFill: () => _pushUndoState(captureImage: true),
-                            onImageSizeResolved: _handleImageSizeResolved,
-                            onExtractText: _handleExtractText,
-                            onPerformCanvasFill: (pos) {
-                              setState(_bumpImageRevision);
-                            },
-                            // Cut, move and delete rewrite the file in place
-                            // from inside the canvas, at the same path and the
-                            // same size, so nothing else here would notice.
-                            onImageBytesChanged: () {
-                              setState(_bumpImageRevision);
-                            },
-                            // The canvas drops writes it cannot map into image
-                            // pixels. Silently losing a stroke is its own bug,
-                            // so say it out loud; the canvas throttles this so
-                            // a drag cannot flood the toast.
-                            onEditUnplaceable: () => _showToast(
-                              'Could not apply that edit: the image has not '
-                              'loaded. Try reselecting this capture.',
+                        Row(
+                          children: [
+                            // Slim Left Sidebar Tools
+                            ToolSidebar(
+                              activeTool: _activeTool,
+                              onToolSelected: _setActiveTool,
+                              shapeKind: _currentToolProperties.shapeKind,
+                              onShapeKindSelected: (kind) =>
+                                  _updateActiveToolProperty(shapeKind: kind),
+                              isSidebarOpen: _isSidebarOpen,
+                              onToggleSidebar: () => setState(
+                                () => _isSidebarOpen = !_isSidebarOpen,
+                              ),
                             ),
-                            repaintBoundaryKey: _repaintKey,
-                            zoomScale: _zoomScale,
-                            onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
-                            imageRevision: _imageRevision,
-                            historyRevision: _historyRevision,
-                          ),
+
+                            // Editor Canvas
+                            Expanded(
+                              child: EditorCanvas(
+                                imagePath: _activeCapture?.filePath,
+                                annotations: _annotations,
+                                activeTool: _activeTool,
+                                onToolSelected: _setActiveTool,
+                                onSelectAnnotation: (ann) {
+                                  setState(() {
+                                    _selectedAnnotationId = ann?.id;
+                                    if (ann != null) {
+                                      _isPropertiesOpen = true;
+                                    }
+                                  });
+                                  if (ann != null) {
+                                    // Adopt the item's style into the tool defaults
+                                    // without rewriting the item or logging undo.
+                                    _updateActiveToolProperty(
+                                      syncOnly: true,
+                                      activeColor: ann.color,
+                                      textBackgroundColor: ann.backgroundColor,
+                                      fillColor: ann.fillColor,
+                                      strokeWidth: ann.strokeWidth,
+                                      fontSize: ann.fontSize,
+                                      opacity: ann.opacity,
+                                      isFilled: ann.fill,
+                                      borderRadius: ann.borderRadius,
+                                      shapeKind: ann.shapeKind,
+                                      lineStyle: ann.lineStyle,
+                                      blurType: ann.blurType,
+                                      blurStrength: ann.blurStrength,
+                                      hasShadow: ann.hasShadow,
+                                      isDoubleArrow: ann.isDoubleArrow,
+                                    );
+                                  }
+                                },
+                                activeColor: _currentToolProperties.activeColor,
+                                textBackgroundColor:
+                                    _currentToolProperties.textBackgroundColor,
+                                fillColor: _currentToolProperties.fillColor,
+                                strokeWidth: _currentToolProperties.strokeWidth,
+                                opacity: _currentToolProperties.opacity,
+                                fontSize: _currentToolProperties.fontSize,
+                                isFilled: _currentToolProperties.isFilled,
+                                borderRadius:
+                                    _currentToolProperties.borderRadius,
+                                shapeKind: _currentToolProperties.shapeKind,
+                                lineStyle: _currentToolProperties.lineStyle,
+                                blurType: _currentToolProperties.blurType,
+                                blurStrength:
+                                    _currentToolProperties.blurStrength,
+                                hasShadow: _currentToolProperties.hasShadow,
+                                isDoubleArrow:
+                                    _currentToolProperties.isDoubleArrow,
+                                fillTolerance:
+                                    _currentToolProperties.fillTolerance,
+                                isGlobalFill:
+                                    _currentToolProperties.isGlobalFill,
+                                stepCounter: _stepCounter,
+                                onAnnotationAdded: _onAnnotationAdded,
+                                onAnnotationsUpdated: _onAnnotationsUpdated,
+                                onAnnotationsLiveUpdated:
+                                    _onAnnotationsLiveUpdated,
+                                onStepCounterIncremented: (nextVal) =>
+                                    setState(() => _stepCounter = nextVal),
+                                onApplyCrop: _handleApplyCrop,
+                                onSampleColor: _handleSampleColor,
+                                // Snapshot the bitmap *before* the flood fill
+                                // overwrites the file, otherwise undo would restore
+                                // the already-filled image.
+                                onBeforeCanvasFill: () =>
+                                    _pushUndoState(captureImage: true),
+                                onImageSizeResolved: _handleImageSizeResolved,
+                                onExtractText: _handleExtractText,
+                                onPerformCanvasFill: (pos) {
+                                  setState(_bumpImageRevision);
+                                },
+                                // Cut, move and delete rewrite the file in place
+                                // from inside the canvas, at the same path and the
+                                // same size, so nothing else here would notice.
+                                onImageBytesChanged: () {
+                                  setState(_bumpImageRevision);
+                                },
+                                // The canvas drops writes it cannot map into image
+                                // pixels. Silently losing a stroke is its own bug,
+                                // so say it out loud; the canvas throttles this so
+                                // a drag cannot flood the toast.
+                                onEditUnplaceable: () => _showToast(
+                                  'Could not apply that edit: the image has not '
+                                  'loaded. Try reselecting this capture.',
+                                ),
+                                repaintBoundaryKey: _repaintKey,
+                                zoomScale: _zoomScale,
+                                onZoomScaleChanged: (val) =>
+                                    setState(() => _zoomScale = val),
+                                imageRevision: _imageRevision,
+                                historyRevision: _historyRevision,
+                              ),
+                            ),
+
+                            // Right Properties Sidebar Panel (Full Height & Collapsible Side Drawer)
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 250),
+                              curve: Curves.easeInOut,
+                              width:
+                                  (_activeCapture != null && _isPropertiesOpen)
+                                  ? 250
+                                  : 0,
+                              height: double.infinity,
+                              child: ClipRect(
+                                child: SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  child: SizedBox(
+                                    width: 250,
+                                    height: double.infinity,
+                                    child: StylePicker(
+                                      selectedColor:
+                                          _currentToolProperties.activeColor,
+                                      onColorChanged: (color) =>
+                                          _updateActiveToolProperty(
+                                            activeColor: color,
+                                          ),
+                                      savedColors: _savedColors,
+                                      onSaveColor: _handleSaveColor,
+                                      onRemoveSavedColor:
+                                          _handleRemoveSavedColor,
+                                      textBackgroundColor:
+                                          _currentToolProperties
+                                              .textBackgroundColor,
+                                      onTextBackgroundColorChanged: (c) =>
+                                          _updateActiveToolProperty(
+                                            textBackgroundColor: c,
+                                          ),
+                                      fillColor:
+                                          _currentToolProperties.fillColor,
+                                      onFillColorChanged: (c) =>
+                                          _updateActiveToolProperty(
+                                            fillColor: c,
+                                          ),
+                                      shapeKind:
+                                          _currentToolProperties.shapeKind,
+                                      onShapeKindChanged: (k) =>
+                                          _updateActiveToolProperty(
+                                            shapeKind: k,
+                                          ),
+                                      blurStrength:
+                                          _currentToolProperties.blurStrength,
+                                      onBlurStrengthChanged: (v) =>
+                                          _updateActiveToolProperty(
+                                            blurStrength: v,
+                                          ),
+                                      hasShadow:
+                                          _currentToolProperties.hasShadow,
+                                      onShadowChanged: (v) =>
+                                          _updateActiveToolProperty(
+                                            hasShadow: v,
+                                          ),
+                                      strokeWidth:
+                                          _currentToolProperties.strokeWidth,
+                                      onStrokeWidthChanged: (val) =>
+                                          _updateActiveToolProperty(
+                                            strokeWidth: val,
+                                          ),
+                                      opacity: _currentToolProperties.opacity,
+                                      onOpacityChanged: (val) =>
+                                          _updateActiveToolProperty(
+                                            opacity: val,
+                                          ),
+                                      fontSize: _currentToolProperties.fontSize,
+                                      onFontSizeChanged: (val) =>
+                                          _updateActiveToolProperty(
+                                            fontSize: val,
+                                          ),
+                                      isFilled: _currentToolProperties.isFilled,
+                                      onFillChanged: (val) =>
+                                          _updateActiveToolProperty(
+                                            isFilled: val,
+                                          ),
+                                      borderRadius:
+                                          _currentToolProperties.borderRadius,
+                                      onBorderRadiusChanged: (r) =>
+                                          _updateActiveToolProperty(
+                                            borderRadius: r,
+                                          ),
+                                      lineStyle:
+                                          _currentToolProperties.lineStyle,
+                                      onLineStyleChanged: (s) =>
+                                          _updateActiveToolProperty(
+                                            lineStyle: s,
+                                          ),
+                                      blurType: _currentToolProperties.blurType,
+                                      onBlurTypeChanged: (b) =>
+                                          _updateActiveToolProperty(
+                                            blurType: b,
+                                          ),
+                                      isDoubleArrow:
+                                          _currentToolProperties.isDoubleArrow,
+                                      onDoubleArrowChanged: (d) =>
+                                          _updateActiveToolProperty(
+                                            isDoubleArrow: d,
+                                          ),
+                                      fillTolerance:
+                                          _currentToolProperties.fillTolerance,
+                                      onFillToleranceChanged: (t) =>
+                                          _updateActiveToolProperty(
+                                            fillTolerance: t,
+                                          ),
+                                      isGlobalFill:
+                                          _currentToolProperties.isGlobalFill,
+                                      onGlobalFillChanged: (g) =>
+                                          _updateActiveToolProperty(
+                                            isGlobalFill: g,
+                                          ),
+                                      activeTool: _activeTool,
+                                      stepCounter: _stepCounter,
+                                      onResetStepCounter: () =>
+                                          setState(() => _stepCounter = 1),
+                                      onRenumberSteps: _renumberStepMarkers,
+                                      onActivateEyedropper: () =>
+                                          _setActiveTool(
+                                            CanvasTool.colorPicker,
+                                          ),
+                                      onFlattenCanvas: _annotations.isNotEmpty
+                                          ? _handleFlattenCanvas
+                                          : null,
+                                      onCloseDrawer: () => setState(
+                                        () => _isPropertiesOpen = false,
+                                      ),
+                                      selectedAnnotation: _selectedAnnotation,
+                                      onDeleteSelected:
+                                          _deleteSelectedAnnotation,
+                                      onBringToFront: () =>
+                                          _reorderSelectedAnnotation(
+                                            toFront: true,
+                                          ),
+                                      onSendToBack: () =>
+                                          _reorderSelectedAnnotation(
+                                            toFront: false,
+                                          ),
+                                      onDeselect: () {
+                                        setState(() {
+                                          _selectedAnnotationId = null;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
 
-                        // Right Properties Sidebar Panel (Full Height & Collapsible Side Drawer)
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 250),
-                          curve: Curves.easeInOut,
-                          width: (_activeCapture != null && _isPropertiesOpen) ? 250 : 0,
-                          height: double.infinity,
-                          child: ClipRect(
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              physics: const NeverScrollableScrollPhysics(),
-                              child: SizedBox(
-                                width: 250,
-                                height: double.infinity,
-                                child: StylePicker(
-                                  selectedColor: _currentToolProperties.activeColor,
-                                  onColorChanged: (color) => _updateActiveToolProperty(activeColor: color),
-                                  savedColors: _savedColors,
-                                  onSaveColor: _handleSaveColor,
-                                  onRemoveSavedColor: _handleRemoveSavedColor,
-                                  textBackgroundColor: _currentToolProperties.textBackgroundColor,
-                                  onTextBackgroundColorChanged: (c) => _updateActiveToolProperty(textBackgroundColor: c),
-                                  fillColor: _currentToolProperties.fillColor,
-                                  onFillColorChanged: (c) => _updateActiveToolProperty(fillColor: c),
-                                  shapeKind: _currentToolProperties.shapeKind,
-                                  onShapeKindChanged: (k) => _updateActiveToolProperty(shapeKind: k),
-                                  blurStrength: _currentToolProperties.blurStrength,
-                                  onBlurStrengthChanged: (v) => _updateActiveToolProperty(blurStrength: v),
-                                  hasShadow: _currentToolProperties.hasShadow,
-                                  onShadowChanged: (v) => _updateActiveToolProperty(hasShadow: v),
-                                  strokeWidth: _currentToolProperties.strokeWidth,
-                                  onStrokeWidthChanged: (val) => _updateActiveToolProperty(strokeWidth: val),
-                                  opacity: _currentToolProperties.opacity,
-                                  onOpacityChanged: (val) => _updateActiveToolProperty(opacity: val),
-                                  fontSize: _currentToolProperties.fontSize,
-                                  onFontSizeChanged: (val) => _updateActiveToolProperty(fontSize: val),
-                                  isFilled: _currentToolProperties.isFilled,
-                                  onFillChanged: (val) => _updateActiveToolProperty(isFilled: val),
-                                  borderRadius: _currentToolProperties.borderRadius,
-                                  onBorderRadiusChanged: (r) => _updateActiveToolProperty(borderRadius: r),
-                                  lineStyle: _currentToolProperties.lineStyle,
-                                  onLineStyleChanged: (s) => _updateActiveToolProperty(lineStyle: s),
-                                  blurType: _currentToolProperties.blurType,
-                                  onBlurTypeChanged: (b) => _updateActiveToolProperty(blurType: b),
-                                  isDoubleArrow: _currentToolProperties.isDoubleArrow,
-                                  onDoubleArrowChanged: (d) => _updateActiveToolProperty(isDoubleArrow: d),
-                                  fillTolerance: _currentToolProperties.fillTolerance,
-                                  onFillToleranceChanged: (t) => _updateActiveToolProperty(fillTolerance: t),
-                                  isGlobalFill: _currentToolProperties.isGlobalFill,
-                                  onGlobalFillChanged: (g) => _updateActiveToolProperty(isGlobalFill: g),
-                                  activeTool: _activeTool,
-                                  stepCounter: _stepCounter,
-                                  onResetStepCounter: () => setState(() => _stepCounter = 1),
-                                  onRenumberSteps: _renumberStepMarkers,
-                                  onActivateEyedropper: () => _setActiveTool(CanvasTool.colorPicker),
-                                  onFlattenCanvas: _annotations.isNotEmpty ? _handleFlattenCanvas : null,
-                                  onCloseDrawer: () => setState(() => _isPropertiesOpen = false),
-                                  selectedAnnotation: _selectedAnnotation,
-                                  onDeleteSelected: _deleteSelectedAnnotation,
-                                  onBringToFront: () => _reorderSelectedAnnotation(toFront: true),
-                                  onSendToBack: () => _reorderSelectedAnnotation(toFront: false),
-                                  onDeselect: () {
-                                    setState(() {
-                                      _selectedAnnotationId = null;
-                                    });
-                                  },
+                        // Floating Properties Drawer Open Pill Button (when drawer is collapsed)
+                        if (_activeCapture != null && !_isPropertiesOpen)
+                          Positioned(
+                            top: 12,
+                            right: 12,
+                            child: Tooltip(
+                              message: 'Show Tool Properties Drawer',
+                              child: Material(
+                                color: theme.surface,
+                                elevation: 6,
+                                borderRadius: BorderRadius.circular(20),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: () =>
+                                      setState(() => _isPropertiesOpen = true),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(20),
+                                      // CTA emphasis, not the exclusive active
+                                      // control -- theme.emphasis, not activeFill.
+                                      border: Border.all(
+                                        color: theme.emphasis,
+                                        width: 1.2,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.tune_rounded,
+                                          size: 16,
+                                          color: theme.emphasis,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Properties',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: theme.emphasis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
 
-                    // Floating Properties Drawer Open Pill Button (when drawer is collapsed)
-                    if (_activeCapture != null && !_isPropertiesOpen)
-                      Positioned(
-                        top: 12,
-                        right: 12,
-                        child: Tooltip(
-                          message: 'Show Tool Properties Drawer',
-                          child: Material(
-                            color: theme.surface,
-                            elevation: 6,
-                            borderRadius: BorderRadius.circular(20),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(20),
-                              onTap: () => setState(() => _isPropertiesOpen = true),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(20),
-                                  // CTA emphasis, not the exclusive active
-                                  // control -- theme.emphasis, not activeFill.
-                                  border: Border.all(color: theme.emphasis, width: 1.2),
-                                ),
-                                child: Row(
+                        // Extracted-text panel. Bottom-left keeps it clear of the
+                        // properties drawer and its collapsed pill on the right.
+                        if (_ocrResult != null)
+                          Positioned(
+                            left: 84,
+                            bottom: 16,
+                            child: OcrResultPanel(
+                              result: _ocrResult!,
+                              isLoading: _isOcrRunning,
+                              unavailableReason: _ocrUnavailableReason,
+                              onClose: () => setState(() {
+                                _ocrRequestToken++;
+                                _ocrResult = null;
+                                _isOcrRunning = false;
+                                _ocrUnavailableReason = null;
+                              }),
+                              onInsertAsText: _insertExtractedText,
+                            ),
+                          ),
+
+                        // Capturing Overlay Spinner
+                        //
+                        // SnipTheme.scrim, not a per-mode token: this dims
+                        // whatever was on screen the instant before a real
+                        // OS-level capture, in both chrome modes, the same way a
+                        // modal barrier would. A per-mode token would flip
+                        // polarity in dark mode (a light wash instead of a dim)
+                        // and risk the white spinner/caption vanishing against it
+                        // — see SnipTheme.scrim's own doc comment.
+                        if (_isCapturing)
+                          const Positioned.fill(
+                            child: ColoredBox(
+                              color: SnipTheme.scrim,
+                              child: Center(
+                                child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.tune_rounded, size: 16, color: theme.emphasis),
-                                    const SizedBox(width: 6),
-                                    Text('Properties', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: theme.emphasis)),
+                                    CircularProgressIndicator(
+                                      color: Colors.white,
+                                    ),
+                                    SizedBox(height: 16),
+                                    Text(
+                                      'Waiting for screen capture...',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
+                      ],
+                    ),
+                  ),
 
-                    // Extracted-text panel. Bottom-left keeps it clear of the
-                    // properties drawer and its collapsed pill on the right.
-                    if (_ocrResult != null)
-                      Positioned(
-                        left: 84,
-                        bottom: 16,
-                        child: OcrResultPanel(
-                          result: _ocrResult!,
-                          isLoading: _isOcrRunning,
-                          unavailableReason: _ocrUnavailableReason,
-                          onClose: () => setState(() {
-                            _ocrRequestToken++;
-                            _ocrResult = null;
-                            _isOcrRunning = false;
-                            _ocrUnavailableReason = null;
-                          }),
-                          onInsertAsText: _insertExtractedText,
-                        ),
-                      ),
-
-                    // Capturing Overlay Spinner
-                    //
-                    // SnipTheme.scrim, not a per-mode token: this dims
-                    // whatever was on screen the instant before a real
-                    // OS-level capture, in both chrome modes, the same way a
-                    // modal barrier would. A per-mode token would flip
-                    // polarity in dark mode (a light wash instead of a dim)
-                    // and risk the white spinner/caption vanishing against it
-                    // — see SnipTheme.scrim's own doc comment.
-                    if (_isCapturing)
-                      const Positioned.fill(
-                        child: ColoredBox(
-                          color: SnipTheme.scrim,
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircularProgressIndicator(color: Colors.white),
-                                SizedBox(height: 16),
-                                Text(
-                                  'Waiting for screen capture...',
-                                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                                ),
-                              ],
+                  // Bottom Gallery History Bar
+                  if (_isSidebarOpen)
+                    GallerySidebar(
+                      items: _captures,
+                      activeItem: _activeCapture,
+                      imageRevision: _imageRevision,
+                      zoomScale: _zoomScale,
+                      onZoomScaleChanged: (val) =>
+                          setState(() => _zoomScale = val),
+                      onSelectItem: (item) {
+                        _syncCurrentCaptureAnnotations();
+                        setState(() {
+                          // A different bitmap: nothing cached for the old one can
+                          // describe it, and the open panel is about the old one.
+                          _resetOcr();
+                          _activeCapture = item;
+                          _annotations = List.from(item.annotations);
+                          _undoStack.clear();
+                          _redoStack.clear();
+                          _stepCounter =
+                              _findMaxStepNumber(item.annotations) + 1;
+                        });
+                        DatabaseService.setSetting(
+                          'active_capture_id',
+                          item.id,
+                        );
+                        if (item.annotationsNeedConversion) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (!mounted) return;
+                            _convertActiveCaptureAnnotations();
+                          });
+                        }
+                      },
+                      onDeleteItem: (item) async {
+                        // Read before the setState below reassigns _activeCapture.
+                        final wasActive = _activeCapture?.id == item.id;
+                        if (wasActive) {
+                          _syncCurrentCaptureAnnotations();
+                        }
+                        setState(() {
+                          _captures.removeWhere((c) => c.id == item.id);
+                          if (_activeCapture?.id == item.id) {
+                            _resetOcr();
+                            _activeCapture = _captures.isNotEmpty
+                                ? _captures.first
+                                : null;
+                            _annotations = _activeCapture != null
+                                ? List.from(_activeCapture!.annotations)
+                                : [];
+                            _undoStack.clear();
+                            _redoStack.clear();
+                            _stepCounter = _activeCapture != null
+                                ? _findMaxStepNumber(_annotations) + 1
+                                : 1;
+                          }
+                        });
+                        if (_activeCapture != null) {
+                          unawaited(
+                            DatabaseService.setSetting(
+                              'active_capture_id',
+                              _activeCapture!.id,
                             ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+                          );
+                        }
+                        // Deleting the active capture *promotes* the next one, which
+                        // is a selection change by any other name — so it owes the
+                        // same conversion onSelectItem schedules. Without this the
+                        // promoted capture spends the session with viewport numbers
+                        // treated as image pixels (markup at the wrong scale), and
+                        // because the save guard correctly refuses to persist it,
+                        // nothing the user draws on it is ever written.
+                        //
+                        // Gated on [wasActive] so deleting a *background* capture
+                        // does not schedule a redundant second conversion for the
+                        // unchanged active one — two in-flight runs could both pass
+                        // the flag check across the decode await and double-scale.
+                        if (wasActive &&
+                            (_activeCapture?.annotationsNeedConversion ??
+                                false)) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (!mounted) return;
+                            _convertActiveCaptureAnnotations();
+                          });
+                        }
+                        try {
+                          final file = File(item.filePath);
+                          if (file.existsSync()) {
+                            await file.delete();
+                          }
+                        } catch (_) {}
+                        // The row and its annotations, not just the file.
+                        // `saveHistory` below only rewrites the captures still in
+                        // the list; it never deletes, so without this the deleted
+                        // capture's rows lived on forever — and if the file delete
+                        // above failed (it is deliberately swallowed) the whole
+                        // capture reappeared, annotations and all, on next launch.
+                        await StorageService.deleteCaptureItem(item.id);
+                        unawaited(StorageService.saveHistory(_captures));
+                      },
+                      onOpenLibraryLocation: () async {
+                        final opened = await StorageService.openLibraryFolder();
+                        if (!opened) {
+                          _showToast('Could not open screenshots folder');
+                        }
+                      },
+                      onRevealItemInFolder: (item) async {
+                        final revealed =
+                            await StorageService.revealFileInFolder(
+                              item.filePath,
+                            );
+                        if (!revealed) {
+                          _showToast('Could not reveal file in folder');
+                        }
+                      },
+                      onClose: () => setState(() => _isSidebarOpen = false),
+                    ),
+                ],
               ),
-
-              // Bottom Gallery History Bar
-              if (_isSidebarOpen)
-                GallerySidebar(
-                  items: _captures,
-                  activeItem: _activeCapture,
-                  imageRevision: _imageRevision,
-                  zoomScale: _zoomScale,
-                  onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
-                  onSelectItem: (item) {
-                    _syncCurrentCaptureAnnotations();
-                    setState(() {
-                      // A different bitmap: nothing cached for the old one can
-                      // describe it, and the open panel is about the old one.
-                      _resetOcr();
-                      _activeCapture = item;
-                      _annotations = List.from(item.annotations);
-                      _undoStack.clear();
-                      _redoStack.clear();
-                      _stepCounter = _findMaxStepNumber(item.annotations) + 1;
-                    });
-                    DatabaseService.setSetting('active_capture_id', item.id);
-                    if (item.annotationsNeedConversion) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (!mounted) return;
-                        _convertActiveCaptureAnnotations();
-                      });
-                    }
-                  },
-                  onDeleteItem: (item) async {
-                    // Read before the setState below reassigns _activeCapture.
-                    final wasActive = _activeCapture?.id == item.id;
-                    if (wasActive) {
-                      _syncCurrentCaptureAnnotations();
-                    }
-                    setState(() {
-                      _captures.removeWhere((c) => c.id == item.id);
-                      if (_activeCapture?.id == item.id) {
-                        _resetOcr();
-                        _activeCapture = _captures.isNotEmpty ? _captures.first : null;
-                        _annotations = _activeCapture != null ? List.from(_activeCapture!.annotations) : [];
-                        _undoStack.clear();
-                        _redoStack.clear();
-                        _stepCounter = _activeCapture != null ? _findMaxStepNumber(_annotations) + 1 : 1;
-                      }
-                    });
-                    if (_activeCapture != null) {
-                      unawaited(DatabaseService.setSetting(
-                          'active_capture_id', _activeCapture!.id));
-                    }
-                    // Deleting the active capture *promotes* the next one, which
-                    // is a selection change by any other name — so it owes the
-                    // same conversion onSelectItem schedules. Without this the
-                    // promoted capture spends the session with viewport numbers
-                    // treated as image pixels (markup at the wrong scale), and
-                    // because the save guard correctly refuses to persist it,
-                    // nothing the user draws on it is ever written.
-                    //
-                    // Gated on [wasActive] so deleting a *background* capture
-                    // does not schedule a redundant second conversion for the
-                    // unchanged active one — two in-flight runs could both pass
-                    // the flag check across the decode await and double-scale.
-                    if (wasActive &&
-                        (_activeCapture?.annotationsNeedConversion ?? false)) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (!mounted) return;
-                        _convertActiveCaptureAnnotations();
-                      });
-                    }
-                    try {
-                      final file = File(item.filePath);
-                      if (file.existsSync()) {
-                        await file.delete();
-                      }
-                    } catch (_) {}
-                    // The row and its annotations, not just the file.
-                    // `saveHistory` below only rewrites the captures still in
-                    // the list; it never deletes, so without this the deleted
-                    // capture's rows lived on forever — and if the file delete
-                    // above failed (it is deliberately swallowed) the whole
-                    // capture reappeared, annotations and all, on next launch.
-                    await StorageService.deleteCaptureItem(item.id);
-                    unawaited(StorageService.saveHistory(_captures));
-                  },
-                  onOpenLibraryLocation: () async {
-                    final opened = await StorageService.openLibraryFolder();
-                    if (!opened) {
-                      _showToast('Could not open screenshots folder');
-                    }
-                  },
-                  onRevealItemInFolder: (item) async {
-                    final revealed = await StorageService.revealFileInFolder(item.filePath);
-                    if (!revealed) {
-                      _showToast('Could not reveal file in folder');
-                    }
-                  },
-                  onClose: () => setState(() => _isSidebarOpen = false),
-                ),
-            ],
+            ),
           ),
         ),
       ),
-    )));
+    );
   }
 }

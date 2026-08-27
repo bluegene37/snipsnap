@@ -27,9 +27,23 @@ void main() {
       expect(t.mode, mode);
       // A mode may never ship with a null colour.
       expect(
-        [t.canvas, t.surface, t.surfaceRaised, t.ink, t.inkMuted, t.inkFaint,
-         t.border, t.borderStrong, t.activeFill, t.onActive,
-         t.selectedFill, t.hoverFill, t.danger, t.onDanger, t.emphasis],
+        [
+          t.canvas,
+          t.surface,
+          t.surfaceRaised,
+          t.ink,
+          t.inkMuted,
+          t.inkFaint,
+          t.border,
+          t.borderStrong,
+          t.activeFill,
+          t.onActive,
+          t.selectedFill,
+          t.hoverFill,
+          t.danger,
+          t.onDanger,
+          t.emphasis,
+        ],
         everyElement(isA<Color>()),
         reason: '$mode has an incomplete token set',
       );
@@ -41,26 +55,38 @@ void main() {
   test('ink on surface meets WCAG AA in both modes', () {
     for (final mode in SnipThemeMode.values) {
       final t = SnipTheme.forMode(mode);
-      expect(_contrast(t.ink, t.surface), greaterThanOrEqualTo(4.5),
-          reason: '$mode: ink on surface');
-      expect(_contrast(t.ink, t.canvas), greaterThanOrEqualTo(4.5),
-          reason: '$mode: ink on canvas');
+      expect(
+        _contrast(t.ink, t.surface),
+        greaterThanOrEqualTo(4.5),
+        reason: '$mode: ink on surface',
+      );
+      expect(
+        _contrast(t.ink, t.canvas),
+        greaterThanOrEqualTo(4.5),
+        reason: '$mode: ink on canvas',
+      );
     }
   });
 
   test('knocked-out label on an active plate meets WCAG AA', () {
     for (final mode in SnipThemeMode.values) {
       final t = SnipTheme.forMode(mode);
-      expect(_contrast(t.onActive, t.activeFill), greaterThanOrEqualTo(4.5),
-          reason: '$mode: onActive on activeFill');
+      expect(
+        _contrast(t.onActive, t.activeFill),
+        greaterThanOrEqualTo(4.5),
+        reason: '$mode: onActive on activeFill',
+      );
     }
   });
 
   test('muted text stays legible', () {
     for (final mode in SnipThemeMode.values) {
       final t = SnipTheme.forMode(mode);
-      expect(_contrast(t.inkMuted, t.surface), greaterThanOrEqualTo(3.0),
-          reason: '$mode: inkMuted on surface');
+      expect(
+        _contrast(t.inkMuted, t.surface),
+        greaterThanOrEqualTo(3.0),
+        reason: '$mode: inkMuted on surface',
+      );
     }
   });
 
@@ -70,23 +96,37 @@ void main() {
     // out label — so ink must clear body-text contrast against each.
     for (final mode in SnipThemeMode.values) {
       final t = SnipTheme.forMode(mode);
-      expect(_contrast(t.ink, t.selectedFill), greaterThanOrEqualTo(4.5),
-          reason: '$mode: ink on selectedFill');
-      expect(_contrast(t.ink, t.hoverFill), greaterThanOrEqualTo(4.5),
-          reason: '$mode: ink on hoverFill');
+      expect(
+        _contrast(t.ink, t.selectedFill),
+        greaterThanOrEqualTo(4.5),
+        reason: '$mode: ink on selectedFill',
+      );
+      expect(
+        _contrast(t.ink, t.hoverFill),
+        greaterThanOrEqualTo(4.5),
+        reason: '$mode: ink on hoverFill',
+      );
     }
   });
 
-  test('danger meets WCAG AA against onDanger and stays visible on surface',
-      () {
-    for (final mode in SnipThemeMode.values) {
-      final t = SnipTheme.forMode(mode);
-      expect(_contrast(t.onDanger, t.danger), greaterThanOrEqualTo(4.5),
-          reason: '$mode: onDanger on danger');
-      expect(_contrast(t.danger, t.surface), greaterThanOrEqualTo(3.0),
-          reason: '$mode: danger on surface');
-    }
-  });
+  test(
+    'danger meets WCAG AA against onDanger and stays visible on surface',
+    () {
+      for (final mode in SnipThemeMode.values) {
+        final t = SnipTheme.forMode(mode);
+        expect(
+          _contrast(t.onDanger, t.danger),
+          greaterThanOrEqualTo(4.5),
+          reason: '$mode: onDanger on danger',
+        );
+        expect(
+          _contrast(t.danger, t.surface),
+          greaterThanOrEqualTo(3.0),
+          reason: '$mode: danger on surface',
+        );
+      }
+    },
+  );
 
   test('dark is an inversion, not a tint', () {
     final l = SnipTheme.light();
@@ -101,13 +141,26 @@ void main() {
     // comment), not an oversight.
     for (final mode in SnipThemeMode.values) {
       final t = SnipTheme.forMode(mode);
-      for (final c in [t.canvas, t.surface, t.surfaceRaised, t.ink,
-                       t.inkMuted, t.inkFaint, t.activeFill, t.onActive,
-                       t.selectedFill, t.hoverFill, t.emphasis]) {
+      for (final c in [
+        t.canvas,
+        t.surface,
+        t.surfaceRaised,
+        t.ink,
+        t.inkMuted,
+        t.inkFaint,
+        t.activeFill,
+        t.onActive,
+        t.selectedFill,
+        t.hoverFill,
+        t.emphasis,
+      ]) {
         final maxC = math.max(c.r, math.max(c.g, c.b));
         final minC = math.min(c.r, math.min(c.g, c.b));
-        expect(maxC - minC, lessThan(0.04),
-            reason: '$mode: ${c.toARGB32().toRadixString(16)} is not neutral');
+        expect(
+          maxC - minC,
+          lessThan(0.04),
+          reason: '$mode: ${c.toARGB32().toRadixString(16)} is not neutral',
+        );
       }
     }
   });
@@ -121,8 +174,11 @@ void main() {
       final t = SnipTheme.forMode(mode);
       final maxC = math.max(t.danger.r, math.max(t.danger.g, t.danger.b));
       final minC = math.min(t.danger.r, math.min(t.danger.g, t.danger.b));
-      expect(maxC - minC, greaterThanOrEqualTo(0.04),
-          reason: '$mode: danger has lost its chroma');
+      expect(
+        maxC - minC,
+        greaterThanOrEqualTo(0.04),
+        reason: '$mode: danger has lost its chroma',
+      );
     }
   });
 
@@ -133,10 +189,16 @@ void main() {
     for (final mode in SnipThemeMode.values) {
       final t = SnipTheme.forMode(mode);
       expect(t.emphasis, t.ink, reason: '$mode: emphasis should equal ink');
-      expect(_contrast(t.emphasis, t.surface), greaterThanOrEqualTo(4.5),
-          reason: '$mode: emphasis on surface');
-      expect(_contrast(t.emphasis, t.canvas), greaterThanOrEqualTo(4.5),
-          reason: '$mode: emphasis on canvas');
+      expect(
+        _contrast(t.emphasis, t.surface),
+        greaterThanOrEqualTo(4.5),
+        reason: '$mode: emphasis on surface',
+      );
+      expect(
+        _contrast(t.emphasis, t.canvas),
+        greaterThanOrEqualTo(4.5),
+        reason: '$mode: emphasis on canvas',
+      );
     }
   });
 
@@ -146,40 +208,63 @@ void main() {
     // regardless of SnipThemeMode. This asserts both the value and that
     // there is no light/dark variance to accidentally introduce later.
     expect(SnipTheme.scrim, const Color(0x8A000000));
-    expect(SnipTheme.scrim.a, closeTo(0.54, 0.01),
-        reason: 'scrim should be translucent, matching the pre-conversion '
-            'Colors.black54 literal it replaces');
-    final maxC = math.max(SnipTheme.scrim.r, math.max(SnipTheme.scrim.g, SnipTheme.scrim.b));
-    final minC = math.min(SnipTheme.scrim.r, math.min(SnipTheme.scrim.g, SnipTheme.scrim.b));
+    expect(
+      SnipTheme.scrim.a,
+      closeTo(0.54, 0.01),
+      reason:
+          'scrim should be translucent, matching the pre-conversion '
+          'Colors.black54 literal it replaces',
+    );
+    final maxC = math.max(
+      SnipTheme.scrim.r,
+      math.max(SnipTheme.scrim.g, SnipTheme.scrim.b),
+    );
+    final minC = math.min(
+      SnipTheme.scrim.r,
+      math.min(SnipTheme.scrim.g, SnipTheme.scrim.b),
+    );
     expect(maxC - minC, lessThan(0.04), reason: 'scrim must be neutral');
   });
 
-  test('dark ink deliberately reuses light\'s paper tone, not a fresh grey',
-      () {
-    // See SnipTheme.dark()'s doc comment: the two paper tones this design
-    // uses appear on both sides of the inversion with their roles swapped,
-    // rather than each mode inventing its own near-black/near-white. This
-    // pins that identity so a future "neutralise the 2-unit deficit" edit
-    // doesn't quietly break it.
-    expect(SnipTheme.dark().ink, SnipTheme.light().canvas,
-        reason: "dark's ink should be exactly light's canvas hex");
-    expect(SnipTheme.light().ink, SnipTheme.dark().onActive,
-        reason: "light's ink should be exactly dark's onActive hex");
-    expect(SnipTheme.light().ink, SnipTheme.dark().onDanger,
-        reason: "light's ink should be exactly dark's onDanger hex");
-  });
+  test(
+    'dark ink deliberately reuses light\'s paper tone, not a fresh grey',
+    () {
+      // See SnipTheme.dark()'s doc comment: the two paper tones this design
+      // uses appear on both sides of the inversion with their roles swapped,
+      // rather than each mode inventing its own near-black/near-white. This
+      // pins that identity so a future "neutralise the 2-unit deficit" edit
+      // doesn't quietly break it.
+      expect(
+        SnipTheme.dark().ink,
+        SnipTheme.light().canvas,
+        reason: "dark's ink should be exactly light's canvas hex",
+      );
+      expect(
+        SnipTheme.light().ink,
+        SnipTheme.dark().onActive,
+        reason: "light's ink should be exactly dark's onActive hex",
+      );
+      expect(
+        SnipTheme.light().ink,
+        SnipTheme.dark().onDanger,
+        reason: "light's ink should be exactly dark's onDanger hex",
+      );
+    },
+  );
 
   testWidgets('SnipThemeScope provides and updates', (tester) async {
     late SnipTheme seen;
     Widget app(SnipThemeMode mode) => MaterialApp(
-          home: SnipThemeScope(
-            theme: SnipTheme.forMode(mode),
-            child: Builder(builder: (ctx) {
-              seen = SnipTheme.of(ctx);
-              return const SizedBox();
-            }),
-          ),
-        );
+      home: SnipThemeScope(
+        theme: SnipTheme.forMode(mode),
+        child: Builder(
+          builder: (ctx) {
+            seen = SnipTheme.of(ctx);
+            return const SizedBox();
+          },
+        ),
+      ),
+    );
 
     await tester.pumpWidget(app(SnipThemeMode.light));
     expect(seen.mode, SnipThemeMode.light);
@@ -189,62 +274,104 @@ void main() {
   });
 
   group('controlDecoration/controlForeground — disabled', () {
-    test('disabled resting control is an unchanged hairline, faint foreground', () {
-      for (final mode in SnipThemeMode.values) {
-        final t = SnipTheme.forMode(mode);
-        final deco = t.controlDecoration(active: false, enabled: false);
-        expect(deco.color, Colors.transparent, reason: '$mode');
-        expect((deco.border as Border).top.color, t.border, reason: '$mode');
-        expect(t.controlForeground(active: false, enabled: false), t.inkFaint,
-            reason: '$mode');
-      }
-    });
+    test(
+      'disabled resting control is an unchanged hairline, faint foreground',
+      () {
+        for (final mode in SnipThemeMode.values) {
+          final t = SnipTheme.forMode(mode);
+          final deco = t.controlDecoration(active: false, enabled: false);
+          expect(deco.color, Colors.transparent, reason: '$mode');
+          expect((deco.border as Border).top.color, t.border, reason: '$mode');
+          expect(
+            t.controlForeground(active: false, enabled: false),
+            t.inkFaint,
+            reason: '$mode',
+          );
+        }
+      },
+    );
 
     test('disabled exclusive-active control never renders the activeFill '
         'knockout plate — it downgrades to selectedFill', () {
       for (final mode in SnipThemeMode.values) {
         final t = SnipTheme.forMode(mode);
         final deco = t.controlDecoration(active: true, enabled: false);
-        expect(deco.color, t.selectedFill,
-            reason: '$mode: disabled active must not be activeFill');
-        expect((deco.border as Border).top.color, t.selectedFill, reason: '$mode');
         expect(
-            t.controlForeground(active: true, enabled: false), t.inkFaint,
-            reason: '$mode: disabled foreground is always inkFaint, never onActive');
+          deco.color,
+          t.selectedFill,
+          reason: '$mode: disabled active must not be activeFill',
+        );
+        expect(
+          (deco.border as Border).top.color,
+          t.selectedFill,
+          reason: '$mode',
+        );
+        expect(
+          t.controlForeground(active: true, enabled: false),
+          t.inkFaint,
+          reason:
+              '$mode: disabled foreground is always inkFaint, never onActive',
+        );
       }
     });
 
-    test('disabled non-exclusive selected control also downgrades to inkFaint', () {
-      for (final mode in SnipThemeMode.values) {
-        final t = SnipTheme.forMode(mode);
-        final deco = t.controlDecoration(active: true, exclusive: false, enabled: false);
-        expect(deco.color, t.selectedFill, reason: '$mode');
-        expect(
+    test(
+      'disabled non-exclusive selected control also downgrades to inkFaint',
+      () {
+        for (final mode in SnipThemeMode.values) {
+          final t = SnipTheme.forMode(mode);
+          final deco = t.controlDecoration(
+            active: true,
+            exclusive: false,
+            enabled: false,
+          );
+          expect(deco.color, t.selectedFill, reason: '$mode');
+          expect(
             t.controlForeground(active: true, exclusive: false, enabled: false),
             t.inkFaint,
-            reason: '$mode');
-      }
-    });
+            reason: '$mode',
+          );
+        }
+      },
+    );
   });
 
   group('controlDecoration — hover', () {
-    test('hovered bordered control strengthens the hairline, stays unfilled', () {
-      for (final mode in SnipThemeMode.values) {
-        final t = SnipTheme.forMode(mode);
-        final deco = t.controlDecoration(active: false, hover: true);
-        expect(deco.color, Colors.transparent, reason: '$mode');
-        expect((deco.border as Border).top.color, t.borderStrong, reason: '$mode');
-      }
-    });
+    test(
+      'hovered bordered control strengthens the hairline, stays unfilled',
+      () {
+        for (final mode in SnipThemeMode.values) {
+          final t = SnipTheme.forMode(mode);
+          final deco = t.controlDecoration(active: false, hover: true);
+          expect(deco.color, Colors.transparent, reason: '$mode');
+          expect(
+            (deco.border as Border).top.color,
+            t.borderStrong,
+            reason: '$mode',
+          );
+        }
+      },
+    );
 
-    test('hovered borderless row/tile washes with hoverFill and draws no border', () {
-      for (final mode in SnipThemeMode.values) {
-        final t = SnipTheme.forMode(mode);
-        final deco = t.controlDecoration(active: false, hover: true, bordered: false);
-        expect(deco.color, t.hoverFill, reason: '$mode');
-        expect(deco.border, isNull, reason: '$mode: a borderless row must draw no border');
-      }
-    });
+    test(
+      'hovered borderless row/tile washes with hoverFill and draws no border',
+      () {
+        for (final mode in SnipThemeMode.values) {
+          final t = SnipTheme.forMode(mode);
+          final deco = t.controlDecoration(
+            active: false,
+            hover: true,
+            bordered: false,
+          );
+          expect(deco.color, t.hoverFill, reason: '$mode');
+          expect(
+            deco.border,
+            isNull,
+            reason: '$mode: a borderless row must draw no border',
+          );
+        }
+      },
+    );
 
     test('a resting borderless control also draws no border', () {
       for (final mode in SnipThemeMode.values) {
@@ -257,29 +384,45 @@ void main() {
   });
 
   group('controlDecoration/controlForeground — destructive tone', () {
-    test('resting destructive control borders in danger, not the plain border', () {
-      for (final mode in SnipThemeMode.values) {
-        final t = SnipTheme.forMode(mode);
-        final deco = t.controlDecoration(active: false, tone: SnipControlTone.danger);
-        expect(deco.color, Colors.transparent, reason: '$mode');
-        expect((deco.border as Border).top.color, t.danger, reason: '$mode');
-        expect(t.controlForeground(active: false, tone: SnipControlTone.danger),
+    test(
+      'resting destructive control borders in danger, not the plain border',
+      () {
+        for (final mode in SnipThemeMode.values) {
+          final t = SnipTheme.forMode(mode);
+          final deco = t.controlDecoration(
+            active: false,
+            tone: SnipControlTone.danger,
+          );
+          expect(deco.color, Colors.transparent, reason: '$mode');
+          expect((deco.border as Border).top.color, t.danger, reason: '$mode');
+          expect(
+            t.controlForeground(active: false, tone: SnipControlTone.danger),
             t.danger,
-            reason: '$mode');
-      }
-    });
+            reason: '$mode',
+          );
+        }
+      },
+    );
 
-    test('active destructive control fills with danger, knocks out to onDanger', () {
-      for (final mode in SnipThemeMode.values) {
-        final t = SnipTheme.forMode(mode);
-        final deco = t.controlDecoration(active: true, tone: SnipControlTone.danger);
-        expect(deco.color, t.danger, reason: '$mode');
-        expect((deco.border as Border).top.color, t.danger, reason: '$mode');
-        expect(t.controlForeground(active: true, tone: SnipControlTone.danger),
+    test(
+      'active destructive control fills with danger, knocks out to onDanger',
+      () {
+        for (final mode in SnipThemeMode.values) {
+          final t = SnipTheme.forMode(mode);
+          final deco = t.controlDecoration(
+            active: true,
+            tone: SnipControlTone.danger,
+          );
+          expect(deco.color, t.danger, reason: '$mode');
+          expect((deco.border as Border).top.color, t.danger, reason: '$mode');
+          expect(
+            t.controlForeground(active: true, tone: SnipControlTone.danger),
             t.onDanger,
-            reason: '$mode');
-      }
-    });
+            reason: '$mode',
+          );
+        }
+      },
+    );
 
     test('destructive tone never leaks into activeFill', () {
       // onDanger is deliberately allowed to coincide with onActive in value
@@ -289,32 +432,52 @@ void main() {
       // app's single exclusive-active control.
       for (final mode in SnipThemeMode.values) {
         final t = SnipTheme.forMode(mode);
-        final deco = t.controlDecoration(active: true, tone: SnipControlTone.danger);
+        final deco = t.controlDecoration(
+          active: true,
+          tone: SnipControlTone.danger,
+        );
         expect(deco.color, isNot(t.activeFill), reason: '$mode');
       }
     });
 
-    test('a non-exclusive selected destructive control (e.g. an item marked '
-        'for bulk delete) stays on selectedFill, not the onDanger knockout',
-        () {
-      // Regression for a real mismatch: controlDecoration's non-exclusive
-      // branch never swaps the *fill* for danger (only the outline), so
-      // controlForeground must check `exclusive` before `tone` too, or a
-      // call site passing identical arguments to both gets onDanger drawn
-      // on selectedFill — 1.12:1 in light, 1.3:1 in dark. Invisible.
-      for (final mode in SnipThemeMode.values) {
-        final t = SnipTheme.forMode(mode);
-        final deco = t.controlDecoration(
-            active: true, exclusive: false, tone: SnipControlTone.danger);
-        final fg = t.controlForeground(
-            active: true, exclusive: false, tone: SnipControlTone.danger);
-        expect(deco.color, t.selectedFill, reason: '$mode: fill is never swapped here');
-        expect((deco.border as Border).top.color, t.danger, reason: '$mode');
-        expect(fg, t.danger, reason: '$mode: must not be onDanger — that pairs only with '
-            'the exclusive-active danger fill, never with selectedFill');
-        expect(fg, isNot(t.onDanger), reason: '$mode');
-      }
-    });
+    test(
+      'a non-exclusive selected destructive control (e.g. an item marked '
+      'for bulk delete) stays on selectedFill, not the onDanger knockout',
+      () {
+        // Regression for a real mismatch: controlDecoration's non-exclusive
+        // branch never swaps the *fill* for danger (only the outline), so
+        // controlForeground must check `exclusive` before `tone` too, or a
+        // call site passing identical arguments to both gets onDanger drawn
+        // on selectedFill — 1.12:1 in light, 1.3:1 in dark. Invisible.
+        for (final mode in SnipThemeMode.values) {
+          final t = SnipTheme.forMode(mode);
+          final deco = t.controlDecoration(
+            active: true,
+            exclusive: false,
+            tone: SnipControlTone.danger,
+          );
+          final fg = t.controlForeground(
+            active: true,
+            exclusive: false,
+            tone: SnipControlTone.danger,
+          );
+          expect(
+            deco.color,
+            t.selectedFill,
+            reason: '$mode: fill is never swapped here',
+          );
+          expect((deco.border as Border).top.color, t.danger, reason: '$mode');
+          expect(
+            fg,
+            t.danger,
+            reason:
+                '$mode: must not be onDanger — that pairs only with '
+                'the exclusive-active danger fill, never with selectedFill',
+          );
+          expect(fg, isNot(t.onDanger), reason: '$mode');
+        }
+      },
+    );
   });
 
   test('foreground never drifts from fill: every (active, exclusive, enabled, '
@@ -337,22 +500,43 @@ void main() {
           for (final enabled in [false, true]) {
             for (final tone in SnipControlTone.values) {
               final deco = t.controlDecoration(
-                  active: active, exclusive: exclusive, enabled: enabled, tone: tone);
+                active: active,
+                exclusive: exclusive,
+                enabled: enabled,
+                tone: tone,
+              );
               final fg = t.controlForeground(
-                  active: active, exclusive: exclusive, enabled: enabled, tone: tone);
-              expect(deco, isNotNull, reason: '$mode $active $exclusive $enabled $tone');
+                active: active,
+                exclusive: exclusive,
+                enabled: enabled,
+                tone: tone,
+              );
+              expect(
+                deco,
+                isNotNull,
+                reason: '$mode $active $exclusive $enabled $tone',
+              );
               if (!enabled) {
-                expect(fg, t.inkFaint, reason: '$mode $active $exclusive $enabled $tone');
+                expect(
+                  fg,
+                  t.inkFaint,
+                  reason: '$mode $active $exclusive $enabled $tone',
+                );
                 continue;
               }
               // The fill a resting/transparent decoration paints on is
               // whatever surface it sits on — surfaceRaised is the panel
               // tone used throughout the app for a control's own backdrop.
-              final effectiveFill =
-                  deco.color == Colors.transparent ? t.surfaceRaised : deco.color!;
-              expect(_contrast(fg, effectiveFill), greaterThanOrEqualTo(4.5),
-                  reason: '$mode active=$active exclusive=$exclusive tone=$tone: '
-                      'foreground $fg on fill $effectiveFill');
+              final effectiveFill = deco.color == Colors.transparent
+                  ? t.surfaceRaised
+                  : deco.color!;
+              expect(
+                _contrast(fg, effectiveFill),
+                greaterThanOrEqualTo(4.5),
+                reason:
+                    '$mode active=$active exclusive=$exclusive tone=$tone: '
+                    'foreground $fg on fill $effectiveFill',
+              );
             }
           }
         }
@@ -367,34 +551,59 @@ void main() {
       // black swatch) / ~1.12:1 (dark, white swatch) — effectively
       // invisible. ringOn must pick the *other* mark tone in each case.
       final light = SnipTheme.light();
-      expect(light.ringOn(const Color(0xFF000000)), light.onActive,
-          reason: 'light mode, pure black swatch: ink itself is near-black, '
-              'must fall back to onActive (near-white)');
-      expect(_contrast(light.ringOn(const Color(0xFF000000)), const Color(0xFF000000)),
-          greaterThanOrEqualTo(3.0));
+      expect(
+        light.ringOn(const Color(0xFF000000)),
+        light.onActive,
+        reason:
+            'light mode, pure black swatch: ink itself is near-black, '
+            'must fall back to onActive (near-white)',
+      );
+      expect(
+        _contrast(
+          light.ringOn(const Color(0xFF000000)),
+          const Color(0xFF000000),
+        ),
+        greaterThanOrEqualTo(3.0),
+      );
 
       final dark = SnipTheme.dark();
-      expect(dark.ringOn(const Color(0xFFFFFFFF)), dark.onActive,
-          reason: 'dark mode, pure white swatch: ink itself is near-white, '
-              'must fall back to onActive (near-black)');
-      expect(_contrast(dark.ringOn(const Color(0xFFFFFFFF)), const Color(0xFFFFFFFF)),
-          greaterThanOrEqualTo(3.0));
+      expect(
+        dark.ringOn(const Color(0xFFFFFFFF)),
+        dark.onActive,
+        reason:
+            'dark mode, pure white swatch: ink itself is near-white, '
+            'must fall back to onActive (near-black)',
+      );
+      expect(
+        _contrast(
+          dark.ringOn(const Color(0xFFFFFFFF)),
+          const Color(0xFFFFFFFF),
+        ),
+        greaterThanOrEqualTo(3.0),
+      );
     });
 
-    test('every AppColors.palette entry gets a ring that clears 3:1 in both modes', () {
-      // 3:1 is the WCAG non-text UI-indicator bar (not the 4.5:1 text bar) —
-      // a selection ring is a graphical indicator, not body text.
-      for (final mode in SnipThemeMode.values) {
-        final t = SnipTheme.forMode(mode);
-        for (final swatch in AppColors.palette) {
-          final ring = t.ringOn(swatch);
-          expect(_contrast(ring, swatch), greaterThanOrEqualTo(3.0),
-              reason: '$mode: ring for '
+    test(
+      'every AppColors.palette entry gets a ring that clears 3:1 in both modes',
+      () {
+        // 3:1 is the WCAG non-text UI-indicator bar (not the 4.5:1 text bar) —
+        // a selection ring is a graphical indicator, not body text.
+        for (final mode in SnipThemeMode.values) {
+          final t = SnipTheme.forMode(mode);
+          for (final swatch in AppColors.palette) {
+            final ring = t.ringOn(swatch);
+            expect(
+              _contrast(ring, swatch),
+              greaterThanOrEqualTo(3.0),
+              reason:
+                  '$mode: ring for '
                   '#${swatch.toARGB32().toRadixString(16)} only clears '
-                  '${_contrast(ring, swatch).toStringAsFixed(2)}:1');
+                  '${_contrast(ring, swatch).toStringAsFixed(2)}:1',
+            );
+          }
         }
-      }
-    });
+      },
+    );
 
     test('ringOn only ever answers one of the theme\'s own two mark tones', () {
       // Never a third, invented colour — stays inside the design's existing
@@ -404,7 +613,11 @@ void main() {
       for (final mode in SnipThemeMode.values) {
         final t = SnipTheme.forMode(mode);
         for (final swatch in [...AppColors.palette, const Color(0xFF808080)]) {
-          expect([t.ink, t.onActive], contains(t.ringOn(swatch)), reason: '$mode');
+          expect(
+            [t.ink, t.onActive],
+            contains(t.ringOn(swatch)),
+            reason: '$mode',
+          );
         }
         expect(
           [t.ink, t.onActive],
@@ -419,20 +632,26 @@ void main() {
     test('an opaque swatch never requires a backdrop', () {
       for (final mode in SnipThemeMode.values) {
         final t = SnipTheme.forMode(mode);
-        expect(() => t.ringOn(const Color(0xFF112233)), returnsNormally, reason: '$mode');
+        expect(
+          () => t.ringOn(const Color(0xFF112233)),
+          returnsNormally,
+          reason: '$mode',
+        );
       }
     });
 
     test('a translucent swatch without a backdrop asserts', () {
       for (final mode in SnipThemeMode.values) {
         final t = SnipTheme.forMode(mode);
-        expect(() => t.ringOn(Colors.black.withValues(alpha: 0.5)), throwsAssertionError,
-            reason: '$mode');
+        expect(
+          () => t.ringOn(Colors.black.withValues(alpha: 0.5)),
+          throwsAssertionError,
+          reason: '$mode',
+        );
       }
     });
 
-    test(
-        'a translucent backdrop itself throws — an ArgumentError, not an '
+    test('a translucent backdrop itself throws — an ArgumentError, not an '
         'assert, so this is the same code path in a release build too '
         '(review round, Finding 2)', () {
       // The backdrop-opacity check runs unconditionally, before either the
@@ -463,7 +682,10 @@ void main() {
       for (final mode in SnipThemeMode.values) {
         final t = SnipTheme.forMode(mode);
         expect(
-          () => t.ringOn(const Color(0xFF112233), backdrop: Colors.white.withValues(alpha: 0.5)),
+          () => t.ringOn(
+            const Color(0xFF112233),
+            backdrop: Colors.white.withValues(alpha: 0.5),
+          ),
           throwsArgumentError,
           reason: '$mode',
         );
@@ -485,20 +707,35 @@ void main() {
       final t = SnipTheme.light();
       const nearBlackTranslucent = Color(0x11000000); // alpha ~6.7%
       const nearWhiteBackdrop = Color(0xFFF5F5F5);
-      final composited = Color.alphaBlend(nearBlackTranslucent, nearWhiteBackdrop);
-      expect(_luminance(composited), greaterThan(0.7),
-          reason: 'sanity: the composited pixel should be close to the white backdrop');
+      final composited = Color.alphaBlend(
+        nearBlackTranslucent,
+        nearWhiteBackdrop,
+      );
+      expect(
+        _luminance(composited),
+        greaterThan(0.7),
+        reason:
+            'sanity: the composited pixel should be close to the white backdrop',
+      );
       // What the pre-fix, alpha-blind code would have scored: contrast
       // against the raw (uncomposited) near-black RGB picks onActive —
       // demonstrably wrong once you know the true rendered pixel is light.
-      expect(_contrast(t.onActive, nearBlackTranslucent) >= _contrast(t.ink, nearBlackTranslucent),
-          isTrue,
-          reason: 'sanity: scoring the raw uncomposited RGB would have picked onActive');
+      expect(
+        _contrast(t.onActive, nearBlackTranslucent) >=
+            _contrast(t.ink, nearBlackTranslucent),
+        isTrue,
+        reason:
+            'sanity: scoring the raw uncomposited RGB would have picked onActive',
+      );
       // The fixed method scores the composited pixel instead, and correctly
       // picks the dark tone for what is actually a light pixel.
-      expect(t.ringOn(nearBlackTranslucent, backdrop: nearWhiteBackdrop), t.ink,
-          reason: 'must score against the composited (near-white) pixel, not the raw '
-              '(near-black) swatch RGB, which would wrongly answer onActive');
+      expect(
+        t.ringOn(nearBlackTranslucent, backdrop: nearWhiteBackdrop),
+        t.ink,
+        reason:
+            'must score against the composited (near-white) pixel, not the raw '
+            '(near-black) swatch RGB, which would wrongly answer onActive',
+      );
     });
   });
 
@@ -513,10 +750,14 @@ void main() {
           final stops = stopsOf(gradient);
           final ring = t.ringOnGradient(stops);
           for (final stop in stops) {
-            expect(_contrast(ring, stop), greaterThanOrEqualTo(3.0),
-                reason: '$mode: ring for gradient stop '
-                    '#${stop.toARGB32().toRadixString(16)} only clears '
-                    '${_contrast(ring, stop).toStringAsFixed(2)}:1');
+            expect(
+              _contrast(ring, stop),
+              greaterThanOrEqualTo(3.0),
+              reason:
+                  '$mode: ring for gradient stop '
+                  '#${stop.toARGB32().toRadixString(16)} only clears '
+                  '${_contrast(ring, stop).toStringAsFixed(2)}:1',
+            );
           }
         }
       }
@@ -536,9 +777,14 @@ void main() {
       expect(t.ringOnGradient(stops), t.ink);
 
       final ringWorst = stops.map((s) => _contrast(t.ink, s)).reduce(math.min);
-      final otherWorst = stops.map((s) => _contrast(t.onActive, s)).reduce(math.min);
-      expect(ringWorst, greaterThan(otherWorst),
-          reason: 'sanity: ink should actually have the better worst-case here');
+      final otherWorst = stops
+          .map((s) => _contrast(t.onActive, s))
+          .reduce(math.min);
+      expect(
+        ringWorst,
+        greaterThan(otherWorst),
+        reason: 'sanity: ink should actually have the better worst-case here',
+      );
     });
 
     test('rejects an empty stop list', () {
@@ -549,7 +795,10 @@ void main() {
     test('a translucent stop asserts, mirroring ringOn\'s own contract', () {
       final t = SnipTheme.light();
       expect(
-        () => t.ringOnGradient([Colors.black.withValues(alpha: 0.5), const Color(0xFFFFFFFF)]),
+        () => t.ringOnGradient([
+          Colors.black.withValues(alpha: 0.5),
+          const Color(0xFFFFFFFF),
+        ]),
         throwsAssertionError,
       );
     });
@@ -558,8 +807,11 @@ void main() {
       for (final mode in SnipThemeMode.values) {
         final t = SnipTheme.forMode(mode);
         for (final gradient in AppColors.framingGradients) {
-          expect([t.ink, t.onActive], contains(t.ringOnGradient(stopsOf(gradient))),
-              reason: '$mode');
+          expect(
+            [t.ink, t.onActive],
+            contains(t.ringOnGradient(stopsOf(gradient))),
+            reason: '$mode',
+          );
         }
       }
     });

@@ -110,9 +110,14 @@ class AppDatabase extends _$AppDatabase {
 
   // Captures CRUD
   Future<List<Capture>> getAllCaptures() =>
-      (select(captures)..orderBy([(t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc)])).get();
+      (select(captures)..orderBy([
+            (t) =>
+                OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc),
+          ]))
+          .get();
 
-  Future<void> insertOrUpdateCapture(CapturesCompanion capture) => into(captures).insertOnConflictUpdate(capture);
+  Future<void> insertOrUpdateCapture(CapturesCompanion capture) =>
+      into(captures).insertOnConflictUpdate(capture);
 
   Future<void> deleteCaptureItem(String id) async {
     await transaction(() async {
@@ -131,9 +136,14 @@ class AppDatabase extends _$AppDatabase {
             ]))
           .get();
 
-  Future<void> saveAnnotationsForCapture(String captureId, List<AnnotationsCompanion> annotationList) async {
+  Future<void> saveAnnotationsForCapture(
+    String captureId,
+    List<AnnotationsCompanion> annotationList,
+  ) async {
     await transaction(() async {
-      await (delete(annotations)..where((t) => t.captureId.equals(captureId))).go();
+      await (delete(
+        annotations,
+      )..where((t) => t.captureId.equals(captureId))).go();
       for (final companion in annotationList) {
         await into(annotations).insert(companion);
       }
@@ -143,7 +153,8 @@ class AppDatabase extends _$AppDatabase {
   // Shortcuts CRUD
   Future<List<Shortcut>> getAllShortcuts() => select(shortcuts).get();
 
-  Future<void> saveShortcut(ShortcutsCompanion shortcut) => into(shortcuts).insertOnConflictUpdate(shortcut);
+  Future<void> saveShortcut(ShortcutsCompanion shortcut) =>
+      into(shortcuts).insertOnConflictUpdate(shortcut);
 
   Future<void> saveAllShortcuts(List<ShortcutsCompanion> shortcutList) async {
     await transaction(() async {
@@ -155,18 +166,24 @@ class AppDatabase extends _$AppDatabase {
 
   // Settings CRUD
   Future<String?> getSetting(String key) async {
-    final row = await (select(appSettings)..where((t) => t.key.equals(key))).getSingleOrNull();
+    final row = await (select(
+      appSettings,
+    )..where((t) => t.key.equals(key))).getSingleOrNull();
     return row?.value;
   }
 
   Future<void> setSetting(String key, String value) =>
-      into(appSettings).insertOnConflictUpdate(AppSettingsCompanion(key: Value(key), value: Value(value)));
+      into(appSettings).insertOnConflictUpdate(
+        AppSettingsCompanion(key: Value(key), value: Value(value)),
+      );
 }
 
 LazyDatabase _openConnection() {
   return LazyDatabase(() async {
     final dbFolder = await getApplicationDocumentsDirectory();
-    final file = File(p.join(dbFolder.path, 'SnipSnap', 'snipsnap_local.sqlite'));
+    final file = File(
+      p.join(dbFolder.path, 'SnipSnap', 'snipsnap_local.sqlite'),
+    );
     return NativeDatabase.createInBackground(file);
   });
 }

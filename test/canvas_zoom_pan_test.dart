@@ -11,7 +11,9 @@ import 'package:snipsnap/views/editor_canvas.dart';
 
 /// The live transform the canvas is rendering through.
 Matrix4 _transform(WidgetTester tester) {
-  final viewer = tester.widget<InteractiveViewer>(find.byType(InteractiveViewer));
+  final viewer = tester.widget<InteractiveViewer>(
+    find.byType(InteractiveViewer),
+  );
   return viewer.transformationController!.value;
 }
 
@@ -28,31 +30,33 @@ Future<void> _pumpCanvas(
   ValueChanged<double>? onZoom,
 }) async {
   await tester.runAsync(() async {
-    await tester.pumpWidget(SnipThemeScope(
-      theme: SnipTheme.forMode(SnipThemeMode.dark),
-      child: MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 600,
-            height: 500,
-            child: EditorCanvas(
-              imagePath: imagePath,
-              annotations: const [],
-              activeTool: CanvasTool.select,
-              activeColor: const Color(0xFF000000),
-              strokeWidth: 4,
-              fontSize: 16,
-              isFilled: false,
-              stepCounter: 1,
-              onAnnotationAdded: (_) {},
-              onStepCounterIncremented: (_) {},
-              onZoomScaleChanged: onZoom,
-              repaintBoundaryKey: repaintKey,
+    await tester.pumpWidget(
+      SnipThemeScope(
+        theme: SnipTheme.forMode(SnipThemeMode.dark),
+        child: MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 600,
+              height: 500,
+              child: EditorCanvas(
+                imagePath: imagePath,
+                annotations: const [],
+                activeTool: CanvasTool.select,
+                activeColor: const Color(0xFF000000),
+                strokeWidth: 4,
+                fontSize: 16,
+                isFilled: false,
+                stepCounter: 1,
+                onAnnotationAdded: (_) {},
+                onStepCounterIncremented: (_) {},
+                onZoomScaleChanged: onZoom,
+                repaintBoundaryKey: repaintKey,
+              ),
             ),
           ),
         ),
       ),
-    ));
+    );
     await Future<void>.delayed(const Duration(milliseconds: 600));
     await tester.pump();
   });
@@ -101,16 +105,23 @@ void main() {
     await _pumpCanvas(tester, imagePath: imagePath, repaintKey: repaintKey);
 
     // Zoom in first — with the capture fitted there is nothing to pan to.
-    await _scroll(tester, const Offset(300, 250), const Offset(0, -300),
-        holding: LogicalKeyboardKey.metaLeft);
+    await _scroll(
+      tester,
+      const Offset(300, 250),
+      const Offset(0, -300),
+      holding: LogicalKeyboardKey.metaLeft,
+    );
     expect(_scale(tester), greaterThan(1.5), reason: 'Cmd+scroll must zoom');
 
     final before = _translation(tester);
     await _scroll(tester, const Offset(300, 250), const Offset(0, 120));
     final after = _translation(tester);
 
-    expect(after.dy, lessThan(before.dy),
-        reason: 'scrolling down moves the content up, i.e. reveals lower rows');
+    expect(
+      after.dy,
+      lessThan(before.dy),
+      reason: 'scrolling down moves the content up, i.e. reveals lower rows',
+    );
     expect(_scale(tester), closeTo(_scale(tester), 0.001));
   });
 
@@ -120,8 +131,11 @@ void main() {
     await _pumpCanvas(tester, imagePath: imagePath, repaintKey: repaintKey);
 
     await _scroll(tester, const Offset(300, 250), const Offset(0, -240));
-    expect(_scale(tester), closeTo(1.0, 0.001),
-        reason: 'plain scroll is a pan gesture now, not a zoom');
+    expect(
+      _scale(tester),
+      closeTo(1.0, 0.001),
+      reason: 'plain scroll is a pan gesture now, not a zoom',
+    );
   });
 
   testWidgets('zoom holds the point under the cursor still', (tester) async {
@@ -133,8 +147,12 @@ void main() {
     await _pumpCanvas(tester, imagePath: imagePath, repaintKey: repaintKey);
 
     const focal = Offset(120, 100);
-    await _scroll(tester, focal, const Offset(0, -300),
-        holding: LogicalKeyboardKey.metaLeft);
+    await _scroll(
+      tester,
+      focal,
+      const Offset(0, -300),
+      holding: LogicalKeyboardKey.metaLeft,
+    );
 
     final m = _transform(tester);
     final scale = m.getMaxScaleOnAxis();
@@ -142,7 +160,10 @@ void main() {
 
     // The content point that was under the cursor must still map to the cursor.
     final t = _translation(tester);
-    final contentUnderCursor = Offset((focal.dx - t.dx) / scale, (focal.dy - t.dy) / scale);
+    final contentUnderCursor = Offset(
+      (focal.dx - t.dx) / scale,
+      (focal.dy - t.dy) / scale,
+    );
     final reprojected = Offset(
       contentUnderCursor.dx * scale + t.dx,
       contentUnderCursor.dy * scale + t.dy,
@@ -150,8 +171,11 @@ void main() {
     expect(reprojected.dx, closeTo(focal.dx, 0.5));
     expect(reprojected.dy, closeTo(focal.dy, 0.5));
     // And it must not have snapped back to the middle of the viewport.
-    expect(t.dx, isNot(closeTo((800 - 800 * scale) / 2, 1.0)),
-        reason: 'a centre-anchored matrix would put tx exactly here');
+    expect(
+      t.dx,
+      isNot(closeTo((800 - 800 * scale) / 2, 1.0)),
+      reason: 'a centre-anchored matrix would put tx exactly here',
+    );
   });
 
   testWidgets('a pan survives the next zoom step', (tester) async {
@@ -160,16 +184,27 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await _pumpCanvas(tester, imagePath: imagePath, repaintKey: repaintKey);
 
-    await _scroll(tester, const Offset(300, 250), const Offset(0, -300),
-        holding: LogicalKeyboardKey.metaLeft);
+    await _scroll(
+      tester,
+      const Offset(300, 250),
+      const Offset(0, -300),
+      holding: LogicalKeyboardKey.metaLeft,
+    );
     await _scroll(tester, const Offset(300, 250), const Offset(0, 150));
     final panned = _translation(tester);
     expect(panned.dy, lessThan(0.0));
 
-    await _scroll(tester, const Offset(300, 250), const Offset(0, -60),
-        holding: LogicalKeyboardKey.metaLeft);
-    expect(_translation(tester).dy, lessThan(0.0),
-        reason: 'zooming again must not throw the pan away');
+    await _scroll(
+      tester,
+      const Offset(300, 250),
+      const Offset(0, -60),
+      holding: LogicalKeyboardKey.metaLeft,
+    );
+    expect(
+      _translation(tester).dy,
+      lessThan(0.0),
+      reason: 'zooming again must not throw the pan away',
+    );
   });
 
   testWidgets('the content can never be panned out of sight', (tester) async {
@@ -177,22 +212,34 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await _pumpCanvas(tester, imagePath: imagePath, repaintKey: repaintKey);
 
-    await _scroll(tester, const Offset(300, 250), const Offset(0, -300),
-        holding: LogicalKeyboardKey.metaLeft);
+    await _scroll(
+      tester,
+      const Offset(300, 250),
+      const Offset(0, -300),
+      holding: LogicalKeyboardKey.metaLeft,
+    );
     for (var i = 0; i < 40; i++) {
       await _scroll(tester, const Offset(300, 250), const Offset(0, -400));
     }
 
     final t = _translation(tester);
-    expect(t.dy, lessThanOrEqualTo(0.001),
-        reason: 'the top edge is the furthest the content may travel down');
+    expect(
+      t.dy,
+      lessThanOrEqualTo(0.001),
+      reason: 'the top edge is the furthest the content may travel down',
+    );
     final scale = _scale(tester);
     final viewportH = tester.getSize(find.byType(InteractiveViewer)).height;
-    expect(t.dy, greaterThanOrEqualTo(viewportH - viewportH * scale - 0.001),
-        reason: 'and the bottom edge is the furthest the other way');
+    expect(
+      t.dy,
+      greaterThanOrEqualTo(viewportH - viewportH * scale - 0.001),
+      reason: 'and the bottom edge is the furthest the other way',
+    );
   });
 
-  testWidgets('drawing stays accurate while zoomed in and panned', (tester) async {
+  testWidgets('drawing stays accurate while zoomed in and panned', (
+    tester,
+  ) async {
     // The coordinate contract this whole change had to preserve: gestures are
     // handled inside the transformed subtree, so Flutter applies the inverse
     // transform for hit testing and `localPosition` stays in child space no
@@ -204,38 +251,44 @@ void main() {
     Rect? applied;
     final key = GlobalKey();
     await tester.runAsync(() async {
-      await tester.pumpWidget(SnipThemeScope(
-        theme: SnipTheme.forMode(SnipThemeMode.dark),
-        child: MaterialApp(
-          home: Scaffold(
-            body: SizedBox(
-              width: 600,
-              height: 500,
-              child: EditorCanvas(
-                imagePath: imagePath,
-                annotations: const [],
-                activeTool: CanvasTool.crop,
-                activeColor: const Color(0xFF000000),
-                strokeWidth: 4,
-                fontSize: 16,
-                isFilled: false,
-                stepCounter: 1,
-                onAnnotationAdded: (_) {},
-                onStepCounterIncremented: (_) {},
-                onApplyCrop: (r) => applied = r,
-                repaintBoundaryKey: key,
+      await tester.pumpWidget(
+        SnipThemeScope(
+          theme: SnipTheme.forMode(SnipThemeMode.dark),
+          child: MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                width: 600,
+                height: 500,
+                child: EditorCanvas(
+                  imagePath: imagePath,
+                  annotations: const [],
+                  activeTool: CanvasTool.crop,
+                  activeColor: const Color(0xFF000000),
+                  strokeWidth: 4,
+                  fontSize: 16,
+                  isFilled: false,
+                  stepCounter: 1,
+                  onAnnotationAdded: (_) {},
+                  onStepCounterIncremented: (_) {},
+                  onApplyCrop: (r) => applied = r,
+                  repaintBoundaryKey: key,
+                ),
               ),
             ),
           ),
         ),
-      ));
+      );
       await Future<void>.delayed(const Duration(milliseconds: 600));
       await tester.pump();
     });
     await tester.pumpAndSettle();
 
-    await _scroll(tester, const Offset(200, 180), const Offset(0, -300),
-        holding: LogicalKeyboardKey.metaLeft);
+    await _scroll(
+      tester,
+      const Offset(200, 180),
+      const Offset(0, -300),
+      holding: LogicalKeyboardKey.metaLeft,
+    );
     await _scroll(tester, const Offset(300, 250), const Offset(0, 90));
     final scale = _scale(tester);
     expect(scale, greaterThan(1.5), reason: 'the view must actually be zoomed');
@@ -249,7 +302,10 @@ void main() {
     final box = key.currentContext!.findRenderObject() as RenderBox;
     Offset toChild(Offset v) => box.globalToLocal(v);
 
-    final gesture = await tester.startGesture(fromView, kind: PointerDeviceKind.mouse);
+    final gesture = await tester.startGesture(
+      fromView,
+      kind: PointerDeviceKind.mouse,
+    );
     await tester.pump(const Duration(milliseconds: 16));
     await gesture.moveTo(fromView + const Offset(2, 2));
     await tester.pump(const Duration(milliseconds: 16));
@@ -281,14 +337,22 @@ void main() {
     await _pumpCanvas(tester, imagePath: imagePath, repaintKey: repaintKey);
 
     for (var i = 0; i < 60; i++) {
-      await _scroll(tester, const Offset(300, 250), const Offset(0, -400),
-          holding: LogicalKeyboardKey.metaLeft);
+      await _scroll(
+        tester,
+        const Offset(300, 250),
+        const Offset(0, -400),
+        holding: LogicalKeyboardKey.metaLeft,
+      );
     }
     expect(_scale(tester), closeTo(4.0, 0.001));
 
     for (var i = 0; i < 120; i++) {
-      await _scroll(tester, const Offset(300, 250), const Offset(0, 400),
-          holding: LogicalKeyboardKey.metaLeft);
+      await _scroll(
+        tester,
+        const Offset(300, 250),
+        const Offset(0, 400),
+        holding: LogicalKeyboardKey.metaLeft,
+      );
     }
     expect(_scale(tester), closeTo(0.2, 0.001));
   });

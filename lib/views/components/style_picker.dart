@@ -134,16 +134,19 @@ class StylePicker extends StatelessWidget {
     return [
       for (final color in savedColors)
         GestureDetector(
-          onSecondaryTap:
-              onRemoveSavedColor == null ? null : () => onRemoveSavedColor!(color),
-          onLongPress:
-              onRemoveSavedColor == null ? null : () => onRemoveSavedColor!(color),
+          onSecondaryTap: onRemoveSavedColor == null
+              ? null
+              : () => onRemoveSavedColor!(color),
+          onLongPress: onRemoveSavedColor == null
+              ? null
+              : () => onRemoveSavedColor!(color),
           child: _CircleColorSwatch(
             // Drawn as saved; compared and applied through [applied], which is
             // how a section that owns its own transparency keeps the swatch
             // itself readable.
             color: color,
-            isSelected: current.toARGB32() ==
+            isSelected:
+                current.toARGB32() ==
                 (applied?.call(color) ?? color).toARGB32(),
             onTap: () => onPick(color),
             size: 30,
@@ -196,18 +199,24 @@ class StylePicker extends StatelessWidget {
     // Thickness is drag-set for some marks, and a slider showing the same
     // property would only be a second, coarser way to do it — capped lower than
     // the drag allows, at that. See [dragSizedStrokeTools].
-    final showStroke = [
-      CanvasTool.pen,
-      CanvasTool.arrow,
-      CanvasTool.line,
-      CanvasTool.shape,
-      CanvasTool.highlight,
-      CanvasTool.ruler,
-    ].contains(effectiveTool) &&
+    final showStroke =
+        [
+          CanvasTool.pen,
+          CanvasTool.arrow,
+          CanvasTool.line,
+          CanvasTool.shape,
+          CanvasTool.highlight,
+          CanvasTool.ruler,
+        ].contains(effectiveTool) &&
         !dragSizedStrokeTools.contains(effectiveTool);
 
-    final showFont = effectiveTool == CanvasTool.text || effectiveTool == CanvasTool.stepMarker;
-    final showFill = [CanvasTool.shape, CanvasTool.text].contains(effectiveTool);
+    final showFont =
+        effectiveTool == CanvasTool.text ||
+        effectiveTool == CanvasTool.stepMarker;
+    final showFill = [
+      CanvasTool.shape,
+      CanvasTool.text,
+    ].contains(effectiveTool);
 
     // A drop shadow adds depth to vector annotations, text callouts and step markers over screenshots.
     final showShadow = [
@@ -220,35 +229,41 @@ class StylePicker extends StatelessWidget {
     ].contains(effectiveTool);
 
     // Corner radius applies to rectangular shapes, speech bubbles, text background badges, and blur redaction boxes.
-    final showCornerRadius = (effectiveTool == CanvasTool.shape &&
+    final showCornerRadius =
+        (effectiveTool == CanvasTool.shape &&
             (effectiveShapeKind == ShapeKind.rectangle ||
                 effectiveShapeKind == ShapeKind.speechBubble)) ||
         (effectiveTool == CanvasTool.text && isFilled) ||
         (effectiveTool == CanvasTool.blur);
 
-    final showColor = [
-      CanvasTool.pen,
-      CanvasTool.arrow,
-      CanvasTool.line,
-      CanvasTool.shape,
-      CanvasTool.highlight,
-      CanvasTool.text,
-      CanvasTool.stepMarker,
-      CanvasTool.ruler,
-    ].contains(effectiveTool) || (selectedAnnotation != null && effectiveTool != CanvasTool.blur && effectiveTool != CanvasTool.crop);
+    final showColor =
+        [
+          CanvasTool.pen,
+          CanvasTool.arrow,
+          CanvasTool.line,
+          CanvasTool.shape,
+          CanvasTool.highlight,
+          CanvasTool.text,
+          CanvasTool.stepMarker,
+          CanvasTool.ruler,
+        ].contains(effectiveTool) ||
+        (selectedAnnotation != null &&
+            effectiveTool != CanvasTool.blur &&
+            effectiveTool != CanvasTool.crop);
 
-    final showOpacity = [
-      CanvasTool.pen,
-      CanvasTool.arrow,
-      CanvasTool.line,
-      CanvasTool.shape,
-      CanvasTool.highlight,
-      CanvasTool.text,
-      CanvasTool.stepMarker,
-      CanvasTool.blur,
-      CanvasTool.ruler,
-    ].contains(effectiveTool) || (selectedAnnotation != null && effectiveTool != CanvasTool.crop);
-
+    final showOpacity =
+        [
+          CanvasTool.pen,
+          CanvasTool.arrow,
+          CanvasTool.line,
+          CanvasTool.shape,
+          CanvasTool.highlight,
+          CanvasTool.text,
+          CanvasTool.stepMarker,
+          CanvasTool.blur,
+          CanvasTool.ruler,
+        ].contains(effectiveTool) ||
+        (selectedAnnotation != null && effectiveTool != CanvasTool.crop);
 
     final bgColor = t.surface;
     final textColor = t.ink;
@@ -268,9 +283,7 @@ class StylePicker extends StatelessWidget {
       height: double.infinity,
       decoration: BoxDecoration(
         color: bgColor,
-        border: Border(
-          left: BorderSide(color: borderColor),
-        ),
+        border: Border(left: BorderSide(color: borderColor)),
       ),
       padding: const EdgeInsets.all(16),
       child: SingleChildScrollView(
@@ -287,14 +300,18 @@ class StylePicker extends StatelessWidget {
                   child: Row(
                     children: [
                       Icon(
-                        selectedAnnotation != null ? Icons.layers_rounded : Icons.tune_rounded,
+                        selectedAnnotation != null
+                            ? Icons.layers_rounded
+                            : Icons.tune_rounded,
                         color: t.ink,
                         size: 18,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          selectedAnnotation != null ? 'Item Properties' : 'Tool Properties',
+                          selectedAnnotation != null
+                              ? 'Item Properties'
+                              : 'Tool Properties',
                           style: TextStyle(
                             color: textColor,
                             fontSize: 15,
@@ -308,7 +325,11 @@ class StylePicker extends StatelessWidget {
                 ),
                 if (onCloseDrawer != null)
                   IconButton(
-                    icon: Icon(Icons.chevron_right_rounded, color: subTextColor, size: 20),
+                    icon: Icon(
+                      Icons.chevron_right_rounded,
+                      color: subTextColor,
+                      size: 20,
+                    ),
                     tooltip: 'Hide Properties Drawer',
                     onPressed: onCloseDrawer,
                     padding: EdgeInsets.zero,
@@ -336,10 +357,16 @@ class StylePicker extends StatelessWidget {
                       Tooltip(
                         message: 'Bring to Front',
                         child: IconButton(
-                          icon: const Icon(Icons.flip_to_front_rounded, size: 16),
+                          icon: const Icon(
+                            Icons.flip_to_front_rounded,
+                            size: 16,
+                          ),
                           color: textColor,
                           padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 30,
+                          ),
                           onPressed: onBringToFront,
                         ),
                       ),
@@ -347,10 +374,16 @@ class StylePicker extends StatelessWidget {
                       Tooltip(
                         message: 'Send to Back',
                         child: IconButton(
-                          icon: const Icon(Icons.flip_to_back_rounded, size: 16),
+                          icon: const Icon(
+                            Icons.flip_to_back_rounded,
+                            size: 16,
+                          ),
                           color: textColor,
                           padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 30,
+                          ),
                           onPressed: onSendToBack,
                         ),
                       ),
@@ -358,9 +391,16 @@ class StylePicker extends StatelessWidget {
                       Tooltip(
                         message: 'Delete Selected (Del)',
                         child: IconButton(
-                          icon: Icon(Icons.delete_outline_rounded, size: 16, color: t.danger),
+                          icon: Icon(
+                            Icons.delete_outline_rounded,
+                            size: 16,
+                            color: t.danger,
+                          ),
                           padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 30,
+                          ),
                           onPressed: onDeleteSelected,
                         ),
                       ),
@@ -368,9 +408,16 @@ class StylePicker extends StatelessWidget {
                       Tooltip(
                         message: 'Deselect (Esc)',
                         child: IconButton(
-                          icon: Icon(Icons.close_rounded, size: 16, color: subTextColor),
+                          icon: Icon(
+                            Icons.close_rounded,
+                            size: 16,
+                            color: subTextColor,
+                          ),
                           padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 32, minHeight: 30),
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 30,
+                          ),
                           onPressed: onDeselect,
                         ),
                       ),
@@ -381,7 +428,8 @@ class StylePicker extends StatelessWidget {
             ],
 
             // Context Card: Selection Tool (when no item selected)
-            if (activeTool == CanvasTool.select && selectedAnnotation == null) ...[
+            if (activeTool == CanvasTool.select &&
+                selectedAnnotation == null) ...[
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -398,14 +446,22 @@ class StylePicker extends StatelessWidget {
                         const SizedBox(width: 8),
                         Text(
                           'Selection & Cut',
-                          style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
+                          style: TextStyle(
+                            color: textColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       '• Drag over the image to create a selection.\n• Drag inside to cut & move.\n• Press Delete to erase to transparent.\n• Click any annotation on canvas to edit its properties.',
-                      style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
+                      style: TextStyle(
+                        color: subTextColor,
+                        fontSize: 11,
+                        height: 1.4,
+                      ),
                     ),
                   ],
                 ),
@@ -431,14 +487,22 @@ class StylePicker extends StatelessWidget {
                         const SizedBox(width: 8),
                         Text(
                           'Crop & Canvas Bounds',
-                          style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
+                          style: TextStyle(
+                            color: textColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       '• Drag handles inward to crop image.\n• Drag handles outward to expand canvas with transparent space.\n• Press Enter to commit changes.',
-                      style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
+                      style: TextStyle(
+                        color: subTextColor,
+                        fontSize: 11,
+                        height: 1.4,
+                      ),
                     ),
                   ],
                 ),
@@ -464,14 +528,22 @@ class StylePicker extends StatelessWidget {
                         const SizedBox(width: 8),
                         Text(
                           'OCR Text Extraction',
-                          style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
+                          style: TextStyle(
+                            color: textColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       '• Drag a rectangle over any text in the screenshot to extract it.\n• Click canvas to extract text from the entire screenshot.\n• Extracted text is copied directly to clipboard.',
-                      style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
+                      style: TextStyle(
+                        color: subTextColor,
+                        fontSize: 11,
+                        height: 1.4,
+                      ),
                     ),
                   ],
                 ),
@@ -497,14 +569,22 @@ class StylePicker extends StatelessWidget {
                         const SizedBox(width: 8),
                         Text(
                           'Color Eyedropper',
-                          style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
+                          style: TextStyle(
+                            color: textColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       '• Hover and click anywhere on the screenshot to sample the pixel color into your active tool.',
-                      style: TextStyle(color: subTextColor, fontSize: 11, height: 1.4),
+                      style: TextStyle(
+                        color: subTextColor,
+                        fontSize: 11,
+                        height: 1.4,
+                      ),
                     ),
                     const SizedBox(height: 10),
                     // The sampled colour is almost never one of the preset
@@ -553,7 +633,9 @@ class StylePicker extends StatelessWidget {
                     size: 30,
                   ),
                   ...AppColors.palette.map((color) {
-                    final isSelected = selectedColor.toARGB32() == color.toARGB32() && opacity > 0.05;
+                    final isSelected =
+                        selectedColor.toARGB32() == color.toARGB32() &&
+                        opacity > 0.05;
                     return _CircleColorSwatch(
                       color: color,
                       isSelected: isSelected,
@@ -585,7 +667,11 @@ class StylePicker extends StatelessWidget {
                           shape: BoxShape.circle,
                           border: Border.all(color: borderColor),
                         ),
-                        child: Icon(Icons.color_lens_rounded, size: 16, color: textColor),
+                        child: Icon(
+                          Icons.color_lens_rounded,
+                          size: 16,
+                          color: textColor,
+                        ),
                       ),
                     ),
                   ),
@@ -602,7 +688,11 @@ class StylePicker extends StatelessWidget {
                             shape: BoxShape.circle,
                             border: Border.all(color: borderColor),
                           ),
-                          child: Icon(Icons.colorize_rounded, size: 16, color: textColor),
+                          child: Icon(
+                            Icons.colorize_rounded,
+                            size: 16,
+                            color: textColor,
+                          ),
                         ),
                       ),
                     ),
@@ -614,15 +704,32 @@ class StylePicker extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Tolerance:', style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text(
+                    'Tolerance:',
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(4),
                       border: Border.all(color: borderColor),
                     ),
-                    child: Text('${fillTolerance.toInt()}%', style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold)),
+                    child: Text(
+                      '${fillTolerance.toInt()}%',
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -642,15 +749,32 @@ class StylePicker extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Opacity:', style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text(
+                    'Opacity:',
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(4),
                       border: Border.all(color: borderColor),
                     ),
-                    child: Text('${(opacity * 100).toInt()}%', style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold)),
+                    child: Text(
+                      '${(opacity * 100).toInt()}%',
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -679,16 +803,23 @@ class StylePicker extends StatelessWidget {
                         height: 20,
                         child: Checkbox(
                           value: isGlobalFill,
-                          onChanged: (val) => onGlobalFillChanged?.call(val ?? false),
+                          onChanged: (val) =>
+                              onGlobalFillChanged?.call(val ?? false),
                           activeColor: t.activeFill,
                           checkColor: t.onActive,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Text(
                         'Global Fill (All matching pixels)',
-                        style: TextStyle(color: textColor, fontSize: 12, fontWeight: FontWeight.w500),
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ],
                   ),
@@ -698,7 +829,8 @@ class StylePicker extends StatelessWidget {
             ],
 
             // Shape Chooser Grid (when Shape tool is active or shape is selected)
-            if (effectiveTool == CanvasTool.shape && onShapeKindChanged != null) ...[
+            if (effectiveTool == CanvasTool.shape &&
+                onShapeKindChanged != null) ...[
               Text(
                 'SHAPE',
                 style: TextStyle(
@@ -724,7 +856,10 @@ class StylePicker extends StatelessWidget {
                         child: Container(
                           width: 46,
                           height: 42,
-                          decoration: t.controlDecoration(active: isSelected, radius: 8),
+                          decoration: t.controlDecoration(
+                            active: isSelected,
+                            radius: 8,
+                          ),
                           child: Icon(
                             kind.icon,
                             size: 20,
@@ -762,7 +897,11 @@ class StylePicker extends StatelessWidget {
                           child: Center(
                             child: Text(
                               '$stepCounter',
-                              style: TextStyle(color: t.onActive, fontWeight: FontWeight.bold, fontSize: 13),
+                              style: TextStyle(
+                                color: t.onActive,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
                         ),
@@ -773,47 +912,85 @@ class StylePicker extends StatelessWidget {
                             children: [
                               Text(
                                 'Next Step Badge',
-                                style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 12),
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
                               ),
                               Text(
                                 'Click canvas to place #$stepCounter',
-                                style: TextStyle(color: subTextColor, fontSize: 10),
+                                style: TextStyle(
+                                  color: subTextColor,
+                                  fontSize: 10,
+                                ),
                               ),
                             ],
                           ),
                         ),
                       ],
                     ),
-                    if ((stepCounter > 1 && onResetStepCounter != null) || onRenumberSteps != null) ...[
+                    if ((stepCounter > 1 && onResetStepCounter != null) ||
+                        onRenumberSteps != null) ...[
                       const SizedBox(height: 10),
                       Row(
                         children: [
                           if (stepCounter > 1 && onResetStepCounter != null)
                             Expanded(
                               child: OutlinedButton.icon(
-                                icon: const Icon(Icons.restart_alt_rounded, size: 14),
-                                label: const Text('Reset #1', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                                icon: const Icon(
+                                  Icons.restart_alt_rounded,
+                                  size: 14,
+                                ),
+                                label: const Text(
+                                  'Reset #1',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: t.ink,
                                   side: BorderSide(color: t.border),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 6,
+                                    horizontal: 6,
+                                  ),
                                 ),
                                 onPressed: onResetStepCounter,
                               ),
                             ),
-                          if (stepCounter > 1 && onResetStepCounter != null && onRenumberSteps != null)
+                          if (stepCounter > 1 &&
+                              onResetStepCounter != null &&
+                              onRenumberSteps != null)
                             const SizedBox(width: 6),
                           if (onRenumberSteps != null)
                             Expanded(
                               child: OutlinedButton.icon(
-                                icon: const Icon(Icons.format_list_numbered_rounded, size: 14),
-                                label: const Text('Renumber', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                                icon: const Icon(
+                                  Icons.format_list_numbered_rounded,
+                                  size: 14,
+                                ),
+                                label: const Text(
+                                  'Renumber',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: t.ink,
                                   side: BorderSide(color: t.border),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 6,
+                                    horizontal: 6,
+                                  ),
                                 ),
                                 onPressed: onRenumberSteps,
                               ),
@@ -833,8 +1010,10 @@ class StylePicker extends StatelessWidget {
                 effectiveTool == CanvasTool.text
                     ? 'TEXT COLOR'
                     : (effectiveTool == CanvasTool.highlight
-                        ? 'HIGHLIGHTER TINT'
-                        : (effectiveTool == CanvasTool.stepMarker ? 'BADGE COLOR' : 'COLOR')),
+                          ? 'HIGHLIGHTER TINT'
+                          : (effectiveTool == CanvasTool.stepMarker
+                                ? 'BADGE COLOR'
+                                : 'COLOR')),
                 style: TextStyle(
                   color: subTextColor,
                   fontSize: 11,
@@ -866,14 +1045,15 @@ class StylePicker extends StatelessWidget {
                             ]
                           : AppColors.palette)
                       .map((color) {
-                    final isSelected = selectedColor.toARGB32() == color.toARGB32();
-                    return _CircleColorSwatch(
-                      color: color,
-                      isSelected: isSelected,
-                      onTap: () => onColorChanged(color),
-                      size: 30,
-                    );
-                  }),
+                        final isSelected =
+                            selectedColor.toARGB32() == color.toARGB32();
+                        return _CircleColorSwatch(
+                          color: color,
+                          isSelected: isSelected,
+                          onTap: () => onColorChanged(color),
+                          size: 30,
+                        );
+                      }),
                   ..._savedColorSwatches(t: t, onPick: onColorChanged),
                   // Custom Color Button
                   Tooltip(
@@ -888,7 +1068,11 @@ class StylePicker extends StatelessWidget {
                           shape: BoxShape.circle,
                           border: Border.all(color: borderColor),
                         ),
-                        child: Icon(Icons.color_lens_rounded, size: 16, color: textColor),
+                        child: Icon(
+                          Icons.color_lens_rounded,
+                          size: 16,
+                          color: textColor,
+                        ),
                       ),
                     ),
                   ),
@@ -905,7 +1089,11 @@ class StylePicker extends StatelessWidget {
                             shape: BoxShape.circle,
                             border: Border.all(color: borderColor),
                           ),
-                          child: Icon(Icons.colorize_rounded, size: 16, color: textColor),
+                          child: Icon(
+                            Icons.colorize_rounded,
+                            size: 16,
+                            color: textColor,
+                          ),
                         ),
                       ),
                     ),
@@ -933,14 +1121,21 @@ class StylePicker extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       '${strokeWidth.toInt()} px',
-                      style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -954,7 +1149,9 @@ class StylePicker extends StatelessWidget {
                     child: _StrokePresetChip(
                       label: '2px',
                       width: AppDefaults.strokeWidthThin,
-                      isSelected: (strokeWidth - AppDefaults.strokeWidthThin).abs() < 0.5,
+                      isSelected:
+                          (strokeWidth - AppDefaults.strokeWidthThin).abs() <
+                          0.5,
                       onSelect: onStrokeWidthChanged,
                     ),
                   ),
@@ -963,7 +1160,9 @@ class StylePicker extends StatelessWidget {
                     child: _StrokePresetChip(
                       label: '4px',
                       width: AppDefaults.strokeWidthMedium,
-                      isSelected: (strokeWidth - AppDefaults.strokeWidthMedium).abs() < 0.5,
+                      isSelected:
+                          (strokeWidth - AppDefaults.strokeWidthMedium).abs() <
+                          0.5,
                       onSelect: onStrokeWidthChanged,
                     ),
                   ),
@@ -972,7 +1171,9 @@ class StylePicker extends StatelessWidget {
                     child: _StrokePresetChip(
                       label: '8px',
                       width: AppDefaults.strokeWidthThick,
-                      isSelected: (strokeWidth - AppDefaults.strokeWidthThick).abs() < 0.5,
+                      isSelected:
+                          (strokeWidth - AppDefaults.strokeWidthThick).abs() <
+                          0.5,
                       onSelect: onStrokeWidthChanged,
                     ),
                   ),
@@ -981,7 +1182,9 @@ class StylePicker extends StatelessWidget {
                     child: _StrokePresetChip(
                       label: '14px',
                       width: AppDefaults.strokeWidthHeavy,
-                      isSelected: (strokeWidth - AppDefaults.strokeWidthHeavy).abs() < 0.5,
+                      isSelected:
+                          (strokeWidth - AppDefaults.strokeWidthHeavy).abs() <
+                          0.5,
                       onSelect: onStrokeWidthChanged,
                     ),
                   ),
@@ -1020,14 +1223,21 @@ class StylePicker extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       '${(opacity * 100).toInt()}%',
-                      style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -1064,14 +1274,21 @@ class StylePicker extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       '${borderRadius.toInt()} px',
-                      style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -1129,7 +1346,8 @@ class StylePicker extends StatelessWidget {
             ],
 
             // Line Style (Solid vs Dashed)
-            if (effectiveTool == CanvasTool.line || effectiveTool == CanvasTool.arrow) ...[
+            if (effectiveTool == CanvasTool.line ||
+                effectiveTool == CanvasTool.arrow) ...[
               Text(
                 'LINE STYLE',
                 style: TextStyle(
@@ -1145,10 +1363,15 @@ class StylePicker extends StatelessWidget {
                   Expanded(
                     child: FilterChip(
                       label: Center(
-                        child: Text('Solid',
-                            style: TextStyle(
-                                fontSize: 11,
-                                color: t.controlForeground(active: lineStyle == LineStyle.solid))),
+                        child: Text(
+                          'Solid',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: t.controlForeground(
+                              active: lineStyle == LineStyle.solid,
+                            ),
+                          ),
+                        ),
                       ),
                       selected: lineStyle == LineStyle.solid,
                       backgroundColor: Colors.transparent,
@@ -1164,10 +1387,15 @@ class StylePicker extends StatelessWidget {
                   Expanded(
                     child: FilterChip(
                       label: Center(
-                        child: Text('Dashed',
-                            style: TextStyle(
-                                fontSize: 11,
-                                color: t.controlForeground(active: lineStyle == LineStyle.dashed))),
+                        child: Text(
+                          'Dashed',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: t.controlForeground(
+                              active: lineStyle == LineStyle.dashed,
+                            ),
+                          ),
+                        ),
                       ),
                       selected: lineStyle == LineStyle.dashed,
                       backgroundColor: Colors.transparent,
@@ -1175,7 +1403,9 @@ class StylePicker extends StatelessWidget {
                       checkmarkColor: t.onActive,
                       side: BorderSide(color: t.border),
                       onSelected: (selected) {
-                        if (selected) onLineStyleChanged?.call(LineStyle.dashed);
+                        if (selected) {
+                          onLineStyleChanged?.call(LineStyle.dashed);
+                        }
                       },
                     ),
                   ),
@@ -1225,10 +1455,15 @@ class StylePicker extends StatelessWidget {
                   Expanded(
                     child: FilterChip(
                       label: Center(
-                        child: Text('Blur',
-                            style: TextStyle(
-                                fontSize: 10.5,
-                                color: t.controlForeground(active: blurType == BlurType.gaussian))),
+                        child: Text(
+                          'Blur',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: t.controlForeground(
+                              active: blurType == BlurType.gaussian,
+                            ),
+                          ),
+                        ),
                       ),
                       selected: blurType == BlurType.gaussian,
                       backgroundColor: Colors.transparent,
@@ -1236,7 +1471,9 @@ class StylePicker extends StatelessWidget {
                       checkmarkColor: t.onActive,
                       side: BorderSide(color: t.border),
                       onSelected: (selected) {
-                        if (selected) onBlurTypeChanged?.call(BlurType.gaussian);
+                        if (selected) {
+                          onBlurTypeChanged?.call(BlurType.gaussian);
+                        }
                       },
                     ),
                   ),
@@ -1244,10 +1481,15 @@ class StylePicker extends StatelessWidget {
                   Expanded(
                     child: FilterChip(
                       label: Center(
-                        child: Text('Pixelate',
-                            style: TextStyle(
-                                fontSize: 10.5,
-                                color: t.controlForeground(active: blurType == BlurType.pixelate))),
+                        child: Text(
+                          'Pixelate',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: t.controlForeground(
+                              active: blurType == BlurType.pixelate,
+                            ),
+                          ),
+                        ),
                       ),
                       selected: blurType == BlurType.pixelate,
                       backgroundColor: Colors.transparent,
@@ -1255,7 +1497,9 @@ class StylePicker extends StatelessWidget {
                       checkmarkColor: t.onActive,
                       side: BorderSide(color: t.border),
                       onSelected: (selected) {
-                        if (selected) onBlurTypeChanged?.call(BlurType.pixelate);
+                        if (selected) {
+                          onBlurTypeChanged?.call(BlurType.pixelate);
+                        }
                       },
                     ),
                   ),
@@ -1263,10 +1507,15 @@ class StylePicker extends StatelessWidget {
                   Expanded(
                     child: FilterChip(
                       label: Center(
-                        child: Text('Blackout',
-                            style: TextStyle(
-                                fontSize: 10.5,
-                                color: t.controlForeground(active: blurType == BlurType.solid))),
+                        child: Text(
+                          'Blackout',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: t.controlForeground(
+                              active: blurType == BlurType.solid,
+                            ),
+                          ),
+                        ),
                       ),
                       selected: blurType == BlurType.solid,
                       backgroundColor: Colors.transparent,
@@ -1288,7 +1537,9 @@ class StylePicker extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        blurType == BlurType.pixelate ? 'BLOCK SIZE' : 'BLUR STRENGTH',
+                        blurType == BlurType.pixelate
+                            ? 'BLOCK SIZE'
+                            : 'BLUR STRENGTH',
                         style: TextStyle(
                           color: subTextColor,
                           fontSize: 11,
@@ -1300,14 +1551,21 @@ class StylePicker extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: cardBg,
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         '${blurStrength.toInt()} px',
-                        style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -1326,9 +1584,13 @@ class StylePicker extends StatelessWidget {
                 blurType == BlurType.solid
                     ? 'Solid blackout permanently covers sensitive passwords, API keys, or PII.'
                     : (blurType == BlurType.pixelate
-                        ? 'Mosaic blocks fully discard the original pixels — safe for redacting data.'
-                        : 'Gaussian blur softens the region; use a high strength for sensitive content.'),
-                style: TextStyle(color: subTextColor, fontSize: 10.5, height: 1.3),
+                          ? 'Mosaic blocks fully discard the original pixels — safe for redacting data.'
+                          : 'Gaussian blur softens the region; use a high strength for sensitive content.'),
+                style: TextStyle(
+                  color: subTextColor,
+                  fontSize: 10.5,
+                  height: 1.3,
+                ),
               ),
               const SizedBox(height: 16),
             ],
@@ -1352,14 +1614,21 @@ class StylePicker extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: cardBg,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       '${fontSize.toInt()} pt',
-                      style: TextStyle(color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -1383,7 +1652,9 @@ class StylePicker extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    effectiveTool == CanvasTool.text ? 'TEXT BACKGROUND BOX' : 'SHAPE FILL',
+                    effectiveTool == CanvasTool.text
+                        ? 'TEXT BACKGROUND BOX'
+                        : 'SHAPE FILL',
                     style: TextStyle(
                       color: subTextColor,
                       fontSize: 11,
@@ -1426,11 +1697,19 @@ class StylePicker extends StatelessWidget {
                             color: cardBg,
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: (!isFilled || textBackgroundColor == null) ? t.ink : borderColor,
-                              width: (!isFilled || textBackgroundColor == null) ? 2.5 : 1,
+                              color: (!isFilled || textBackgroundColor == null)
+                                  ? t.ink
+                                  : borderColor,
+                              width: (!isFilled || textBackgroundColor == null)
+                                  ? 2.5
+                                  : 1,
                             ),
                           ),
-                          child: Icon(Icons.block_rounded, size: 14, color: t.inkMuted),
+                          child: Icon(
+                            Icons.block_rounded,
+                            size: 14,
+                            color: t.inkMuted,
+                          ),
                         ),
                       ),
                     ),
@@ -1443,8 +1722,12 @@ class StylePicker extends StatelessWidget {
                       const Color(0xFF007AFF),
                       const Color(0xFF34C759),
                     ].map((bgC) {
-                      final isSelected = isFilled && textBackgroundColor?.toARGB32() == bgC.toARGB32();
-                      final ring = isSelected ? t.ringOn(bgC, backdrop: t.surface) : null;
+                      final isSelected =
+                          isFilled &&
+                          textBackgroundColor?.toARGB32() == bgC.toARGB32();
+                      final ring = isSelected
+                          ? t.ringOn(bgC, backdrop: t.surface)
+                          : null;
                       return GestureDetector(
                         onTap: () {
                           onTextBackgroundColorChanged?.call(bgC);
@@ -1463,7 +1746,11 @@ class StylePicker extends StatelessWidget {
                           ),
                           child: ring == null
                               ? null
-                              : Icon(Icons.check_rounded, size: 14, color: ring),
+                              : Icon(
+                                  Icons.check_rounded,
+                                  size: 14,
+                                  color: ring,
+                                ),
                         ),
                       );
                     }),
@@ -1479,7 +1766,11 @@ class StylePicker extends StatelessWidget {
                             shape: BoxShape.circle,
                             border: Border.all(color: borderColor),
                           ),
-                          child: Icon(Icons.color_lens_rounded, size: 14, color: textColor),
+                          child: Icon(
+                            Icons.color_lens_rounded,
+                            size: 14,
+                            color: textColor,
+                          ),
                         ),
                       ),
                     ),
@@ -1492,7 +1783,9 @@ class StylePicker extends StatelessWidget {
               // its own. The fill used to offer seven fixed pre-tinted colours
               // and nothing else, so it could not be set to a colour the rest
               // of the panel could.
-              if (isFilled && onFillColorChanged != null && effectiveTool == CanvasTool.shape) ...[
+              if (isFilled &&
+                  onFillColorChanged != null &&
+                  effectiveTool == CanvasTool.shape) ...[
                 const SizedBox(height: 4),
                 Text(
                   'FILL COLOUR',
@@ -1548,7 +1841,8 @@ class StylePicker extends StatelessWidget {
                       final applied = color.withValues(alpha: _fillOpacity);
                       return _CircleColorSwatch(
                         color: color,
-                        isSelected: fillColor != null &&
+                        isSelected:
+                            fillColor != null &&
                             fillColor!.toARGB32() == applied.toARGB32(),
                         onTap: () => onFillColorChanged!(applied),
                         size: 30,
@@ -1559,8 +1853,9 @@ class StylePicker extends StatelessWidget {
                       t: t,
                       selectedAgainst: fillColor ?? const Color(0x00000000),
                       applied: (c) => c.withValues(alpha: _fillOpacity),
-                      onPick: (c) =>
-                          onFillColorChanged!(c.withValues(alpha: _fillOpacity)),
+                      onPick: (c) => onFillColorChanged!(
+                        c.withValues(alpha: _fillOpacity),
+                      ),
                     ),
                     Tooltip(
                       message: 'Custom Fill Colour',
@@ -1574,7 +1869,11 @@ class StylePicker extends StatelessWidget {
                             shape: BoxShape.circle,
                             border: Border.all(color: borderColor),
                           ),
-                          child: Icon(Icons.color_lens_rounded, size: 16, color: textColor),
+                          child: Icon(
+                            Icons.color_lens_rounded,
+                            size: 16,
+                            color: textColor,
+                          ),
                         ),
                       ),
                     ),
@@ -1598,7 +1897,10 @@ class StylePicker extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: cardBg,
                         borderRadius: BorderRadius.circular(4),
@@ -1606,7 +1908,10 @@ class StylePicker extends StatelessWidget {
                       child: Text(
                         '${(_fillOpacity * 100).round()}%',
                         style: TextStyle(
-                            color: textColor, fontSize: 11, fontWeight: FontWeight.bold),
+                          color: textColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -1620,8 +1925,9 @@ class StylePicker extends StatelessWidget {
                     // Separate from the annotation's own opacity slider, which
                     // fades the outline too. This one is the fill alone, so a
                     // shape can have a solid border over a translucent centre.
-                    onChanged: (v) =>
-                        onFillColorChanged!(_effectiveFillColor.withValues(alpha: v)),
+                    onChanged: (v) => onFillColorChanged!(
+                      _effectiveFillColor.withValues(alpha: v),
+                    ),
                   ),
                 ),
               ],
@@ -1673,7 +1979,10 @@ class StylePicker extends StatelessWidget {
                     icon: const Icon(Icons.layers_clear_rounded, size: 16),
                     label: const Text(
                       'Flatten Canvas',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     onPressed: onFlattenCanvas,
                   ),
@@ -1798,12 +2107,14 @@ class _CircleColorSwatch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = SnipTheme.of(context);
-    final hexString = tooltip ??
+    final hexString =
+        tooltip ??
         (isTransparent
             ? 'Transparent / Erase Fill'
             : '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}');
 
-    final isLightColor = color == Colors.white || color.computeLuminance() > 0.65;
+    final isLightColor =
+        color == Colors.white || color.computeLuminance() > 0.65;
 
     return Tooltip(
       message: hexString,
@@ -1823,16 +2134,25 @@ class _CircleColorSwatch extends StatelessWidget {
                   // mode, both live AppColors.palette entries. Not a
                   // meaningful ring colour for the transparent tile (no
                   // single fill to contrast against), which keeps t.ink.
-                  ? (isTransparent ? t.ink : t.ringOn(color, backdrop: backdrop))
+                  ? (isTransparent
+                        ? t.ink
+                        : t.ringOn(color, backdrop: backdrop))
                   : (isTransparent
-                      ? t.border
-                      : (isLightColor
-                          ? t.border
-                          : (color == Colors.black && t.isDark ? t.border : Colors.transparent))),
+                        ? t.border
+                        : (isLightColor
+                              ? t.border
+                              : (color == Colors.black && t.isDark
+                                    ? t.border
+                                    : Colors.transparent))),
               width: isSelected ? 2.5 : 1.0,
             ),
             boxShadow: isSelected && !isTransparent
-                ? [BoxShadow(color: color.withValues(alpha: 0.55), blurRadius: 6)]
+                ? [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.55),
+                      blurRadius: 6,
+                    ),
+                  ]
                 : [],
           ),
           child: Stack(
@@ -1840,9 +2160,7 @@ class _CircleColorSwatch extends StatelessWidget {
             children: [
               if (isTransparent) ...[
                 const Positioned.fill(
-                  child: ClipOval(
-                    child: _MiniCheckerboard(),
-                  ),
+                  child: ClipOval(child: _MiniCheckerboard()),
                 ),
                 if (isSelected)
                   Container(
@@ -1899,7 +2217,12 @@ class _MiniCheckerPainter extends CustomPainter {
       int c = 0;
       for (double x = 0; x < size.width; x += s) {
         canvas.drawRect(
-          Rect.fromLTWH(x, y, math.min(s, size.width - x), math.min(s, size.height - y)),
+          Rect.fromLTWH(
+            x,
+            y,
+            math.min(s, size.width - x),
+            math.min(s, size.height - y),
+          ),
           (r + c) % 2 == 0 ? p1 : p2,
         );
         c++;
@@ -1911,8 +2234,6 @@ class _MiniCheckerPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
-
-
 
 /// The active colour, shown as a swatch plus its hex value.
 ///
@@ -1967,7 +2288,9 @@ class _CurrentColorReadout extends StatelessWidget {
                     painter: const CheckerboardPainter(),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: paintSolid ? color.withValues(alpha: 1.0) : color,
+                        color: paintSolid
+                            ? color.withValues(alpha: 1.0)
+                            : color,
                         border: Border.all(color: t.border, width: t.hairline),
                         borderRadius: BorderRadius.circular(4),
                       ),

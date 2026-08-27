@@ -46,7 +46,8 @@ class CaptureItem {
       width: width ?? this.width,
       height: height ?? this.height,
       annotations: annotations ?? this.annotations,
-      annotationsNeedConversion: annotationsNeedConversion ?? this.annotationsNeedConversion,
+      annotationsNeedConversion:
+          annotationsNeedConversion ?? this.annotationsNeedConversion,
     );
   }
 

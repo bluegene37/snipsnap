@@ -16,8 +16,22 @@ void main() {
           'h': 18.0,
           'confidence': 0.94,
           'words': [
-            {'text': 'Hello', 'x': 10.0, 'y': 20.0, 'w': 44.0, 'h': 18.0, 'confidence': 0.96},
-            {'text': 'world', 'x': 58.0, 'y': 20.0, 'w': 52.0, 'h': 18.0, 'confidence': 0.92},
+            {
+              'text': 'Hello',
+              'x': 10.0,
+              'y': 20.0,
+              'w': 44.0,
+              'h': 18.0,
+              'confidence': 0.96,
+            },
+            {
+              'text': 'world',
+              'x': 58.0,
+              'y': 20.0,
+              'w': 52.0,
+              'h': 18.0,
+              'confidence': 0.92,
+            },
           ],
         },
       ],
@@ -36,15 +50,35 @@ void main() {
       'width': 10,
       'height': 10,
       'lines': [
-        {'text': 'one', 'x': 0.0, 'y': 0.0, 'w': 1.0, 'h': 1.0, 'confidence': 1.0, 'words': <dynamic>[]},
-        {'text': 'two', 'x': 0.0, 'y': 2.0, 'w': 1.0, 'h': 1.0, 'confidence': 1.0, 'words': <dynamic>[]},
+        {
+          'text': 'one',
+          'x': 0.0,
+          'y': 0.0,
+          'w': 1.0,
+          'h': 1.0,
+          'confidence': 1.0,
+          'words': <dynamic>[],
+        },
+        {
+          'text': 'two',
+          'x': 0.0,
+          'y': 2.0,
+          'w': 1.0,
+          'h': 1.0,
+          'confidence': 1.0,
+          'words': <dynamic>[],
+        },
       ],
     });
     expect(result.plainText, 'one\ntwo');
   });
 
   test('tolerates a payload with no lines', () {
-    final result = OcrResult.fromChannelMap(const {'width': 5, 'height': 5, 'lines': <dynamic>[]});
+    final result = OcrResult.fromChannelMap(const {
+      'width': 5,
+      'height': 5,
+      'lines': <dynamic>[],
+    });
     expect(result.lines, isEmpty);
     expect(result.plainText, isEmpty);
     expect(result.isEmpty, isTrue);
@@ -68,7 +102,15 @@ void main() {
       'width': 100,
       'height': 100,
       'lines': [
-        {'text': 'valid', 'x': 10.0, 'y': 20.0, 'w': 30.0, 'h': 15.0, 'confidence': 0.95, 'words': <dynamic>[]},
+        {
+          'text': 'valid',
+          'x': 10.0,
+          'y': 20.0,
+          'w': 30.0,
+          'h': 15.0,
+          'confidence': 0.95,
+          'words': <dynamic>[],
+        },
         'invalid string entry',
         null,
         {
@@ -110,10 +152,24 @@ void main() {
           'h': 15.0,
           'confidence': 0.9,
           'words': [
-            {'text': 'valid', 'x': 10.0, 'y': 20.0, 'w': 30.0, 'h': 15.0, 'confidence': 0.95},
+            {
+              'text': 'valid',
+              'x': 10.0,
+              'y': 20.0,
+              'w': 30.0,
+              'h': 15.0,
+              'confidence': 0.95,
+            },
             'invalid',
             null,
-            {'text': 'also valid', 'x': 45.0, 'y': 20.0, 'w': 55.0, 'h': 15.0, 'confidence': 0.93},
+            {
+              'text': 'also valid',
+              'x': 45.0,
+              'y': 20.0,
+              'w': 55.0,
+              'h': 15.0,
+              'confidence': 0.93,
+            },
           ],
         },
       ],
@@ -167,7 +223,14 @@ void main() {
           'h': 15.0,
           'confidence': 0.9,
           'words': [
-            {'text': 123, 'x': 10.0, 'y': 20.0, 'w': 20.0, 'h': 15.0, 'confidence': 0.95},
+            {
+              'text': 123,
+              'x': 10.0,
+              'y': 20.0,
+              'w': 20.0,
+              'h': 15.0,
+              'confidence': 0.95,
+            },
           ],
         },
       ],

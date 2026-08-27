@@ -14,7 +14,7 @@ class CropToolHandler extends ToolHandler {
     if (delegate.activeCropRect == null) {
       delegate.onSelectedAnnotationIdChanged(null);
       delegate.onActiveCropRectChanged(Rect.fromPoints(pos, pos));
-      
+
       final annotation = Annotation(
         id: _uuid.v4(),
         tool: CanvasTool.crop,
@@ -28,10 +28,13 @@ class CropToolHandler extends ToolHandler {
 
   @override
   void onPanUpdate(DragUpdateDetails details, Offset pos) {
-    if (delegate.currentAnnotation != null && delegate.currentAnnotation!.tool == CanvasTool.crop) {
+    if (delegate.currentAnnotation != null &&
+        delegate.currentAnnotation!.tool == CanvasTool.crop) {
       final updated = delegate.currentAnnotation!.copyWith(endPoint: pos);
       delegate.onCurrentAnnotationChanged(updated);
-      delegate.onActiveCropRectChanged(Rect.fromPoints(updated.startPoint!, pos));
+      delegate.onActiveCropRectChanged(
+        Rect.fromPoints(updated.startPoint!, pos),
+      );
     }
   }
 

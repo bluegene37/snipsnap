@@ -32,7 +32,8 @@ class OcrResultPanel extends StatelessWidget {
     this.unavailableReason,
   });
 
-  bool get _hasText => !isLoading && unavailableReason == null && !result.isEmpty;
+  bool get _hasText =>
+      !isLoading && unavailableReason == null && !result.isEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -52,7 +53,11 @@ class OcrResultPanel extends StatelessWidget {
           // the app's other incidental drop shadows (e.g. the shortcut
           // dialog's kbd badges).
           boxShadow: const [
-            BoxShadow(color: Colors.black26, blurRadius: 16, offset: Offset(0, 4)),
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 16,
+              offset: Offset(0, 4),
+            ),
           ],
         ),
         padding: const EdgeInsets.all(14),
@@ -85,7 +90,8 @@ class OcrResultPanel extends StatelessWidget {
                     style: TextButton.styleFrom(foregroundColor: t.ink),
                     icon: const Icon(Icons.copy_rounded, size: 16),
                     label: const Text('Copy'),
-                    onPressed: () => ClipboardService.copyText(result.plainText),
+                    onPressed: () =>
+                        ClipboardService.copyText(result.plainText),
                   ),
                   const SizedBox(width: 8),
                   TextButton.icon(

@@ -23,7 +23,8 @@ class _Harness {
 
   List<Annotation> latest = const [];
 
-  RenderBox get box => repaintKey.currentContext!.findRenderObject() as RenderBox;
+  RenderBox get box =>
+      repaintKey.currentContext!.findRenderObject() as RenderBox;
 }
 
 Future<_Harness> _pump(WidgetTester tester, Annotation seed) async {
@@ -37,34 +38,40 @@ Future<_Harness> _pump(WidgetTester tester, Annotation seed) async {
   harness.latest = [seed];
 
   await tester.runAsync(() async {
-    await tester.pumpWidget(StatefulBuilder(builder: (ctx, setState) {
-      return SnipThemeScope(
-        theme: SnipTheme.forMode(SnipThemeMode.dark),
-        child: MaterialApp(
-          home: Scaffold(
-            body: SizedBox(
-              width: 700,
-              height: 600,
-              child: EditorCanvas(
-                imagePath: imagePath,
-                annotations: harness.latest,
-                activeTool: CanvasTool.select,
-                activeColor: const Color(0xFF000000),
-                strokeWidth: 6,
-                fontSize: 16,
-                isFilled: false,
-                stepCounter: 1,
-                onAnnotationAdded: (_) {},
-                onStepCounterIncremented: (_) {},
-                onAnnotationsUpdated: (list) => setState(() => harness.latest = list),
-                onAnnotationsLiveUpdated: (list) => setState(() => harness.latest = list),
-                repaintBoundaryKey: harness.repaintKey,
+    await tester.pumpWidget(
+      StatefulBuilder(
+        builder: (ctx, setState) {
+          return SnipThemeScope(
+            theme: SnipTheme.forMode(SnipThemeMode.dark),
+            child: MaterialApp(
+              home: Scaffold(
+                body: SizedBox(
+                  width: 700,
+                  height: 600,
+                  child: EditorCanvas(
+                    imagePath: imagePath,
+                    annotations: harness.latest,
+                    activeTool: CanvasTool.select,
+                    activeColor: const Color(0xFF000000),
+                    strokeWidth: 6,
+                    fontSize: 16,
+                    isFilled: false,
+                    stepCounter: 1,
+                    onAnnotationAdded: (_) {},
+                    onStepCounterIncremented: (_) {},
+                    onAnnotationsUpdated: (list) =>
+                        setState(() => harness.latest = list),
+                    onAnnotationsLiveUpdated: (list) =>
+                        setState(() => harness.latest = list),
+                    repaintBoundaryKey: harness.repaintKey,
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
-      );
-    }));
+          );
+        },
+      ),
+    );
     await Future<void>.delayed(const Duration(milliseconds: 600));
     await tester.pump();
   });
@@ -73,7 +80,10 @@ Future<_Harness> _pump(WidgetTester tester, Annotation seed) async {
 }
 
 Future<void> _dragFromTo(WidgetTester tester, Offset from, Offset to) async {
-  final gesture = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+  final gesture = await tester.startGesture(
+    from,
+    kind: PointerDeviceKind.mouse,
+  );
   await tester.pump(const Duration(milliseconds: 16));
   // Nudge past the pan slop along the drag's own direction. A diagonal nudge
   // would inject movement across the stroke and pollute the axis under test.
@@ -106,13 +116,17 @@ Future<Rect> _selectAndGetHandles(WidgetTester tester, _Harness harness) async {
 
   await tester.tapAt(box.localToGlobal(body), kind: PointerDeviceKind.mouse);
   await tester.pumpAndSettle();
-  return AnnotationRenderer.selectionRect(_toCanvas(harness.latest.single, box.size));
+  return AnnotationRenderer.selectionRect(
+    _toCanvas(harness.latest.single, box.size),
+  );
 }
 
 Annotation _toCanvas(Annotation ann, Size canvasSize) {
   const imageSize = Size(1200, 900);
-  final scale = math.min(canvasSize.width / imageSize.width,
-      canvasSize.height / imageSize.height);
+  final scale = math.min(
+    canvasSize.width / imageSize.width,
+    canvasSize.height / imageSize.height,
+  );
   final dx = (canvasSize.width - imageSize.width * scale) / 2;
   final dy = (canvasSize.height - imageSize.height * scale) / 2;
   Offset map(Offset p) => Offset(p.dx * scale + dx, p.dy * scale + dy);
@@ -131,29 +145,29 @@ double _angle(Annotation a) {
 }
 
 Annotation _pen({double strokeWidth = 5}) => Annotation(
-      id: 'a1',
-      tool: CanvasTool.pen,
-      color: const Color(0xFF000000),
-      strokeWidth: strokeWidth,
-      startPoint: const Offset(300, 300),
-      points: const [
-        Offset(300, 300),
-        Offset(420, 380),
-        Offset(560, 340),
-        Offset(700, 460),
-      ],
-    );
+  id: 'a1',
+  tool: CanvasTool.pen,
+  color: const Color(0xFF000000),
+  strokeWidth: strokeWidth,
+  startPoint: const Offset(300, 300),
+  points: const [
+    Offset(300, 300),
+    Offset(420, 380),
+    Offset(560, 340),
+    Offset(700, 460),
+  ],
+);
 
 /// A horizontal stroke, so screen axes and stroke axes coincide — the shape
 /// the behaviour was reported against.
 Annotation _flat(CanvasTool tool, {double strokeWidth = 8}) => Annotation(
-      id: 'a1',
-      tool: tool,
-      color: const Color(0xFF000000),
-      strokeWidth: strokeWidth,
-      startPoint: const Offset(250, 450),
-      endPoint: const Offset(900, 452),
-    );
+  id: 'a1',
+  tool: tool,
+  color: const Color(0xFF000000),
+  strokeWidth: strokeWidth,
+  startPoint: const Offset(250, 450),
+  endPoint: const Offset(900, 452),
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -161,8 +175,9 @@ void main() {
   setUp(() => TestWidgetsFlutterBinding.ensureInitialized());
 
   for (final tool in const [CanvasTool.line, CanvasTool.ruler]) {
-    testWidgets('dragging along a ${tool.name} changes its length only',
-        (tester) async {
+    testWidgets('dragging along a ${tool.name} changes its length only', (
+      tester,
+    ) async {
       await tester.binding.setSurfaceSize(const Size(900, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -178,15 +193,22 @@ void main() {
       await _dragFromTo(tester, corner, corner + const Offset(160, 0));
 
       final after = h.latest.single;
-      expect(_length(after) / _length(before), greaterThan(1.2),
-          reason: 'dragging along the stroke must lengthen it');
-      expect(after.strokeWidth, closeTo(before.strokeWidth, 0.01),
-          reason: 'and must leave the thickness exactly alone');
+      expect(
+        _length(after) / _length(before),
+        greaterThan(1.2),
+        reason: 'dragging along the stroke must lengthen it',
+      );
+      expect(
+        after.strokeWidth,
+        closeTo(before.strokeWidth, 0.01),
+        reason: 'and must leave the thickness exactly alone',
+      );
       expect(_angle(after), closeTo(_angle(before), 0.02));
     });
 
-    testWidgets('dragging across a ${tool.name} changes its thickness only',
-        (tester) async {
+    testWidgets('dragging across a ${tool.name} changes its thickness only', (
+      tester,
+    ) async {
       await tester.binding.setSurfaceSize(const Size(900, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -202,16 +224,27 @@ void main() {
       await _dragFromTo(tester, corner, corner + const Offset(0, 90));
 
       final after = h.latest.single;
-      expect(after.strokeWidth / before.strokeWidth, greaterThan(1.5),
-          reason: 'dragging across the stroke must thicken it');
-      expect(_length(after), closeTo(_length(before), 1.0),
-          reason: 'and must leave the length exactly alone');
-      expect(_angle(after), closeTo(_angle(before), 0.02),
-          reason: 'a perpendicular drag must not swing it around');
+      expect(
+        after.strokeWidth / before.strokeWidth,
+        greaterThan(1.5),
+        reason: 'dragging across the stroke must thicken it',
+      );
+      expect(
+        _length(after),
+        closeTo(_length(before), 1.0),
+        reason: 'and must leave the length exactly alone',
+      );
+      expect(
+        _angle(after),
+        closeTo(_angle(before), 0.02),
+        reason: 'a perpendicular drag must not swing it around',
+      );
     });
   }
 
-  testWidgets('an arrow scales as one object from a corner drag', (tester) async {
+  testWidgets('an arrow scales as one object from a corner drag', (
+    tester,
+  ) async {
     // The report: enlarging an arrow by its guide did not keep its proportions.
     // Under the along/across split a drag lengthened the shaft while the head
     // (sized from the weight) lagged behind, so the arrow came out as a long
@@ -235,51 +268,72 @@ void main() {
     final weightRatio = after.strokeWidth / before.strokeWidth;
 
     expect(lengthRatio, greaterThan(1.2), reason: 'the drag must enlarge it');
-    expect(weightRatio, closeTo(lengthRatio, 0.03),
-        reason: 'weight — and so the head — scales by the same factor as the '
-            'length, or the arrow changes shape as it grows');
+    expect(
+      weightRatio,
+      closeTo(lengthRatio, 0.03),
+      reason:
+          'weight — and so the head — scales by the same factor as the '
+          'length, or the arrow changes shape as it grows',
+    );
     expect(_angle(after), closeTo(_angle(before), 0.02));
 
     final afterBounds = AnnotationRenderer.boundingRect(after);
     expect(afterBounds.topLeft.dx, closeTo(beforeBounds.topLeft.dx, 3));
-    expect(afterBounds.topLeft.dy, closeTo(beforeBounds.topLeft.dy, 3),
-        reason: 'the corner opposite the handle stays put, like a shape');
+    expect(
+      afterBounds.topLeft.dy,
+      closeTo(beforeBounds.topLeft.dy, 3),
+      reason: 'the corner opposite the handle stays put, like a shape',
+    );
   });
 
-  testWidgets('an arrow dragged across thickens at the pointer, head included',
-      (tester) async {
-    // The report: under a pure diagonal-ratio scale a vertical pull on a wide
-    // flat arrow moved its diagonal by about one percent, so the handle did
-    // not follow. Across the arrow now means what it means for a line — the
-    // held edge tracks the pointer — and the head, sized from the weight,
-    // grows with it.
-    await tester.binding.setSurfaceSize(const Size(900, 800));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+  testWidgets(
+    'an arrow dragged across thickens at the pointer, head included',
+    (tester) async {
+      // The report: under a pure diagonal-ratio scale a vertical pull on a wide
+      // flat arrow moved its diagonal by about one percent, so the handle did
+      // not follow. Across the arrow now means what it means for a line — the
+      // held edge tracks the pointer — and the head, sized from the weight,
+      // grows with it.
+      await tester.binding.setSurfaceSize(const Size(900, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    final h = await _pump(tester, _flat(CanvasTool.arrow, strokeWidth: 8));
-    addTearDown(() => h.dir.deleteSync(recursive: true));
+      final h = await _pump(tester, _flat(CanvasTool.arrow, strokeWidth: 8));
+      addTearDown(() => h.dir.deleteSync(recursive: true));
 
-    final before = _toCanvas(h.latest.single, h.box.size);
-    final beforeBounds = AnnotationRenderer.boundingRect(before);
-    final handles = await _selectAndGetHandles(tester, h);
-    final corner = h.box.localToGlobal(handles.bottomRight);
-    await _dragFromTo(tester, corner, corner + const Offset(0, 90));
+      final before = _toCanvas(h.latest.single, h.box.size);
+      final beforeBounds = AnnotationRenderer.boundingRect(before);
+      final handles = await _selectAndGetHandles(tester, h);
+      final corner = h.box.localToGlobal(handles.bottomRight);
+      await _dragFromTo(tester, corner, corner + const Offset(0, 90));
 
-    final after = _toCanvas(h.latest.single, h.box.size);
-    final afterBounds = AnnotationRenderer.boundingRect(after);
-    expect(afterBounds.bottom - beforeBounds.bottom, closeTo(90, 5),
-        reason: 'the held edge must land under the pointer');
-    expect(afterBounds.top, closeTo(beforeBounds.top, 3),
-        reason: 'and the opposite edge stays put');
-    expect(_length(after), closeTo(_length(before), 2),
-        reason: 'an across drag does not lengthen it');
-    expect(AnnotationRenderer.arrowHead(after).halfWidth,
+      final after = _toCanvas(h.latest.single, h.box.size);
+      final afterBounds = AnnotationRenderer.boundingRect(after);
+      expect(
+        afterBounds.bottom - beforeBounds.bottom,
+        closeTo(90, 5),
+        reason: 'the held edge must land under the pointer',
+      );
+      expect(
+        afterBounds.top,
+        closeTo(beforeBounds.top, 3),
+        reason: 'and the opposite edge stays put',
+      );
+      expect(
+        _length(after),
+        closeTo(_length(before), 2),
+        reason: 'an across drag does not lengthen it',
+      );
+      expect(
+        AnnotationRenderer.arrowHead(after).halfWidth,
         greaterThan(AnnotationRenderer.arrowHead(before).halfWidth * 1.5),
-        reason: 'the head grows with the weight');
-  });
+        reason: 'the head grows with the weight',
+      );
+    },
+  );
 
-  testWidgets('a big enough arrow drag still clears the old slider ceiling',
-      (tester) async {
+  testWidgets('a big enough arrow drag still clears the old slider ceiling', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(900, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -311,8 +365,9 @@ void main() {
     expect(canvas.strokeWidth, lessThanOrEqualTo(240.0 + 0.001));
   });
 
-  testWidgets('the top-left handle thickens when pulled the other way',
-      (tester) async {
+  testWidgets('the top-left handle thickens when pulled the other way', (
+    tester,
+  ) async {
     // Outward is per-corner: the bottom-right handle thickens downward, the
     // top-left one upward. Getting the sign from the corner rather than
     // hard-coding it is what makes both work.
@@ -330,8 +385,9 @@ void main() {
     expect(h.latest.single.strokeWidth / before.strokeWidth, greaterThan(1.5));
   });
 
-  testWidgets('a vertical stroke lengthens when dragged vertically',
-      (tester) async {
+  testWidgets('a vertical stroke lengthens when dragged vertically', (
+    tester,
+  ) async {
     // The axes are the stroke's own, not the screen's. A vertical line dragged
     // downward gets longer; screen-space axes would have fattened it instead.
     await tester.binding.setSurfaceSize(const Size(900, 800));
@@ -354,8 +410,11 @@ void main() {
     await _dragFromTo(tester, corner, corner + const Offset(0, 110));
 
     final after = h.latest.single;
-    expect(_length(after) / _length(before), greaterThan(1.2),
-        reason: 'dragging along a vertical stroke lengthens it');
+    expect(
+      _length(after) / _length(before),
+      greaterThan(1.2),
+      reason: 'dragging along a vertical stroke lengthens it',
+    );
     expect(after.strokeWidth, closeTo(before.strokeWidth, 0.01));
   });
 
@@ -381,13 +440,18 @@ void main() {
     final spanRatio = afterSpan / beforeSpan;
 
     expect(spanRatio, greaterThan(1.15));
-    expect(after.strokeWidth, closeTo(before.strokeWidth, 0.01),
-        reason: 'a squiggle has no direction of its own, so its longer bounding '
-            'axis stands in for one — dragging along it resizes, not thickens');
+    expect(
+      after.strokeWidth,
+      closeTo(before.strokeWidth, 0.01),
+      reason:
+          'a squiggle has no direction of its own, so its longer bounding '
+          'axis stands in for one — dragging along it resizes, not thickens',
+    );
   });
 
-  testWidgets('a pen stroke never changes weight, whichever way it is dragged',
-      (tester) async {
+  testWidgets('a pen stroke never changes weight, whichever way it is dragged', (
+    tester,
+  ) async {
     // The pen keeps its thickness slider, so that stays the only way to change
     // a stroke's weight. Dragging a squiggle bigger makes it bigger, not
     // heavier — including straight across its axis, which for every other
@@ -404,13 +468,17 @@ void main() {
       final corner = h.box.localToGlobal(handles.bottomRight);
       await _dragFromTo(tester, corner, corner + drag);
 
-      expect(h.latest.single.strokeWidth, closeTo(before.strokeWidth, 0.01),
-          reason: 'dragging $drag must leave the pen weight untouched');
+      expect(
+        h.latest.single.strokeWidth,
+        closeTo(before.strokeWidth, 0.01),
+        reason: 'dragging $drag must leave the pen weight untouched',
+      );
     }
   });
 
-  testWidgets('a pen stroke scales in proportion from any corner drag',
-      (tester) async {
+  testWidgets('a pen stroke scales in proportion from any corner drag', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(900, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -420,46 +488,56 @@ void main() {
     final before = h.latest.single;
     final beforeW =
         (before.points.map((p) => p.dx).reduce(math.max)) -
-            (before.points.map((p) => p.dx).reduce(math.min));
+        (before.points.map((p) => p.dx).reduce(math.min));
     final beforeH =
         (before.points.map((p) => p.dy).reduce(math.max)) -
-            (before.points.map((p) => p.dy).reduce(math.min));
+        (before.points.map((p) => p.dy).reduce(math.min));
 
     final handles = await _selectAndGetHandles(tester, h);
     final corner = h.box.localToGlobal(handles.bottomRight);
     await _dragFromTo(tester, corner, corner + const Offset(0, 90));
 
     final after = h.latest.single;
-    final afterW = (after.points.map((p) => p.dx).reduce(math.max)) -
+    final afterW =
+        (after.points.map((p) => p.dx).reduce(math.max)) -
         (after.points.map((p) => p.dx).reduce(math.min));
-    final afterH = (after.points.map((p) => p.dy).reduce(math.max)) -
+    final afterH =
+        (after.points.map((p) => p.dy).reduce(math.max)) -
         (after.points.map((p) => p.dy).reduce(math.min));
 
-    expect(afterH / beforeH, greaterThan(1.1),
-        reason: 'a downward drag must grow it');
-    expect(afterW / beforeW, closeTo(afterH / beforeH, 0.02),
-        reason: 'and grow it by the same factor on both axes — proportionally, '
-            'not stretched');
+    expect(
+      afterH / beforeH,
+      greaterThan(1.1),
+      reason: 'a downward drag must grow it',
+    );
+    expect(
+      afterW / beforeW,
+      closeTo(afterH / beforeH, 0.02),
+      reason:
+          'and grow it by the same factor on both axes — proportionally, '
+          'not stretched',
+    );
   });
 
-  testWidgets('the highlighter resizes on both axes like the other strokes',
-      (tester) async {
+  testWidgets('the highlighter resizes on both axes like the other strokes', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(900, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     Annotation marker() => Annotation(
-          id: 'a1',
-          tool: CanvasTool.highlight,
-          color: const Color(0xFFFDE047),
-          strokeWidth: 18,
-          startPoint: const Offset(300, 400),
-          points: const [
-            Offset(300, 400),
-            Offset(450, 405),
-            Offset(620, 400),
-            Offset(780, 408),
-          ],
-        );
+      id: 'a1',
+      tool: CanvasTool.highlight,
+      color: const Color(0xFFFDE047),
+      strokeWidth: 18,
+      startPoint: const Offset(300, 400),
+      points: const [
+        Offset(300, 400),
+        Offset(450, 405),
+        Offset(620, 400),
+        Offset(780, 408),
+      ],
+    );
 
     final along = await _pump(tester, marker());
     addTearDown(() => along.dir.deleteSync(recursive: true));
@@ -473,11 +551,16 @@ void main() {
       along.box.localToGlobal(handles.bottomRight) + const Offset(150, 0),
     );
     final afterAlong = along.latest.single;
-    expect((afterAlong.points.last - afterAlong.points.first).distance / beforeSpan,
-        greaterThan(1.15),
-        reason: 'dragging along the band lengthens it');
-    expect(afterAlong.strokeWidth, closeTo(beforeAlong.strokeWidth, 0.5),
-        reason: 'and leaves the band height alone');
+    expect(
+      (afterAlong.points.last - afterAlong.points.first).distance / beforeSpan,
+      greaterThan(1.15),
+      reason: 'dragging along the band lengthens it',
+    );
+    expect(
+      afterAlong.strokeWidth,
+      closeTo(beforeAlong.strokeWidth, 0.5),
+      reason: 'and leaves the band height alone',
+    );
 
     final across = await _pump(tester, marker());
     addTearDown(() => across.dir.deleteSync(recursive: true));
@@ -488,13 +571,16 @@ void main() {
       across.box.localToGlobal(handles.bottomRight),
       across.box.localToGlobal(handles.bottomRight) + const Offset(0, 70),
     );
-    expect(across.latest.single.strokeWidth / beforeAcross.strokeWidth,
-        greaterThan(1.5),
-        reason: 'dragging across it makes the band taller');
+    expect(
+      across.latest.single.strokeWidth / beforeAcross.strokeWidth,
+      greaterThan(1.5),
+      reason: 'dragging across it makes the band taller',
+    );
   });
 
-  testWidgets('a resized line tracks the pointer one-for-one, like a shape',
-      (tester) async {
+  testWidgets('a resized line tracks the pointer one-for-one, like a shape', (
+    tester,
+  ) async {
     // The bar this was measured against: dragging a shape's corner moves that
     // corner exactly onto the pointer. A stroke should feel the same — 120px
     // sideways adds 120px of length, 60px down adds 60px of weight — rather
@@ -514,14 +600,21 @@ void main() {
     await _dragFromTo(tester, corner, corner + const Offset(120, 60));
 
     final after = _toCanvas(h.latest.single, h.box.size);
-    expect(_length(after) - beforeLength, closeTo(120, 3),
-        reason: 'the far end must land under the pointer, not short of it');
-    expect(after.strokeWidth - beforeWidth, closeTo(60, 3),
-        reason: 'and the edge must land under it too');
+    expect(
+      _length(after) - beforeLength,
+      closeTo(120, 3),
+      reason: 'the far end must land under the pointer, not short of it',
+    );
+    expect(
+      after.strokeWidth - beforeWidth,
+      closeTo(60, 3),
+      reason: 'and the edge must land under it too',
+    );
   });
 
-  testWidgets('thickening from the bottom handle leaves the top edge put',
-      (tester) async {
+  testWidgets('thickening from the bottom handle leaves the top edge put', (
+    tester,
+  ) async {
     // The report: holding the bottom of a line and dragging down grew it
     // upward as well, because a stroke straddles its own centre line. Dragging
     // a shape's bottom corner leaves its top where it was; this must match.
@@ -542,16 +635,26 @@ void main() {
     await _dragFromTo(tester, corner, corner + const Offset(0, 80));
 
     final after = _toCanvas(h.latest.single, h.box.size);
-    expect(after.strokeWidth - before.strokeWidth, closeTo(80, 4),
-        reason: 'the drag must still thicken it one-for-one');
-    expect(topEdge(after), closeTo(topEdge(before), 2),
-        reason: 'the edge opposite the handle must not move');
-    expect(bottomEdge(after) - bottomEdge(before), closeTo(80, 4),
-        reason: 'and the held edge follows the pointer');
+    expect(
+      after.strokeWidth - before.strokeWidth,
+      closeTo(80, 4),
+      reason: 'the drag must still thicken it one-for-one',
+    );
+    expect(
+      topEdge(after),
+      closeTo(topEdge(before), 2),
+      reason: 'the edge opposite the handle must not move',
+    );
+    expect(
+      bottomEdge(after) - bottomEdge(before),
+      closeTo(80, 4),
+      reason: 'and the held edge follows the pointer',
+    );
   });
 
-  testWidgets('thickening from the top handle leaves the bottom edge put',
-      (tester) async {
+  testWidgets('thickening from the top handle leaves the bottom edge put', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(900, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -570,12 +673,16 @@ void main() {
 
     final after = _toCanvas(h.latest.single, h.box.size);
     expect(after.strokeWidth - before.strokeWidth, closeTo(80, 4));
-    expect(bottomEdge(after), closeTo(bottomEdge(before), 2),
-        reason: 'held from the top, the bottom edge is the one that is pinned');
+    expect(
+      bottomEdge(after),
+      closeTo(bottomEdge(before), 2),
+      reason: 'held from the top, the bottom edge is the one that is pinned',
+    );
   });
 
-  testWidgets('a ruler grows by what was dragged, not eight times it',
-      (tester) async {
+  testWidgets('a ruler grows by what was dragged, not eight times it', (
+    tester,
+  ) async {
     // The report: the ruler "expanded extremely", and upward as well as down.
     // Its caps and ticks reach 3.5x the stroke weight on *each* side of the
     // line, so treating a box change as a stroke-weight change multiplied every
@@ -597,16 +704,26 @@ void main() {
     final after = _toCanvas(h.latest.single, h.box.size);
     final afterBounds = AnnotationRenderer.boundingRect(after);
 
-    expect(afterBounds.height - beforeBounds.height, closeTo(80, 5),
-        reason: 'the drawn height must follow the pointer one-for-one');
-    expect(afterBounds.top, closeTo(beforeBounds.top, 3),
-        reason: 'and it must not climb upward while the bottom is held');
-    expect(afterBounds.bottom - beforeBounds.bottom, closeTo(80, 5),
-        reason: 'the held edge is the one that moves');
+    expect(
+      afterBounds.height - beforeBounds.height,
+      closeTo(80, 5),
+      reason: 'the drawn height must follow the pointer one-for-one',
+    );
+    expect(
+      afterBounds.top,
+      closeTo(beforeBounds.top, 3),
+      reason: 'and it must not climb upward while the bottom is held',
+    );
+    expect(
+      afterBounds.bottom - beforeBounds.bottom,
+      closeTo(80, 5),
+      reason: 'the held edge is the one that moves',
+    );
   });
 
-  testWidgets('a ruler guide encloses its caps, not just its line',
-      (tester) async {
+  testWidgets('a ruler guide encloses its caps, not just its line', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(900, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -618,13 +735,17 @@ void main() {
     final capHalf = AnnotationRenderer.rulerCapHalf(canvas);
     final lineY = canvas.startPoint!.dy;
 
-    expect(guide.top, lessThanOrEqualTo(lineY - capHalf + 0.001),
-        reason: 'the cap reaches capHalf above the line and must be inside');
+    expect(
+      guide.top,
+      lessThanOrEqualTo(lineY - capHalf + 0.001),
+      reason: 'the cap reaches capHalf above the line and must be inside',
+    );
     expect(guide.bottom, greaterThanOrEqualTo(lineY + capHalf - 0.001));
   });
 
-  testWidgets('the selection guide grows with the stroke it surrounds',
-      (tester) async {
+  testWidgets('the selection guide grows with the stroke it surrounds', (
+    tester,
+  ) async {
     // The report: the line thickened but the box you grab to drag it did not,
     // so the handles ended up buried inside the mark. `boundingRect` returned a
     // bare `Rect.fromPoints` for two-point marks — pen, highlighter and curved
@@ -642,21 +763,31 @@ void main() {
     final after = _toCanvas(h.latest.single, h.box.size);
     final afterGuide = AnnotationRenderer.selectionRect(after);
 
-    expect(after.strokeWidth, greaterThan(20.0), reason: 'it must have thickened');
-    expect(afterGuide.height, greaterThan(beforeGuide.height + 10),
-        reason: 'the guide must have grown with it');
+    expect(
+      after.strokeWidth,
+      greaterThan(20.0),
+      reason: 'it must have thickened',
+    );
+    expect(
+      afterGuide.height,
+      greaterThan(beforeGuide.height + 10),
+      reason: 'the guide must have grown with it',
+    );
     // The mark has to sit inside its own guide, which is the whole point: the
     // stroke straddles the line by half its width on each side.
-    final strokeTop = math.min(after.startPoint!.dy, after.endPoint!.dy) -
+    final strokeTop =
+        math.min(after.startPoint!.dy, after.endPoint!.dy) -
         after.strokeWidth / 2;
-    final strokeBottom = math.max(after.startPoint!.dy, after.endPoint!.dy) +
+    final strokeBottom =
+        math.max(after.startPoint!.dy, after.endPoint!.dy) +
         after.strokeWidth / 2;
     expect(afterGuide.top, lessThanOrEqualTo(strokeTop + 0.001));
     expect(afterGuide.bottom, greaterThanOrEqualTo(strokeBottom - 0.001));
   });
 
-  testWidgets('a line can be dragged well past the old slider ceiling',
-      (tester) async {
+  testWidgets('a line can be dragged well past the old slider ceiling', (
+    tester,
+  ) async {
     // The report: dragging a line's edge stopped getting thicker almost
     // immediately. The clamp was the properties slider's own maximum of 30,
     // which is not thick on a large capture — and the line has no slider any
@@ -672,15 +803,22 @@ void main() {
     await _dragFromTo(tester, corner, corner + const Offset(0, 260));
 
     final canvas = _toCanvas(h.latest.single, h.box.size);
-    expect(canvas.strokeWidth, greaterThan(30.0),
-        reason: 'the slider ceiling must no longer cap a dragged line');
-    expect(canvas.strokeWidth, lessThanOrEqualTo(240.0 + 0.001),
-        reason: 'but a runaway drag still stops somewhere');
+    expect(
+      canvas.strokeWidth,
+      greaterThan(30.0),
+      reason: 'the slider ceiling must no longer cap a dragged line',
+    );
+    expect(
+      canvas.strokeWidth,
+      lessThanOrEqualTo(240.0 + 0.001),
+      reason: 'but a runaway drag still stops somewhere',
+    );
   });
 
   for (final tool in const [CanvasTool.highlight, CanvasTool.ruler]) {
-    testWidgets('${tool.name} can also be dragged past the old ceiling',
-        (tester) async {
+    testWidgets('${tool.name} can also be dragged past the old ceiling', (
+      tester,
+    ) async {
       await tester.binding.setSurfaceSize(const Size(900, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -691,7 +829,11 @@ void main() {
               color: const Color(0xFFFDE047),
               strokeWidth: 8,
               startPoint: const Offset(250, 450),
-              points: const [Offset(250, 450), Offset(560, 452), Offset(900, 450)],
+              points: const [
+                Offset(250, 450),
+                Offset(560, 452),
+                Offset(900, 450),
+              ],
             )
           : _flat(tool, strokeWidth: 8);
 
@@ -703,13 +845,18 @@ void main() {
       await _dragFromTo(tester, corner, corner + const Offset(0, 260));
 
       final canvas = _toCanvas(h.latest.single, h.box.size);
-      expect(canvas.strokeWidth, greaterThan(30.0),
-          reason: 'no slider caps ${tool.name} any more');
+      expect(
+        canvas.strokeWidth,
+        greaterThan(30.0),
+        reason: 'no slider caps ${tool.name} any more',
+      );
       expect(canvas.strokeWidth, lessThanOrEqualTo(240.0 + 0.001));
     });
   }
 
-  testWidgets('a runaway drag still cannot move the pen weight', (tester) async {
+  testWidgets('a runaway drag still cannot move the pen weight', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(900, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 

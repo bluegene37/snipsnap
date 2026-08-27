@@ -113,7 +113,9 @@ class ShortcutService {
     return getDefaultShortcuts();
   }
 
-  static Future<void> saveShortcuts(Map<AppShortcutAction, CustomShortcut> shortcuts) async {
+  static Future<void> saveShortcuts(
+    Map<AppShortcutAction, CustomShortcut> shortcuts,
+  ) async {
     await DatabaseService.saveShortcutsToDb(shortcuts);
   }
 

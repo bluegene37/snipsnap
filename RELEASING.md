@@ -1,7 +1,7 @@
 # Releasing snipsnap
 
-snipsnap ships for **Windows, macOS, and Linux**. Every release is driven by a
-`v*` git tag; CI builds, tests, and packages all three platforms and attaches
+snipsnap ships for **Windows and macOS** (with Linux support). Every release is driven by a
+`v*` git tag; CI builds, tests, and packages release installers and attaches
 the artifacts to a GitHub Release.
 
 ## App identity
@@ -11,18 +11,19 @@ the artifacts to a GitHub Release.
 | Display name | snipsnap |
 | Publisher | genexis.dev |
 | Application ID | `dev.genexis.snipsnap` |
+| AppId (GUID) | `6b7e88bf-76f5-46aa-b2b9-e152504b86bb` |
 | Copyright | Copyright © 2026 genexis.dev. All rights reserved. |
 
 The application ID is set in `macos/Runner/Configs/AppInfo.xcconfig`
 (`PRODUCT_BUNDLE_IDENTIFIER`), `windows/runner/main.cpp`
-(`SetCurrentProcessExplicitAppUserModelID`), `windows/installer/snipsnap.iss`
-(`MyAppUserModelId`), `pubspec.yaml` (`msix_config.identity_name`), and
+(`SetCurrentProcessExplicitAppUserModelID`), `pubspec.yaml`
+(`inno_bundle.id` and `msix_config.identity_name`), and
 `linux/CMakeLists.txt` (`APPLICATION_ID`). They must all stay identical.
 
 Two Windows values must **never change once shipped**:
 
-- `AppId` in `windows/installer/snipsnap.iss` — the installer's upgrade
-  identity. Changing it makes new releases install alongside the old one.
+- `id` (AppId GUID) in `pubspec.yaml` (`inno_bundle` configuration) — the installer's upgrade
+  identity. Changing it causes new releases to install alongside the old version instead of upgrading.
 - The AppUserModelID string (`dev.genexis.snipsnap`) — taskbar pinning and
   notifications key off it.
 
@@ -30,11 +31,10 @@ Two Windows values must **never change once shipped**:
 
 `pubspec.yaml` `version:` is the **single source of truth** (`1.0.0+1` =
 semantic version `+` build number). Everything else reads it at build time
-(installer filename, DMG name, .deb version, Windows file version, macOS
+(installer filename, DMG name, Windows file version, macOS
 `CFBundleShortVersionString`/`CFBundleVersion`).
 
-When bumping the version, also update — these are the only places not derived
-automatically:
+When bumping the version, also update:
 
 1. `pubspec.yaml` → `msix_config.msix_version` — four segments, `<version>.0`
    (e.g. `1.2.0` → `1.2.0.0`).
@@ -45,84 +45,99 @@ Rules:
 
 - The build number (`+N`) must **increase monotonically forever** for any build
   that gets distributed. Never reuse one — stores reject reused build numbers
-  at upload, and it is the only way to tell two builds of the same version
-  apart.
-- Tag names are `v<version>` and must match pubspec (e.g. `version: 1.2.0+5`
-  → tag `v1.2.0`).
+  at upload, and it is the only way to distinguish two builds of the same version.
+- Tag names are `v<version>` and must match the semantic version in `pubspec.yaml`
+  (e.g. `version: 1.0.0+1` → tag `v1.0.0`).
 
-## Release flow
+## Release Flow (Step-by-Step)
 
-```bash
-# 1. Bump the version (see checklist above), commit.
-# 2. Verify locally:
-flutter analyze && flutter test
+1. **Bump Version & Update References**
+   - Update `version:` in `pubspec.yaml` (e.g. `1.0.0+1`).
+   - Update `msix_config.msix_version` in `pubspec.yaml` (e.g. `1.0.0.0`).
+   - Update the version string in `lib/views/dialogs/about_dialog.dart`.
 
-# 3. Tag and push — this triggers .github/workflows/release.yml:
-git tag v1.0.0
-git push origin main v1.0.0
+2. **Verify Locally**
+   ```bash
+   dart format --output=none --set-exit-if-changed .
+   flutter analyze --fatal-infos
+   flutter test
+   ```
+
+3. **Commit & Push Changes**
+   ```bash
+   git add pubspec.yaml lib/views/dialogs/about_dialog.dart
+   git commit -m "chore(release): bump version to 1.0.0"
+   git push origin main
+   ```
+
+4. **Tag & Trigger Automated Release Pipeline**
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+   Pushing a `v*` tag triggers `.github/workflows/release.yml`, which:
+   - Runs tests on `windows-latest` and builds the release installer with `inno_bundle` (`dart run inno_bundle:build --release --no-app`).
+   - Runs tests on `macos-latest` and builds the `.dmg` package with `scripts/build_macos_dmg.sh`.
+   - Collects all packaged artifacts on `ubuntu-latest` and publishes a new GitHub Release with automated changelog notes.
+
+| Artifact | Built by | Output File |
+|---|---|---|
+| Windows Installer (`.exe`) | `dart run inno_bundle:build --release --no-app` | `build/windows/x64/installer/Release/snipsnap-1.0.0-windows-installer.exe` |
+| macOS Disk Image (`.dmg`) | `scripts/build_macos_dmg.sh` | `build/macos/snipsnap-1.0.0.dmg` |
+
+## Website Download Links
+
+Use the following direct GitHub Releases URL patterns for website download buttons, documentation, and badges:
+
+### Windows Installer
+```text
+https://github.com/<OWNER>/<REPO>/releases/latest/download/<installer-name>.exe
 ```
+*Example:*
+`https://github.com/genexis-dev/snipsnap/releases/latest/download/snipsnap-1.0.0-windows-installer.exe`
 
-CI then runs one job per platform (`windows-latest`, `macos-latest`,
-`ubuntu-latest`), each doing `analyze` → `test` → package, and a final job
-that attaches everything to the GitHub Release:
+### macOS DMG
+```text
+https://github.com/<OWNER>/<REPO>/releases/latest/download/<app-name>-<version>.dmg
+```
+*Example:*
+`https://github.com/genexis-dev/snipsnap/releases/latest/download/snipsnap-1.0.0.dmg`
 
-| Artifact | Built by |
-|---|---|
-| `snipsnap-<version>-windows-x64-setup.exe` | `windows/installer/build_installer.ps1` (Inno Setup) |
-| `snipsnap-<version>.dmg` | `scripts/build_macos_dmg.sh` |
-| `snipsnap-<version>-linux-x64.tar.gz` | `scripts/build_linux_packages.sh` |
-| `snipsnap_<version>_amd64.deb` | `scripts/build_linux_packages.sh` |
+## Local Builds
 
-`workflow_dispatch` runs the same builds without publishing a release.
-
-## Local builds
-
-Each platform must be built on its own OS (no cross-compiling).
+Each platform must be built on its native OS (no cross-compiling).
 
 ```bash
-# Windows (needs Visual Studio C++ workload + Inno Setup 6)
-powershell -ExecutionPolicy Bypass -File windows\installer\build_installer.ps1
+# Windows Installer (requires Inno Setup 6)
+flutter build windows --release
+dart run inno_bundle:build --release --no-app
 
 # Windows MSIX (optional, store/enterprise deployment)
 flutter build windows --release
 dart run msix:create
 
-# macOS (needs Xcode; create-dmg optional, falls back to hdiutil)
+# macOS DMG (requires Xcode / hdiutil)
 bash scripts/build_macos_dmg.sh
-
-# Linux (needs: sudo apt-get install ninja-build libgtk-3-dev libkeybinder-3.0-dev)
-bash scripts/build_linux_packages.sh
 ```
 
-After changing the icon source (`assets/icon/app_icon.png`, a processed
-1024×1024 full-bleed copy of `assets/images/app_logo.png` with transparent
-rounded corners), regenerate platform icons:
+After changing the icon source (`assets/icon/app_icon.png`), regenerate platform icons:
 
 ```bash
 dart run flutter_launcher_icons
 ```
 
-## Signing status
+## Signing Status
 
 | Platform | Status | Consequence |
 |---|---|---|
-| Windows | **Unsigned** | SmartScreen shows "Windows protected your PC"; users must click *More info* → *Run anyway*. Only an EV certificate removes this outright. |
-| macOS | **Ad-hoc signed** (no Developer ID) | Gatekeeper blocks the app on first launch: "snipsnap can't be opened because Apple cannot check it for malicious software." Users must right-click → Open, or on macOS 15+ approve it under System Settings → Privacy & Security. Fix: set `DEVELOPMENT_TEAM` in `macos/Runner/Configs/AppInfo.xcconfig`, sign with a Developer ID certificate, then notarize and staple — full commands in [docs/release.md](docs/release.md). |
-| Linux | Not applicable | No signing; the .deb is unsigned (no apt repository). |
+| Windows | **Unsigned** | SmartScreen shows "Windows protected your PC"; users click *More info* → *Run anyway*. An EV certificate removes this warning. |
+| macOS | **Ad-hoc signed** (no Developer ID) | Gatekeeper blocks the app on first launch unless right-clicked → Open, or approved under System Settings → Privacy & Security. Set `DEVELOPMENT_TEAM` in `macos/Runner/Configs/AppInfo.xcconfig` to sign, notarize, and staple. |
 
-`docs/release.md` has the deep-dive: Developer ID signing, notarization,
-stapling, sandbox implications, and Windows installer internals.
+## Pre-Release Checklist
 
-## Pre-release checklist
-
-- [ ] `flutter analyze` clean, `flutter test` green
-- [ ] Version bumped in all three places (pubspec `version:`, `msix_version`,
-      About dialog string); build number never used before
-- [ ] Tag matches pubspec version
-- [ ] Icons render correctly (Finder, Windows taskbar, Linux launcher)
-- [ ] macOS: launched from the DMG on a clean machine; screen-recording
-      prompt appears and capture works
-- [ ] Windows: installer run on a machine without Visual Studio; capture and
-      OCR verified
-- [ ] Linux: .deb installs, app appears in the launcher with icon
-- [ ] Release notes drafted (CI generates notes from commits; edit after)
+- [ ] `dart format --output=none --set-exit-if-changed .` clean
+- [ ] `flutter analyze --fatal-infos` clean
+- [ ] `flutter test` green
+- [ ] Version bumped in all places (`pubspec.yaml`, `about_dialog.dart`)
+- [ ] Git tag `v<version>` pushed to remote repository
+- [ ] GitHub Actions release pipeline completed and artifacts verified

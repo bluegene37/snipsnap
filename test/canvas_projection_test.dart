@@ -29,7 +29,11 @@ void main() {
       Size(2000, 400),
     ]) {
       final p = CanvasProjection(imageSize: imageSize, canvasSize: canvas);
-      for (final pt in const [Offset(0, 0), Offset(960, 540), Offset(1919, 1079)]) {
+      for (final pt in const [
+        Offset(0, 0),
+        Offset(960, 540),
+        Offset(1919, 1079),
+      ]) {
         final round = p.toImage(p.toCanvas(pt));
         expect(round.dx, closeTo(pt.dx, 1e-6), reason: 'canvas=$canvas pt=$pt');
         expect(round.dy, closeTo(pt.dy, 1e-6), reason: 'canvas=$canvas pt=$pt');
@@ -49,14 +53,23 @@ void main() {
 
   test('is invalid for empty sizes and never divides by zero', () {
     expect(
-      CanvasProjection(imageSize: Size.zero, canvasSize: const Size(10, 10)).isValid,
+      CanvasProjection(
+        imageSize: Size.zero,
+        canvasSize: const Size(10, 10),
+      ).isValid,
       isFalse,
     );
     expect(
-      CanvasProjection(imageSize: const Size(10, 10), canvasSize: Size.zero).isValid,
+      CanvasProjection(
+        imageSize: const Size(10, 10),
+        canvasSize: Size.zero,
+      ).isValid,
       isFalse,
     );
-    final invalid = CanvasProjection(imageSize: Size.zero, canvasSize: Size.zero);
+    final invalid = CanvasProjection(
+      imageSize: Size.zero,
+      canvasSize: Size.zero,
+    );
     expect(invalid.scale, 1.0);
     expect(invalid.toImage(const Offset(5, 5)), const Offset(5, 5));
   });

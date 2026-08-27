@@ -9,10 +9,10 @@ import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/editor_canvas.dart';
 
-Matrix4 _transform(WidgetTester tester) =>
-    tester.widget<InteractiveViewer>(find.byType(InteractiveViewer))
-        .transformationController!
-        .value;
+Matrix4 _transform(WidgetTester tester) => tester
+    .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+    .transformationController!
+    .value;
 
 /// Pumps the canvas on [tool] and returns the annotations it emits.
 Future<List<Annotation>> _pumpCanvas(
@@ -23,30 +23,32 @@ Future<List<Annotation>> _pumpCanvas(
   final added = <Annotation>[];
   final key = GlobalKey();
   await tester.runAsync(() async {
-    await tester.pumpWidget(SnipThemeScope(
-      theme: SnipTheme.forMode(SnipThemeMode.dark),
-      child: MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 600,
-            height: 500,
-            child: EditorCanvas(
-              imagePath: imagePath,
-              annotations: const [],
-              activeTool: tool,
-              activeColor: const Color(0xFF000000),
-              strokeWidth: 4,
-              fontSize: 16,
-              isFilled: false,
-              stepCounter: 1,
-              onAnnotationAdded: added.add,
-              onStepCounterIncremented: (_) {},
-              repaintBoundaryKey: key,
+    await tester.pumpWidget(
+      SnipThemeScope(
+        theme: SnipTheme.forMode(SnipThemeMode.dark),
+        child: MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 600,
+              height: 500,
+              child: EditorCanvas(
+                imagePath: imagePath,
+                annotations: const [],
+                activeTool: tool,
+                activeColor: const Color(0xFF000000),
+                strokeWidth: 4,
+                fontSize: 16,
+                isFilled: false,
+                stepCounter: 1,
+                onAnnotationAdded: added.add,
+                onStepCounterIncremented: (_) {},
+                repaintBoundaryKey: key,
+              ),
             ),
           ),
         ),
       ),
-    ));
+    );
     await Future<void>.delayed(const Duration(milliseconds: 600));
     await tester.pump();
   });
@@ -55,12 +57,18 @@ Future<List<Annotation>> _pumpCanvas(
 }
 
 /// A two-finger trackpad swipe: the gesture macOS sends to scroll around.
-Future<void> _twoFingerPan(WidgetTester tester, Offset at, Offset totalPan) async {
+Future<void> _twoFingerPan(
+  WidgetTester tester,
+  Offset at,
+  Offset totalPan,
+) async {
   final pointer = TestPointer(1, PointerDeviceKind.trackpad);
   await tester.sendEventToBinding(pointer.panZoomStart(at));
   await tester.pump();
   for (var i = 1; i <= 10; i++) {
-    await tester.sendEventToBinding(pointer.panZoomUpdate(at, pan: totalPan * (i / 10)));
+    await tester.sendEventToBinding(
+      pointer.panZoomUpdate(at, pan: totalPan * (i / 10)),
+    );
     await tester.pump(const Duration(milliseconds: 16));
   }
   await tester.sendEventToBinding(pointer.panZoomEnd());
@@ -96,15 +104,24 @@ void main() {
     CanvasTool.blur,
     CanvasTool.ruler,
   ]) {
-    testWidgets('a two-finger pan draws nothing with ${tool.name}', (tester) async {
+    testWidgets('a two-finger pan draws nothing with ${tool.name}', (
+      tester,
+    ) async {
       await tester.binding.setSurfaceSize(const Size(800, 700));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
       final added = await _pumpCanvas(tester, imagePath: imagePath, tool: tool);
-      await _twoFingerPan(tester, const Offset(300, 250), const Offset(0, -140));
+      await _twoFingerPan(
+        tester,
+        const Offset(300, 250),
+        const Offset(0, -140),
+      );
 
-      expect(added, isEmpty,
-          reason: 'scrolling around the capture must not mark it up');
+      expect(
+        added,
+        isEmpty,
+        reason: 'scrolling around the capture must not mark it up',
+      );
     });
   }
 
@@ -116,20 +133,29 @@ void main() {
 
     // Zoom in first, or there is nowhere to pan to.
     final pointer = TestPointer(2, PointerDeviceKind.trackpad);
-    await tester.sendEventToBinding(pointer.panZoomStart(const Offset(300, 250)));
+    await tester.sendEventToBinding(
+      pointer.panZoomStart(const Offset(300, 250)),
+    );
     await tester.pump();
     await tester.sendEventToBinding(
-        pointer.panZoomUpdate(const Offset(300, 250), scale: 2.5));
+      pointer.panZoomUpdate(const Offset(300, 250), scale: 2.5),
+    );
     await tester.pumpAndSettle();
     await tester.sendEventToBinding(pointer.panZoomEnd());
     await tester.pumpAndSettle();
-    expect(_transform(tester).getMaxScaleOnAxis(), greaterThan(1.5),
-        reason: 'pinch must zoom');
+    expect(
+      _transform(tester).getMaxScaleOnAxis(),
+      greaterThan(1.5),
+      reason: 'pinch must zoom',
+    );
 
     final before = _transform(tester).storage[13];
     await _twoFingerPan(tester, const Offset(300, 250), const Offset(0, -120));
-    expect(_transform(tester).storage[13], lessThan(before),
-        reason: 'two-finger swipe must still scroll the view');
+    expect(
+      _transform(tester).storage[13],
+      lessThan(before),
+      reason: 'two-finger swipe must still scroll the view',
+    );
   });
 
   testWidgets('a click-drag on the same trackpad still draws', (tester) async {
@@ -138,11 +164,18 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(800, 700));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    final added = await _pumpCanvas(tester, imagePath: imagePath, tool: CanvasTool.line);
+    final added = await _pumpCanvas(
+      tester,
+      imagePath: imagePath,
+      tool: CanvasTool.line,
+    );
 
     const from = Offset(150, 150);
     const to = Offset(400, 320);
-    final gesture = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+    final gesture = await tester.startGesture(
+      from,
+      kind: PointerDeviceKind.mouse,
+    );
     await tester.pump(const Duration(milliseconds: 16));
     for (var i = 1; i <= 10; i++) {
       await gesture.moveTo(Offset.lerp(from, to, i / 10)!);

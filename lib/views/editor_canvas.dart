@@ -219,7 +219,6 @@ const double _maxStrokeWidth = 30.0;
 /// on a large capture.
 const double _maxDragStrokeWidth = 240.0;
 
-
 /// Tools whose annotation is created on tap-up, so a stray drag cannot spawn
 /// duplicates. Their handlers still own the placement — the canvas only
 /// declines to start a drag for them.
@@ -326,7 +325,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   String? _editingAnnotationId;
   Offset? _inlineTextPos;
   final TextEditingController _inlineTextController = TextEditingController();
-  final FocusNode _inlineTextFocusNode = FocusNode(debugLabel: 'InlineTextEditor');
+  final FocusNode _inlineTextFocusNode = FocusNode(
+    debugLabel: 'InlineTextEditor',
+  );
 
   // Eyedropper Magnifier state
   Offset? _hoverPos;
@@ -338,6 +339,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   Offset? _drawStart;
 
   MouseCursor _cursor = SystemMouseCursors.basic;
+
   /// Trackpad pan/zoom gesture state. `PointerPanZoomUpdateEvent` reports
   /// cumulative values, so each frame's increment is the difference from the
   /// last one.
@@ -401,7 +403,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       // has already reloaded the bitmap before notifying the parent — decoding
       // it a second time here would only burn CPU on the exact same bytes.
       final isSelfEdit =
-          _suppressNextRevisionReload && oldWidget.imagePath == widget.imagePath;
+          _suppressNextRevisionReload &&
+          oldWidget.imagePath == widget.imagePath;
       _suppressNextRevisionReload = false;
       if (!isSelfEdit) _loadBaseImage();
     }
@@ -410,7 +413,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // what `_notifyZoom` triggers, so comparing against the controller is what
     // stops a pointer zoom from being re-applied centred on the way back.
     if (oldWidget.zoomScale != widget.zoomScale &&
-        (_transformationController.value.getMaxScaleOnAxis() - widget.zoomScale).abs() >
+        (_transformationController.value.getMaxScaleOnAxis() - widget.zoomScale)
+                .abs() >
             0.001) {
       _zoomToCentre(widget.zoomScale);
     }
@@ -474,7 +478,6 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         _ensureCropRectInitialized();
       }
     }
-
   }
 
   /// Drops every piece of canvas state that describes the capture the editor
@@ -503,7 +506,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       // capture's here, because the reload that replaces `_baseImage` has not
       // run yet — capture it now rather than letting the async body read a
       // rect that by then describes the new bitmap.
-      _commitFloatingSelection(toPath: previousPath, throughImageRect: _imageRect);
+      _commitFloatingSelection(
+        toPath: previousPath,
+        throughImageRect: _imageRect,
+      );
     } else {
       _floatingSelectionUiImage?.dispose();
       _floatingSelectionUiImage = null;
@@ -650,7 +656,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   void _checkFileExists() {
-    final exists = widget.imagePath != null && File(widget.imagePath!).existsSync();
+    final exists =
+        widget.imagePath != null && File(widget.imagePath!).existsSync();
     if (exists != _fileExists) {
       setState(() => _fileExists = exists);
     }
@@ -680,7 +687,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     double axis(double translation, double viewportExtent) {
       final contentExtent = viewportExtent * scale;
-      if (contentExtent <= viewportExtent) return (viewportExtent - contentExtent) / 2;
+      if (contentExtent <= viewportExtent) {
+        return (viewportExtent - contentExtent) / 2;
+      }
       return translation.clamp(viewportExtent - contentExtent, 0.0);
     }
 
@@ -750,7 +759,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   void _handlePointerSignal(PointerSignalEvent signal) {
     if (signal is! PointerScrollEvent) return;
     if (_isZoomModifierDown) {
-      _zoomByFactor(_zoomFactorForDelta(signal.scrollDelta.dy), signal.localPosition);
+      _zoomByFactor(
+        _zoomFactorForDelta(signal.scrollDelta.dy),
+        signal.localPosition,
+      );
       return;
     }
     var delta = signal.scrollDelta;
@@ -775,8 +787,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   /// True while the view-pan modifier is held, so a drag moves the viewport
   /// instead of drawing. Space is the near-universal convention for this.
-  bool get _isPanModifierDown =>
-      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.space);
+  bool get _isPanModifierDown => HardwareKeyboard.instance.logicalKeysPressed
+      .contains(LogicalKeyboardKey.space);
 
   /// Exponential, and proportional to how far the wheel actually moved.
   ///
@@ -799,7 +811,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// viewport that never existed. Callers detect the degenerate case through
   /// `CanvasProjection.isValid` and decline to convert.
   Size get _canvasSize {
-    final renderObj = widget.repaintBoundaryKey.currentContext?.findRenderObject();
+    final renderObj = widget.repaintBoundaryKey.currentContext
+        ?.findRenderObject();
     if (renderObj is RenderBox && renderObj.hasSize) return renderObj.size;
     return Size.zero;
   }
@@ -866,7 +879,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   /// The list every read inside this canvas goes through: the in-flight
   /// version while a gesture is running, the parent's otherwise.
-  List<Annotation> get _sourceAnnotations => _liveAnnotations ?? widget.annotations;
+  List<Annotation> get _sourceAnnotations =>
+      _liveAnnotations ?? widget.annotations;
 
   /// Hands the in-flight list to the parent and stops overriding.
   ///
@@ -876,7 +890,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final pending = _liveAnnotations;
     if (pending == null) return;
     _liveAnnotations = null;
-    (widget.onAnnotationsLiveUpdated ?? widget.onAnnotationsUpdated)?.call(pending);
+    (widget.onAnnotationsLiveUpdated ?? widget.onAnnotationsUpdated)?.call(
+      pending,
+    );
   }
 
   List<Annotation>? _canvasAnnotationsCache;
@@ -992,19 +1008,36 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     const r = AnnotationRenderer.handleHitRadius;
 
     // Curvature handle for Arrow
-    if (ann.tool == CanvasTool.arrow && ann.startPoint != null && ann.endPoint != null) {
-      final curvePos = ann.controlPoint ?? ((ann.startPoint! + ann.endPoint!) / 2);
+    if (ann.tool == CanvasTool.arrow &&
+        ann.startPoint != null &&
+        ann.endPoint != null) {
+      final curvePos =
+          ann.controlPoint ?? ((ann.startPoint! + ann.endPoint!) / 2);
       if ((local - curvePos).distance <= r + 4.0) return _AnnHandle.curve;
     }
 
-    final rotPos = bounds.topCenter - const Offset(0, AnnotationRenderer.rotationHandleGap);
-    if ((local - rotPos).distance <= r) return _AnnHandle.rotate;
-    if ((local - bounds.topLeft).distance <= r) return _AnnHandle.topLeft;
-    if ((local - bounds.topRight).distance <= r) return _AnnHandle.topRight;
-    if ((local - bounds.bottomLeft).distance <= r) return _AnnHandle.bottomLeft;
-    if ((local - bounds.bottomRight).distance <= r) return _AnnHandle.bottomRight;
+    final rotPos =
+        bounds.topCenter -
+        const Offset(0, AnnotationRenderer.rotationHandleGap);
+    if ((local - rotPos).distance <= r) {
+      return _AnnHandle.rotate;
+    }
+    if ((local - bounds.topLeft).distance <= r) {
+      return _AnnHandle.topLeft;
+    }
+    if ((local - bounds.topRight).distance <= r) {
+      return _AnnHandle.topRight;
+    }
+    if ((local - bounds.bottomLeft).distance <= r) {
+      return _AnnHandle.bottomLeft;
+    }
+    if ((local - bounds.bottomRight).distance <= r) {
+      return _AnnHandle.bottomRight;
+    }
 
-    if (AnnotationRenderer.hitTest(ann, pos)) return _AnnHandle.body;
+    if (AnnotationRenderer.hitTest(ann, pos)) {
+      return _AnnHandle.body;
+    }
     return _AnnHandle.none;
   }
 
@@ -1048,7 +1081,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// Writes [updated] — a **canvas-space** annotation — back to the parent,
   /// which stores image pixels.
   void _replaceAnnotation(Annotation updated, {required bool live}) {
-    if (widget.onAnnotationsLiveUpdated == null && widget.onAnnotationsUpdated == null) {
+    if (widget.onAnnotationsLiveUpdated == null &&
+        widget.onAnnotationsUpdated == null) {
       return;
     }
     final source = _sourceAnnotations;
@@ -1080,12 +1114,18 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// Records the pre-gesture state so the whole gesture collapses into a single
   /// undo step.
   void _pushHistoryCheckpoint() {
-    widget.onAnnotationsUpdated?.call(List<Annotation>.from(widget.annotations));
+    widget.onAnnotationsUpdated?.call(
+      List<Annotation>.from(widget.annotations),
+    );
   }
 
   void _deleteSelectedAnnotation() {
-    if (_selectedAnnotationId == null || widget.onAnnotationsUpdated == null) return;
-    final updated = widget.annotations.where((a) => a.id != _selectedAnnotationId).toList();
+    if (_selectedAnnotationId == null || widget.onAnnotationsUpdated == null) {
+      return;
+    }
+    final updated = widget.annotations
+        .where((a) => a.id != _selectedAnnotationId)
+        .toList();
     setState(() => _selectedAnnotationId = null);
     widget.onSelectAnnotation?.call(null);
     widget.onAnnotationsUpdated!(updated);
@@ -1129,22 +1169,40 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // Corners are round, so they answer to the tighter of the two.
     final cornerRadius = math.min(bandX, bandY);
 
-    if ((pos - cropRect.topLeft).distance <= cornerRadius) return _CropHandle.topLeft;
-    if ((pos - cropRect.topRight).distance <= cornerRadius) return _CropHandle.topRight;
-    if ((pos - cropRect.bottomLeft).distance <= cornerRadius) return _CropHandle.bottomLeft;
+    if ((pos - cropRect.topLeft).distance <= cornerRadius) {
+      return _CropHandle.topLeft;
+    }
+    if ((pos - cropRect.topRight).distance <= cornerRadius) {
+      return _CropHandle.topRight;
+    }
+    if ((pos - cropRect.bottomLeft).distance <= cornerRadius) {
+      return _CropHandle.bottomLeft;
+    }
     if ((pos - cropRect.bottomRight).distance <= cornerRadius) {
       return _CropHandle.bottomRight;
     }
 
-    final withinX = pos.dx >= cropRect.left - bandX && pos.dx <= cropRect.right + bandX;
-    final withinY = pos.dy >= cropRect.top - bandY && pos.dy <= cropRect.bottom + bandY;
+    final withinX =
+        pos.dx >= cropRect.left - bandX && pos.dx <= cropRect.right + bandX;
+    final withinY =
+        pos.dy >= cropRect.top - bandY && pos.dy <= cropRect.bottom + bandY;
 
-    if ((pos.dy - cropRect.top).abs() <= bandY && withinX) return _CropHandle.top;
-    if ((pos.dy - cropRect.bottom).abs() <= bandY && withinX) return _CropHandle.bottom;
-    if ((pos.dx - cropRect.left).abs() <= bandX && withinY) return _CropHandle.left;
-    if ((pos.dx - cropRect.right).abs() <= bandX && withinY) return _CropHandle.right;
+    if ((pos.dy - cropRect.top).abs() <= bandY && withinX) {
+      return _CropHandle.top;
+    }
+    if ((pos.dy - cropRect.bottom).abs() <= bandY && withinX) {
+      return _CropHandle.bottom;
+    }
+    if ((pos.dx - cropRect.left).abs() <= bandX && withinY) {
+      return _CropHandle.left;
+    }
+    if ((pos.dx - cropRect.right).abs() <= bandX && withinY) {
+      return _CropHandle.right;
+    }
 
-    if (cropRect.contains(pos)) return _CropHandle.move;
+    if (cropRect.contains(pos)) {
+      return _CropHandle.move;
+    }
     return _CropHandle.none;
   }
 
@@ -1234,7 +1292,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// The angle is fixed by construction: the mark is scaled along its existing
   /// direction rather than stretched to fill the box, which is what used to
   /// swing a near-horizontal arrow around on the smallest vertical movement.
-  Annotation _resizeStroke(Annotation origin, _AnnHandle handle, Offset totalDelta) {
+  Annotation _resizeStroke(
+    Annotation origin,
+    _AnnHandle handle,
+    Offset totalDelta,
+  ) {
     // `boundingRect`, not `selectionRect`: the handle sits a constant inset
     // outside, and a constant cancels out of every delta below.
     final bounds = AnnotationRenderer.boundingRect(origin);
@@ -1283,10 +1345,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         ? _maxDragStrokeWidth
         : _maxStrokeWidth;
 
-    double diagonal(Rect r) => math.sqrt(r.width * r.width + r.height * r.height);
+    double diagonal(Rect r) =>
+        math.sqrt(r.width * r.width + r.height * r.height);
     final wasDiagonal = diagonal(bounds);
-    final uniformFactor =
-        wasDiagonal < 1.0 ? 1.0 : (diagonal(grown) / wasDiagonal).clamp(0.05, 20.0);
+    final uniformFactor = wasDiagonal < 1.0
+        ? 1.0
+        : (diagonal(grown) / wasDiagonal).clamp(0.05, 20.0);
 
     // Length from the change in the along-extent, one pixel for one pixel (see
     // the note below). Computed up front because a proportional mark's weight
@@ -1303,11 +1367,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // A proportional mark's weight starts from the along-scaled value, then
     // takes the across drag on top — so a sideways pull thickens it just as it
     // thickens a line, and a lengthwise pull keeps it in proportion.
-    final baseWeight = proportional ? origin.strokeWidth * alongFactor : origin.strokeWidth;
+    final baseWeight = proportional
+        ? origin.strokeWidth * alongFactor
+        : origin.strokeWidth;
     final width = fixedWeight
         ? origin.strokeWidth
-        : (baseWeight + (across(grown) - across(bounds)) / perUnit)
-            .clamp(_minStrokeWidth, ceiling);
+        : (baseWeight + (across(grown) - across(bounds)) / perUnit).clamp(
+            _minStrokeWidth,
+            ceiling,
+          );
 
     // Length follows the *change* in the box's along-extent, one pixel for one
     // pixel, so the far end tracks the pointer exactly as a shape's corner
@@ -1326,7 +1394,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // edge climbs away from you too. Offsetting the mark by half the growth,
     // away from the edge being held, pins that edge exactly as dragging a
     // shape's bottom corner leaves its top where it was.
-    final acrossAxis = runsHorizontally ? const Offset(0, 1) : const Offset(1, 0);
+    final acrossAxis = runsHorizontally
+        ? const Offset(0, 1)
+        : const Offset(1, 0);
     final growsPositive = runsHorizontally
         ? handle == _AnnHandle.bottomLeft || handle == _AnnHandle.bottomRight
         : handle == _AnnHandle.topRight || handle == _AnnHandle.bottomRight;
@@ -1360,17 +1430,18 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       startPoint: origin.startPoint == null ? null : scaled(origin.startPoint!),
       endPoint: origin.endPoint == null ? null : scaled(origin.endPoint!),
       // The curve control point rides along, or a curved arrow straightens out.
-      controlPoint:
-          origin.controlPoint == null ? null : scaled(origin.controlPoint!),
+      controlPoint: origin.controlPoint == null
+          ? null
+          : scaled(origin.controlPoint!),
     );
   }
 
   Offset _oppositeCorner(Rect bounds, _AnnHandle handle) => switch (handle) {
-        _AnnHandle.topLeft => bounds.bottomRight,
-        _AnnHandle.topRight => bounds.bottomLeft,
-        _AnnHandle.bottomLeft => bounds.topRight,
-        _ => bounds.topLeft,
-      };
+    _AnnHandle.topLeft => bounds.bottomRight,
+    _AnnHandle.topRight => bounds.bottomLeft,
+    _AnnHandle.bottomLeft => bounds.topRight,
+    _ => bounds.topLeft,
+  };
 
   /// The point a resize scales about: the corner of [bounds] opposite [handle]
   /// for a freehand mark, or — for a two-point mark — whichever of its ends is
@@ -1402,16 +1473,26 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       final span = end - start;
       if (span.distance > 1.0) return span / span.distance;
     }
-    return bounds.width >= bounds.height ? const Offset(1, 0) : const Offset(0, 1);
+    return bounds.width >= bounds.height
+        ? const Offset(1, 0)
+        : const Offset(0, 1);
   }
 
-  Annotation _resizeAnnotation(Annotation origin, _AnnHandle handle, Offset totalDelta) {
-    if (origin.tool == CanvasTool.text || origin.tool == CanvasTool.stepMarker) {
+  Annotation _resizeAnnotation(
+    Annotation origin,
+    _AnnHandle handle,
+    Offset totalDelta,
+  ) {
+    if (origin.tool == CanvasTool.text ||
+        origin.tool == CanvasTool.stepMarker) {
       // Point-anchored items scale by their type size rather than by bounds.
-      final grow = (handle == _AnnHandle.bottomRight || handle == _AnnHandle.topRight)
+      final grow =
+          (handle == _AnnHandle.bottomRight || handle == _AnnHandle.topRight)
           ? totalDelta.dx
           : -totalDelta.dx;
-      return origin.copyWith(fontSize: (origin.fontSize + grow * 0.4).clamp(8.0, 120.0));
+      return origin.copyWith(
+        fontSize: (origin.fontSize + grow * 0.4).clamp(8.0, 120.0),
+      );
     }
 
     if (_strokeTools.contains(origin.tool)) {
@@ -1446,8 +1527,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (_isShiftDown && bounds.width > 0 && bounds.height > 0) {
       // Preserve the original aspect ratio, anchored at the opposite corner.
       final ratio = bounds.height / bounds.width;
-      final anchorLeft = handle == _AnnHandle.topRight || handle == _AnnHandle.bottomRight;
-      final anchorTop = handle == _AnnHandle.bottomLeft || handle == _AnnHandle.bottomRight;
+      final anchorLeft =
+          handle == _AnnHandle.topRight || handle == _AnnHandle.bottomRight;
+      final anchorTop =
+          handle == _AnnHandle.bottomLeft || handle == _AnnHandle.bottomRight;
       final width = (right - left).abs();
       final height = width * ratio;
       if (anchorLeft) {
@@ -1476,15 +1559,20 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (origStart == null || origEnd == null) return origin;
 
     Offset remap(Offset p) => Offset(
-          bounds.width == 0
-              ? newBounds.left
-              : newBounds.left + (p.dx - bounds.left) / bounds.width * newBounds.width,
-          bounds.height == 0
-              ? newBounds.top
-              : newBounds.top + (p.dy - bounds.top) / bounds.height * newBounds.height,
-        );
+      bounds.width == 0
+          ? newBounds.left
+          : newBounds.left +
+                (p.dx - bounds.left) / bounds.width * newBounds.width,
+      bounds.height == 0
+          ? newBounds.top
+          : newBounds.top +
+                (p.dy - bounds.top) / bounds.height * newBounds.height,
+    );
 
-    return origin.copyWith(startPoint: remap(origStart), endPoint: remap(origEnd));
+    return origin.copyWith(
+      startPoint: remap(origStart),
+      endPoint: remap(origEnd),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -1603,9 +1691,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   @override
   void onActiveCropRectChanged(Rect? rect) => setState(() {
-        _activeCropRect = rect;
-        _cropRectIsPristine = false;
-      });
+    _activeCropRect = rect;
+    _cropRectIsPristine = false;
+  });
 
   @override
   void onCurrentAnnotationChanged(Annotation? annotation) =>
@@ -1629,7 +1717,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   void onToolSelected(CanvasTool tool) => widget.onToolSelected?.call(tool);
 
   @override
-  void onStepCounterIncremented(int step) => widget.onStepCounterIncremented(step);
+  void onStepCounterIncremented(int step) =>
+      widget.onStepCounterIncremented(step);
 
   @override
   void showTextPrompt(Offset pos) => _startInlineTextEdit(pos);
@@ -1746,7 +1835,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         // rather than dragging the default around — see `_cropRectIsPristine`.
         // Handles are unaffected, so expanding outward from the default still
         // works on the first gesture.
-        final isPristineBodyDrag = handle == _CropHandle.move && _cropRectIsPristine;
+        final isPristineBodyDrag =
+            handle == _CropHandle.move && _cropRectIsPristine;
         if (handle != _CropHandle.none && !isPristineBodyDrag) {
           setState(() {
             _isDraggingCrop = true;
@@ -1788,7 +1878,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     //
     // A live floating selection outranks it: those two selections are mutually
     // exclusive in practice, and the marquee's own handles share this space.
-    final selected = _floatingSelectionRect == null ? _selectedAnnotation : null;
+    final selected = _floatingSelectionRect == null
+        ? _selectedAnnotation
+        : null;
     if (selected != null) {
       final handle = _hitTestAnnotationHandles(pos, selected);
       if (handle != _AnnHandle.none && handle != _AnnHandle.body) {
@@ -1889,7 +1981,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (_isPanningView) {
       // `details.delta` is in the child's coordinate space, which is already
       // divided by the zoom; the viewport translation wants viewport pixels.
-      _panBy(details.delta * _transformationController.value.getMaxScaleOnAxis());
+      _panBy(
+        details.delta * _transformationController.value.getMaxScaleOnAxis(),
+      );
       return;
     }
 
@@ -1984,7 +2078,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     if (_isRotatingAnnotation && origin != null) {
       final center = AnnotationRenderer.boundingRect(origin).center;
-      var angle = math.atan2(pos.dy - center.dy, pos.dx - center.dx) + math.pi / 2;
+      var angle =
+          math.atan2(pos.dy - center.dy, pos.dx - center.dx) + math.pi / 2;
       if (_isShiftDown) {
         const step = math.pi / 12; // snap to 15°
         angle = (angle / step).round() * step;
@@ -1994,7 +2089,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     }
 
     if (_isResizingAnnotation && origin != null) {
-      _replaceAnnotation(_resizeAnnotation(origin, _currentAnnHandle, totalDelta), live: true);
+      _replaceAnnotation(
+        _resizeAnnotation(origin, _currentAnnHandle, totalDelta),
+        live: true,
+      );
       return;
     }
 
@@ -2002,7 +2100,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       var delta = totalDelta;
       if (_isShiftDown) {
         // Lock movement to the dominant axis.
-        delta = delta.dx.abs() > delta.dy.abs() ? Offset(delta.dx, 0) : Offset(0, delta.dy);
+        delta = delta.dx.abs() > delta.dy.abs()
+            ? Offset(delta.dx, 0)
+            : Offset(0, delta.dy);
       }
       _replaceAnnotation(origin.translated(delta), live: true);
       return;
@@ -2136,7 +2236,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// Double clicks are detected by hand
   bool _consumeDoubleTap(Offset pos) {
     final now = DateTime.now();
-    final isDouble = now.difference(_lastTapAt) < const Duration(milliseconds: 350) &&
+    final isDouble =
+        now.difference(_lastTapAt) < const Duration(milliseconds: 350) &&
         (pos - _lastTapPos).distance < 12;
     _lastTapAt = isDouble ? DateTime.fromMillisecondsSinceEpoch(0) : now;
     _lastTapPos = pos;
@@ -2239,14 +2340,18 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (editingId != null) {
       // Canvas space: `_replaceAnnotation` maps back to image pixels on the way
       // out, so handing it an image-space annotation would scale it twice.
-      final existing = _canvasAnnotations.where((a) => a.id == editingId).firstOrNull;
+      final existing = _canvasAnnotations
+          .where((a) => a.id == editingId)
+          .firstOrNull;
       if (existing != null) {
         _pushHistoryCheckpoint();
         _replaceAnnotation(existing.copyWith(text: text), live: true);
       }
     } else {
-      final annotation = _buildAnnotationForTool(CanvasTool.text, pos)
-          .copyWith(text: text, endPoint: null);
+      final annotation = _buildAnnotationForTool(
+        CanvasTool.text,
+        pos,
+      ).copyWith(text: text, endPoint: null);
       _emitAnnotation(annotation);
       setState(() => _selectedAnnotationId = annotation.id);
       widget.onSelectAnnotation?.call(annotation);
@@ -2260,15 +2365,24 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   /// Converts a canvas point into a pixel coordinate of the source image, or
   /// null when the point lies outside the image (in the letterbox area).
-  ({int x, int y})? _canvasPointToImagePixel(Offset localPos, int imgWidth, int imgHeight) {
+  ({int x, int y})? _canvasPointToImagePixel(
+    Offset localPos,
+    int imgWidth,
+    int imgHeight,
+  ) {
     final rect = RenderService.imageRectInCanvas(
       imageSize: Size(imgWidth.toDouble(), imgHeight.toDouble()),
       canvasSize: _canvasSize,
     );
     if (rect.isEmpty || !rect.contains(localPos)) return null;
 
-    final x = ((localPos.dx - rect.left) / rect.width * imgWidth).round().clamp(0, imgWidth - 1);
-    final y = ((localPos.dy - rect.top) / rect.height * imgHeight).round().clamp(0, imgHeight - 1);
+    final x = ((localPos.dx - rect.left) / rect.width * imgWidth).round().clamp(
+      0,
+      imgWidth - 1,
+    );
+    final y = ((localPos.dy - rect.top) / rect.height * imgHeight)
+        .round()
+        .clamp(0, imgHeight - 1);
     return (x: x, y: y);
   }
 
@@ -2278,7 +2392,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       final path = widget.imagePath;
       if (path == null || !File(path).existsSync()) return;
       try {
-        decoded = await compute(img.decodeImage, await File(path).readAsBytes());
+        decoded = await compute(
+          img.decodeImage,
+          await File(path).readAsBytes(),
+        );
         if (!mounted) return;
         _cachedSourceImage = decoded;
       } catch (e) {
@@ -2288,7 +2405,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     }
     if (decoded == null) return;
 
-    final pixelPos = _canvasPointToImagePixel(localPos, decoded.width, decoded.height);
+    final pixelPos = _canvasPointToImagePixel(
+      localPos,
+      decoded.width,
+      decoded.height,
+    );
     if (pixelPos == null) return;
 
     final pixel = decoded.getPixel(pixelPos.x, pixelPos.y);
@@ -2298,7 +2419,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       pixel.g.toInt(),
       pixel.b.toInt(),
     );
-    final hex = '#${sampled.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
+    final hex =
+        '#${sampled.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
     await ClipboardService.copyText(hex);
     widget.onSampleColor?.call(sampled);
   }
@@ -2306,7 +2428,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   Future<ui.Image?> _imageToUiImage(img.Image image) async {
     try {
       final pngBytes = await compute(img.encodePng, image);
-      final codec = await ui.instantiateImageCodec(Uint8List.fromList(pngBytes));
+      final codec = await ui.instantiateImageCodec(
+        Uint8List.fromList(pngBytes),
+      );
       final frame = await codec.getNextFrame();
       codec.dispose();
       return frame.image;
@@ -2325,7 +2449,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     try {
       img.Image? decoded = _cachedSourceImage;
       if (decoded == null) {
-        decoded = await compute(img.decodeImage, await File(path).readAsBytes());
+        decoded = await compute(
+          img.decodeImage,
+          await File(path).readAsBytes(),
+        );
         if (!mounted) return;
         _cachedSourceImage = decoded;
       }
@@ -2344,8 +2471,14 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
       final pxX = (relLeft * scaleX).round().clamp(0, decoded.width - 1);
       final pxY = (relTop * scaleY).round().clamp(0, decoded.height - 1);
-      final pxW = ((relRight - relLeft) * scaleX).round().clamp(1, decoded.width - pxX);
-      final pxH = ((relBottom - relTop) * scaleY).round().clamp(1, decoded.height - pxY);
+      final pxW = ((relRight - relLeft) * scaleX).round().clamp(
+        1,
+        decoded.width - pxX,
+      );
+      final pxH = ((relBottom - relTop) * scaleY).round().clamp(
+        1,
+        decoded.height - pxY,
+      );
 
       final beforeFill = widget.onBeforeCanvasFill;
       if (beforeFill != null) await beforeFill();
@@ -2405,7 +2538,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     String? toPath,
     Rect? throughImageRect,
   }) async {
-    if (!_hasExtractedSelection || _cutSelectionImage == null || _floatingSelectionRect == null) {
+    if (!_hasExtractedSelection ||
+        _cutSelectionImage == null ||
+        _floatingSelectionRect == null) {
       _floatingSelectionUiImage?.dispose();
       if (mounted) {
         setState(() {
@@ -2431,7 +2566,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       // away from — decode that file fresh instead, and leave the cache alone.
       img.Image? decoded = isForeignTarget ? null : _cachedSourceImage;
       if (decoded == null && path != null && File(path).existsSync()) {
-        decoded = await compute(img.decodeImage, await File(path).readAsBytes());
+        decoded = await compute(
+          img.decodeImage,
+          await File(path).readAsBytes(),
+        );
         if (!isForeignTarget) _cachedSourceImage = decoded;
       }
       if (decoded != null && path != null) {
@@ -2513,9 +2651,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (_cutSelectionImage == null) return;
 
     try {
-      final pngBytes = Uint8List.fromList(await compute(img.encodePng, _cutSelectionImage!));
+      final pngBytes = Uint8List.fromList(
+        await compute(img.encodePng, _cutSelectionImage!),
+      );
       final tempDir = Directory.systemTemp;
-      final tempFile = File('${tempDir.path}/snipsnap_sel_${DateTime.now().millisecondsSinceEpoch}.png');
+      final tempFile = File(
+        '${tempDir.path}/snipsnap_sel_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
       await tempFile.writeAsBytes(pngBytes);
       await ClipboardService.copyImageToClipboard(tempFile.path);
 
@@ -2542,7 +2684,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       }
       if (decoded == null) return;
 
-      final pixelPos = _canvasPointToImagePixel(localPos, decoded.width, decoded.height);
+      final pixelPos = _canvasPointToImagePixel(
+        localPos,
+        decoded.width,
+        decoded.height,
+      );
       if (pixelPos == null) return;
 
       // Snapshot the pre-fill bitmap *before* it is overwritten for undo.
@@ -2586,7 +2732,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   // ---------------------------------------------------------------------------
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
     final key = event.logicalKey;
 
     // When typing in the inline text editor, do NOT let character keys, navigation keys,
@@ -2599,7 +2747,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       return KeyEventResult.ignored;
     }
 
-    if (key == LogicalKeyboardKey.delete || key == LogicalKeyboardKey.backspace) {
+    if (key == LogicalKeyboardKey.delete ||
+        key == LogicalKeyboardKey.backspace) {
       if (_floatingSelectionRect != null) {
         _deleteFloatingSelection();
         return KeyEventResult.handled;
@@ -2628,7 +2777,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       return KeyEventResult.handled;
     }
 
-    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
       if (_floatingSelectionRect != null) {
         _commitFloatingSelection();
         return KeyEventResult.handled;
@@ -2654,8 +2804,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           _extractFloatingSelection();
         }
         setState(() {
-          _floatingSelectionRect =
-              _floatingSelectionRect!.shift(nudge * (_isShiftDown ? 10.0 : 1.0));
+          _floatingSelectionRect = _floatingSelectionRect!.shift(
+            nudge * (_isShiftDown ? 10.0 : 1.0),
+          );
         });
         return KeyEventResult.handled;
       }
@@ -2752,7 +2903,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // Space held over a zoomed-in view: this drag will pan, so say so before
     // the user commits to it.
     if (_isPanModifierDown && _canPanView) {
-      final grab = _isPanningView ? SystemMouseCursors.grabbing : SystemMouseCursors.grab;
+      final grab = _isPanningView
+          ? SystemMouseCursors.grabbing
+          : SystemMouseCursors.grab;
       if (_cursor != grab) setState(() => _cursor = grab);
       return;
     }
@@ -2760,7 +2913,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (widget.activeTool == CanvasTool.colorPicker) {
       final cached = _cachedSourceImage;
       if (cached != null) {
-        final pixelPos = _canvasPointToImagePixel(pos, cached.width, cached.height);
+        final pixelPos = _canvasPointToImagePixel(
+          pos,
+          cached.width,
+          cached.height,
+        );
         if (pixelPos != null) {
           final pixel = cached.getPixel(pixelPos.x, pixelPos.y);
           final color = Color.fromARGB(
@@ -2785,19 +2942,27 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     MouseCursor next;
 
     final selected = _selectedAnnotation;
-    final handle = selected != null ? _hitTestAnnotationHandles(pos, selected) : _AnnHandle.none;
+    final handle = selected != null
+        ? _hitTestAnnotationHandles(pos, selected)
+        : _AnnHandle.none;
 
     if (handle != _AnnHandle.none) {
       next = _cursorForHandle(handle);
     } else if (widget.activeTool == CanvasTool.crop) {
       final crop = _activeCropRect;
-      final cropHandle = crop != null ? _hitTestCropRect(pos, crop) : _CropHandle.none;
+      final cropHandle = crop != null
+          ? _hitTestCropRect(pos, crop)
+          : _CropHandle.none;
       next = switch (cropHandle) {
         _CropHandle.move => SystemMouseCursors.move,
-        _CropHandle.topLeft || _CropHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
-        _CropHandle.topRight || _CropHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
-        _CropHandle.top || _CropHandle.bottom => SystemMouseCursors.resizeUpDown,
-        _CropHandle.left || _CropHandle.right => SystemMouseCursors.resizeLeftRight,
+        _CropHandle.topLeft ||
+        _CropHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
+        _CropHandle.topRight ||
+        _CropHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
+        _CropHandle.top ||
+        _CropHandle.bottom => SystemMouseCursors.resizeUpDown,
+        _CropHandle.left ||
+        _CropHandle.right => SystemMouseCursors.resizeLeftRight,
         _CropHandle.none => SystemMouseCursors.precise,
       };
     } else if (widget.activeTool == CanvasTool.select) {
@@ -2805,15 +2970,23 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         final handle = _hitTestCropRect(pos, _floatingSelectionRect!);
         next = switch (handle) {
           _CropHandle.move => SystemMouseCursors.move,
-          _CropHandle.topLeft || _CropHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
-          _CropHandle.topRight || _CropHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
-          _CropHandle.top || _CropHandle.bottom => SystemMouseCursors.resizeUpDown,
-          _CropHandle.left || _CropHandle.right => SystemMouseCursors.resizeLeftRight,
+          _CropHandle.topLeft ||
+          _CropHandle.bottomRight => SystemMouseCursors.resizeUpLeftDownRight,
+          _CropHandle.topRight ||
+          _CropHandle.bottomLeft => SystemMouseCursors.resizeUpRightDownLeft,
+          _CropHandle.top ||
+          _CropHandle.bottom => SystemMouseCursors.resizeUpDown,
+          _CropHandle.left ||
+          _CropHandle.right => SystemMouseCursors.resizeLeftRight,
           _CropHandle.none =>
-            hitTestAnnotation(pos) != null ? SystemMouseCursors.move : SystemMouseCursors.precise,
+            hitTestAnnotation(pos) != null
+                ? SystemMouseCursors.move
+                : SystemMouseCursors.precise,
         };
       } else {
-        next = hitTestAnnotation(pos) != null ? SystemMouseCursors.move : SystemMouseCursors.precise;
+        next = hitTestAnnotation(pos) != null
+            ? SystemMouseCursors.move
+            : SystemMouseCursors.precise;
       }
     } else if (widget.activeTool == CanvasTool.colorPicker ||
         widget.activeTool == CanvasTool.fill) {
@@ -2839,8 +3012,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     final t = SnipTheme.of(context);
     final selected = _selectedAnnotation;
-    final selectedBounds =
-        selected != null ? AnnotationRenderer.selectionRect(selected) : Rect.zero;
+    final selectedBounds = selected != null
+        ? AnnotationRenderer.selectionRect(selected)
+        : Rect.zero;
     // Resolved once. `imageRect` walks to the render object and refits the
     // bitmap on every read, and this build asked for it seven times a frame.
     final imageRect = _imageRect;
@@ -2856,11 +3030,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         child: Stack(
           children: [
             // Solid workspace background (Snagit-style)
-            Positioned.fill(
-              child: Container(
-                color: t.canvas,
-              ),
-            ),
+            Positioned.fill(child: Container(color: t.canvas)),
             SizedBox.expand(
               child: Listener(
                 key: _viewportKey,
@@ -2921,7 +3091,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                 decoration: BoxDecoration(
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.black.withValues(alpha: t.isDark ? 0.35 : 0.08),
+                                      color: Colors.black.withValues(
+                                        alpha: t.isDark ? 0.35 : 0.08,
+                                      ),
                                       blurRadius: 10,
                                       offset: const Offset(0, 3),
                                     ),
@@ -2929,7 +3101,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                 ),
                                 child: ClipRect(
                                   child: CustomPaint(
-                                    painter: _SteadyCheckerboardPainter(theme: t),
+                                    painter: _SteadyCheckerboardPainter(
+                                      theme: t,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2960,11 +3134,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                           Positioned.fill(
                             child: LayoutBuilder(
                               builder: (context, constraints) {
-                                final projection =
-                                    _projectionFor(constraints.biggest);
+                                final projection = _projectionFor(
+                                  constraints.biggest,
+                                );
                                 return MouseRegion(
                                   cursor: _cursor,
-                                  onHover: (e) => _updateCursor(e.localPosition),
+                                  onHover: (e) =>
+                                      _updateCursor(e.localPosition),
                                   child: GestureDetector(
                                     behavior: HitTestBehavior.opaque,
                                     // Everything except the trackpad's own
@@ -2992,14 +3168,18 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                     onTapUp: _onTapUp,
                                     child: CustomPaint(
                                       painter: _AnnotationPainter(
-                                        annotations:
-                                            _canvasAnnotationsFor(projection),
+                                        annotations: _canvasAnnotationsFor(
+                                          projection,
+                                        ),
                                         pixelScale: projection.scale,
                                         currentAnnotation: _currentAnnotation,
-                                        selectedAnnotationId: _selectedAnnotationId,
-                                        editingAnnotationId: _editingAnnotationId,
+                                        selectedAnnotationId:
+                                            _selectedAnnotationId,
+                                        editingAnnotationId:
+                                            _editingAnnotationId,
                                         baseImage: _baseImage,
-                                        showHud: _currentAnnotation != null ||
+                                        showHud:
+                                            _currentAnnotation != null ||
                                             _isResizingAnnotation ||
                                             _isDraggingAnnotation,
                                       ),
@@ -3012,7 +3192,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
                           // Floating Selection Overlay (Marquee / Cut-and-Move)
                           if (widget.activeTool == CanvasTool.select &&
-                              (_selectionMarquee != null || _floatingSelectionRect != null)) ...[
+                              (_selectionMarquee != null ||
+                                  _floatingSelectionRect != null)) ...[
                             Positioned.fill(
                               child: IgnorePointer(
                                 child: CustomPaint(
@@ -3047,7 +3228,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                             _buildCropActionBar(),
                           ],
 
-                          if (selectedBounds != Rect.zero) _buildDeleteChip(selectedBounds),
+                          if (selectedBounds != Rect.zero)
+                            _buildDeleteChip(selectedBounds),
 
                           // Inline on-canvas text editing overlay
                           if (_inlineTextPos != null) _buildInlineTextEditor(),
@@ -3072,7 +3254,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                               child: IgnorePointer(
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
-                                    border: Border.all(color: t.onActive, width: 2.2),
+                                    border: Border.all(
+                                      color: t.onActive,
+                                      width: 2.2,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -3083,7 +3268,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
                                     color: t.ink.withValues(alpha: 0.1),
-                                    border: Border.all(color: t.ink, width: 1.4),
+                                    border: Border.all(
+                                      color: t.ink,
+                                      width: 1.4,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -3150,7 +3338,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                   fit: BoxFit.cover,
                   errorBuilder: (ctx, err, stack) => ColoredBox(
                     color: t.surfaceRaised,
-                    child: Icon(Icons.crop_free_rounded, size: 40, color: t.emphasis),
+                    child: Icon(
+                      Icons.crop_free_rounded,
+                      size: 40,
+                      color: t.emphasis,
+                    ),
                   ),
                 ),
               ),
@@ -3175,9 +3367,19 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _emptyStatePill(t, Icons.crop_free_rounded, 'Snip Area', 'Cmd+Shift+1'),
+                _emptyStatePill(
+                  t,
+                  Icons.crop_free_rounded,
+                  'Snip Area',
+                  'Cmd+Shift+1',
+                ),
                 const SizedBox(width: 8),
-                _emptyStatePill(t, Icons.file_open_rounded, 'Open Image', 'Cmd+O'),
+                _emptyStatePill(
+                  t,
+                  Icons.file_open_rounded,
+                  'Open Image',
+                  'Cmd+O',
+                ),
               ],
             ),
           ],
@@ -3186,7 +3388,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     );
   }
 
-  Widget _emptyStatePill(SnipTheme t, IconData icon, String label, String shortcut) {
+  Widget _emptyStatePill(
+    SnipTheme t,
+    IconData icon,
+    String label,
+    String shortcut,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -3231,11 +3438,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       barTop = math.max(12, cropRect.top - 48);
       if (barTop < 12) barTop = math.max(12, cropRect.bottom - 48);
     }
-    final barLeft =
-        (cropRect.center.dx - 110).clamp(12.0, math.max(12.0, size.width - 220)).toDouble();
+    final barLeft = (cropRect.center.dx - 110)
+        .clamp(12.0, math.max(12.0, size.width - 220))
+        .toDouble();
 
     final imageRect = _imageRect;
-    final isExpanded = cropRect.left < imageRect.left - 1 ||
+    final isExpanded =
+        cropRect.left < imageRect.left - 1 ||
         cropRect.top < imageRect.top - 1 ||
         cropRect.right > imageRect.right + 1 ||
         cropRect.bottom > imageRect.bottom + 1;
@@ -3261,13 +3470,21 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                   backgroundColor: t.surfaceRaised,
                   foregroundColor: t.emphasis,
                   side: BorderSide(color: t.emphasis, width: 1.2),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
                 icon: const Icon(Icons.check_rounded, size: 16),
                 label: Text(
                   isExpanded ? 'Apply Expansion' : 'Apply Crop',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 onPressed: _applyCrop,
               ),
@@ -3276,8 +3493,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: t.ink,
                   side: BorderSide(color: t.border),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
                 ),
                 icon: const Icon(Icons.close_rounded, size: 16),
                 label: const Text('Cancel', style: TextStyle(fontSize: 12)),
@@ -3325,7 +3547,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (pos == null) return const SizedBox.shrink();
 
     final t = SnipTheme.of(context);
-    final showBg = widget.isFilled &&
+    final showBg =
+        widget.isFilled &&
         widget.textBackgroundColor != null &&
         widget.textBackgroundColor!.a > 0;
     // The frame's own background is `t.surface` (a known token, high
@@ -3336,7 +3559,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // near-white real colour) the moment someone picks a dark text
     // background in light mode or vice versa, so the border contrasts
     // against whichever background is actually painted.
-    final frameBg = showBg ? (widget.textBackgroundColor ?? Colors.black87) : t.surface;
+    final frameBg = showBg
+        ? (widget.textBackgroundColor ?? Colors.black87)
+        : t.surface;
     // frameBg can be translucent (AppDefaults.textBackgroundColor ships at
     // alpha 0xCC, and the user can pick any alpha via the colour dialog).
     // The true backdrop behind this floating editor is arbitrary canvas
@@ -3354,10 +3579,19 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
             color: frameBg,
-            borderRadius: BorderRadius.circular(widget.borderRadius.clamp(4.0, 16.0)),
-            border: Border.all(color: t.ringOn(frameBg, backdrop: t.surface), width: 2.0),
+            borderRadius: BorderRadius.circular(
+              widget.borderRadius.clamp(4.0, 16.0),
+            ),
+            border: Border.all(
+              color: t.ringOn(frameBg, backdrop: t.surface),
+              width: 2.0,
+            ),
             boxShadow: const [
-              BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
+              BoxShadow(
+                color: Colors.black38,
+                blurRadius: 8,
+                offset: Offset(0, 3),
+              ),
             ],
           ),
           child: IntrinsicWidth(
@@ -3399,8 +3633,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       return const SizedBox.shrink();
     }
 
-    final hex = '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
-    final rgb = 'RGB(${(color.r * 255).round()}, ${(color.g * 255).round()}, ${(color.b * 255).round()})';
+    final hex =
+        '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
+    final rgb =
+        'RGB(${(color.r * 255).round()}, ${(color.g * 255).round()}, ${(color.b * 255).round()})';
 
     final size = _canvasSize;
     double left = pos.dx + 20;
@@ -3438,7 +3674,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                     shape: BoxShape.circle,
                     border: Border.all(color: t.ink, width: 1.6),
                     boxShadow: const [
-                      BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 3)),
+                      BoxShadow(
+                        color: Colors.black45,
+                        blurRadius: 8,
+                        offset: Offset(0, 3),
+                      ),
                     ],
                   ),
                   child: ClipOval(
@@ -3463,7 +3703,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: t.border),
                 boxShadow: const [
-                  BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 4,
+                    offset: Offset(0, 2),
+                  ),
                 ],
               ),
               child: Column(
@@ -3501,13 +3745,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                     ],
                   ),
                   const SizedBox(height: 1),
-                  Text(
-                    rgb,
-                    style: TextStyle(
-                      fontSize: 9,
-                      color: t.inkMuted,
-                    ),
-                  ),
+                  Text(rgb, style: TextStyle(fontSize: 9, color: t.inkMuted)),
                 ],
               ),
             ),
@@ -3536,8 +3774,12 @@ class _SteadyCheckerboardPainter extends CustomPainter {
       int col = 0;
       for (double x = 0; x < size.width; x += squareSize) {
         canvas.drawRect(
-          Rect.fromLTWH(x, y, math.min(squareSize, size.width - x),
-              math.min(squareSize, size.height - y)),
+          Rect.fromLTWH(
+            x,
+            y,
+            math.min(squareSize, size.width - x),
+            math.min(squareSize, size.height - y),
+          ),
           ((row + col) % 2 == 0) ? paint1 : paint2,
         );
         col++;
@@ -3569,7 +3811,9 @@ class _CropOverlayPainter extends CustomPainter {
     // 1. Dimming mask on outside of cropRect. `SnipTheme.scrim` is
     // deliberately mode-invariant — see its own doc comment — so the mask
     // never flips polarity in dark mode.
-    final fullRect = (Offset.zero & size).expandToInclude(cropRect).inflate(200.0);
+    final fullRect = (Offset.zero & size)
+        .expandToInclude(cropRect)
+        .inflate(200.0);
     final path = Path()
       ..addRect(fullRect)
       ..addRect(cropRect)
@@ -3657,8 +3901,16 @@ class _CropOverlayPainter extends CustomPainter {
     for (int i = 1; i < 3; i++) {
       final dx = cropRect.left + cropRect.width * i / 3;
       final dy = cropRect.top + cropRect.height * i / 3;
-      canvas.drawLine(Offset(dx, cropRect.top), Offset(dx, cropRect.bottom), guidePaint);
-      canvas.drawLine(Offset(cropRect.left, dy), Offset(cropRect.right, dy), guidePaint);
+      canvas.drawLine(
+        Offset(dx, cropRect.top),
+        Offset(dx, cropRect.bottom),
+        guidePaint,
+      );
+      canvas.drawLine(
+        Offset(cropRect.left, dy),
+        Offset(cropRect.right, dy),
+        guidePaint,
+      );
     }
 
     // 6. 8 Square handles. A physical drop shadow (literal, not themed — it
@@ -3670,8 +3922,15 @@ class _CropOverlayPainter extends CustomPainter {
     // the invisible-handle bug this pairing avoids.
     const handleSize = 9.0;
     void drawSquareHandle(Offset center) {
-      final rect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
-      canvas.drawRect(rect.shift(const Offset(0, 1)), Paint()..color = Colors.black45);
+      final rect = Rect.fromCenter(
+        center: center,
+        width: handleSize,
+        height: handleSize,
+      );
+      canvas.drawRect(
+        rect.shift(const Offset(0, 1)),
+        Paint()..color = Colors.black45,
+      );
       canvas.drawRect(rect, Paint()..color = theme.ink);
       canvas.drawRect(
         rect,
@@ -3708,16 +3967,26 @@ class _CropOverlayPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: '$pixelW × $pixelH px',
-        style: TextStyle(color: theme.onActive, fontSize: 11, fontWeight: FontWeight.bold),
+        style: TextStyle(
+          color: theme.onActive,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
 
-    final badgeCenter = Offset(cropRect.center.dx, math.max(16, cropRect.top - 16));
+    final badgeCenter = Offset(
+      cropRect.center.dx,
+      math.max(16, cropRect.top - 16),
+    );
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(
-            center: badgeCenter, width: tp.width + 12, height: tp.height + 6),
+          center: badgeCenter,
+          width: tp.width + 12,
+          height: tp.height + 6,
+        ),
         const Radius.circular(10),
       ),
       Paint()..color = theme.ink,
@@ -3825,8 +4094,15 @@ class _FloatingSelectionPainter extends CustomPainter {
     if (floatingRect != null) {
       const handleSize = 9.0;
       void drawSquareHandle(Offset center) {
-        final hRect = Rect.fromCenter(center: center, width: handleSize, height: handleSize);
-        canvas.drawRect(hRect.shift(const Offset(0, 1)), Paint()..color = Colors.black38);
+        final hRect = Rect.fromCenter(
+          center: center,
+          width: handleSize,
+          height: handleSize,
+        );
+        canvas.drawRect(
+          hRect.shift(const Offset(0, 1)),
+          Paint()..color = Colors.black38,
+        );
         canvas.drawRect(hRect, Paint()..color = theme.ink);
         canvas.drawRect(
           hRect,
@@ -3863,7 +4139,11 @@ class _FloatingSelectionPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: '$pixelW × $pixelH px',
-        style: TextStyle(color: theme.onActive, fontSize: 11, fontWeight: FontWeight.bold),
+        style: TextStyle(
+          color: theme.onActive,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -3871,7 +4151,11 @@ class _FloatingSelectionPainter extends CustomPainter {
     final badgeCenter = Offset(rect.center.dx, rect.top - 16);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromCenter(center: badgeCenter, width: tp.width + 12, height: tp.height + 6),
+        Rect.fromCenter(
+          center: badgeCenter,
+          width: tp.width + 12,
+          height: tp.height + 6,
+        ),
         const Radius.circular(10),
       ),
       Paint()..color = theme.ink,
@@ -3879,7 +4163,12 @@ class _FloatingSelectionPainter extends CustomPainter {
     tp.paint(canvas, badgeCenter - Offset(tp.width / 2, tp.height / 2));
   }
 
-  void _drawDashedRect(Canvas canvas, Rect rect, Paint paint, Paint shadowPaint) {
+  void _drawDashedRect(
+    Canvas canvas,
+    Rect rect,
+    Paint paint,
+    Paint shadowPaint,
+  ) {
     const dashWidth = 5.0;
     const dashSpace = 4.0;
 
@@ -3894,12 +4183,18 @@ class _FloatingSelectionPainter extends CustomPainter {
       double current = 0.0;
       bool draw = true;
       while (current < distance) {
-        final length = math.min(draw ? dashWidth : dashSpace, distance - current);
+        final length = math.min(
+          draw ? dashWidth : dashSpace,
+          distance - current,
+        );
         if (draw) {
           final p1 = Offset(start.dx + ux * current, start.dy + uy * current);
           final p2 = Offset(p1.dx + ux * length, p1.dy + uy * length);
           canvas.drawLine(
-              p1 + const Offset(0.5, 0.5), p2 + const Offset(0.5, 0.5), shadowPaint);
+            p1 + const Offset(0.5, 0.5),
+            p2 + const Offset(0.5, 0.5),
+            shadowPaint,
+          );
           canvas.drawLine(p1, p2, paint);
         }
         current += length;
@@ -3972,7 +4267,8 @@ class _AnnotationPainter extends CustomPainter {
       pixelScale: pixelScale,
     );
 
-    if (selectedAnnotationId != null && selectedAnnotationId != editingAnnotationId) {
+    if (selectedAnnotationId != null &&
+        selectedAnnotationId != editingAnnotationId) {
       for (final ann in annotations) {
         if (ann.id == selectedAnnotationId) {
           AnnotationRenderer.paintSelection(canvas, ann);
@@ -4004,7 +4300,11 @@ class _LoupeGridPainter extends CustomPainter {
   final img.Image sourceImage;
   final ({int x, int y}) centerPixel;
 
-  _LoupeGridPainter({required this.theme, required this.sourceImage, required this.centerPixel});
+  _LoupeGridPainter({
+    required this.theme,
+    required this.sourceImage,
+    required this.centerPixel,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {

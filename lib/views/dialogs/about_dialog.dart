@@ -41,7 +41,11 @@ class AboutSnipSnapDialog extends StatelessWidget {
                   fit: BoxFit.cover,
                   errorBuilder: (ctx, err, stack) => ColoredBox(
                     color: t.ink,
-                    child: Icon(Icons.camera_rounded, color: t.onActive, size: 40),
+                    child: Icon(
+                      Icons.camera_rounded,
+                      color: t.onActive,
+                      size: 40,
+                    ),
                   ),
                 ),
               ),
@@ -89,7 +93,11 @@ class AboutSnipSnapDialog extends StatelessWidget {
               alignment: WrapAlignment.center,
               children: [
                 _featureChip(t, 'Vector Annotations', Icons.gesture_rounded),
-                _featureChip(t, 'OCR Extraction', Icons.document_scanner_rounded),
+                _featureChip(
+                  t,
+                  'OCR Extraction',
+                  Icons.document_scanner_rounded,
+                ),
                 _featureChip(t, 'Drift SQLite', Icons.storage_rounded),
                 _featureChip(t, 'High-DPI Capture', Icons.hd_rounded),
               ],
@@ -107,12 +115,20 @@ class AboutSnipSnapDialog extends StatelessWidget {
                 backgroundColor: t.surfaceRaised,
                 foregroundColor: t.emphasis,
                 side: BorderSide(color: t.emphasis, width: 1.2),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 10,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 elevation: 0,
               ),
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text(
+                'Close',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),

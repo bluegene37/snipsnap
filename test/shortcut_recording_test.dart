@@ -15,9 +15,9 @@ void main() {
     calls = [];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      return null;
-    });
+          calls.add(call.method);
+          return null;
+        });
   });
 
   tearDown(() {
@@ -40,20 +40,23 @@ void main() {
     // shortcut after it.
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      calls.add(call.method);
-      if (call.method == 'register' && calls.length == 2) {
-        throw PlatformException(code: 'in_use');
-      }
-      return null;
-    });
+          calls.add(call.method);
+          if (call.method == 'register' && calls.length == 2) {
+            throw PlatformException(code: 'in_use');
+          }
+          return null;
+        });
 
     final failed = await ShortcutService.registerGlobalHotKeys(
       shortcuts: ShortcutService.getDefaultShortcuts(),
       onHotKeyTriggered: (_) {},
     );
 
-    expect(calls.where((c) => c == 'register').length, 3,
-        reason: 'all three capture hotkeys must still be attempted');
+    expect(
+      calls.where((c) => c == 'register').length,
+      3,
+      reason: 'all three capture hotkeys must still be attempted',
+    );
     expect(failed, isNotEmpty, reason: 'and the refusal is reported back');
   });
 
@@ -62,12 +65,12 @@ void main() {
     // never fires, so the settings dialog rejects them rather than letting a
     // user configure a shortcut that silently does nothing.
     CustomShortcut chord(int keyId) => CustomShortcut(
-          action: AppShortcutAction.timerSnip,
-          keyId: keyId,
-          keyLabel: '5',
-          meta: true,
-          shift: true,
-        );
+      action: AppShortcutAction.timerSnip,
+      keyId: keyId,
+      keyLabel: '5',
+      meta: true,
+      shift: true,
+    );
 
     // 0x35 is digit 5; 0x36 is digit 6, which the OS leaves alone.
     expect(ShortcutService.isReservedBySystem(chord(0x35)), isTrue);

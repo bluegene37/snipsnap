@@ -12,11 +12,7 @@ Future<void> _pump(WidgetTester tester, {required SnipThemeMode mode}) {
   return tester.pumpWidget(
     SnipThemeScope(
       theme: SnipTheme.forMode(mode),
-      child: const MaterialApp(
-        home: Scaffold(
-          body: AboutSnipSnapDialog(),
-        ),
-      ),
+      child: const MaterialApp(home: Scaffold(body: AboutSnipSnapDialog())),
     ),
   );
 }
@@ -25,7 +21,9 @@ void _runStateTests(SnipThemeMode mode) {
   final label = mode.name;
   final t = SnipTheme.forMode(mode);
 
-  testWidgets('[$label] pumps cleanly and shows the app name and version', (tester) async {
+  testWidgets('[$label] pumps cleanly and shows the app name and version', (
+    tester,
+  ) async {
     await _pump(tester, mode: mode);
     // The asset almost certainly fails to resolve under flutter_test's
     // bundle — drain that expected error rather than assert on it.
@@ -40,7 +38,11 @@ void _runStateTests(SnipThemeMode mode) {
     tester.takeException();
 
     final dialog = tester.widget<Dialog>(find.byType(Dialog));
-    expect(dialog.backgroundColor, t.surface, reason: '$label: dialog background');
+    expect(
+      dialog.backgroundColor,
+      t.surface,
+      reason: '$label: dialog background',
+    );
 
     final title = tester.widget<Text>(find.text('snipsnap'));
     expect(title.style?.color, t.ink, reason: '$label: app name colour');
@@ -49,18 +51,34 @@ void _runStateTests(SnipThemeMode mode) {
     expect(version.style?.color, t.inkMuted, reason: '$label: version colour');
   });
 
-  testWidgets('[$label] the Close CTA uses the emphasis token as a border/text, never a fill',
-      (tester) async {
-    await _pump(tester, mode: mode);
-    tester.takeException();
+  testWidgets(
+    '[$label] the Close CTA uses the emphasis token as a border/text, never a fill',
+    (tester) async {
+      await _pump(tester, mode: mode);
+      tester.takeException();
 
-    final button = tester.widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Close'));
-    final style = button.style!;
-    expect(style.foregroundColor?.resolve({}), t.emphasis, reason: '$label: Close foreground');
-    expect(style.backgroundColor?.resolve({}), t.surfaceRaised,
-        reason: '$label: Close background must stay surfaceRaised, not a filled plate');
-    expect(style.side?.resolve({})?.color, t.emphasis, reason: '$label: Close border');
-  });
+      final button = tester.widget<ElevatedButton>(
+        find.widgetWithText(ElevatedButton, 'Close'),
+      );
+      final style = button.style!;
+      expect(
+        style.foregroundColor?.resolve({}),
+        t.emphasis,
+        reason: '$label: Close foreground',
+      );
+      expect(
+        style.backgroundColor?.resolve({}),
+        t.surfaceRaised,
+        reason:
+            '$label: Close background must stay surfaceRaised, not a filled plate',
+      );
+      expect(
+        style.side?.resolve({})?.color,
+        t.emphasis,
+        reason: '$label: Close border',
+      );
+    },
+  );
 
   testWidgets('[$label] Close pops the dialog', (tester) async {
     await tester.pumpWidget(
@@ -72,7 +90,9 @@ void _runStateTests(SnipThemeMode mode) {
               body: Center(
                 child: ElevatedButton(
                   onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(builder: (_) => const AboutSnipSnapDialog()),
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AboutSnipSnapDialog(),
+                    ),
                   ),
                   child: const Text('open'),
                 ),

@@ -104,7 +104,8 @@ void main() {
       expect(
         occurrences,
         1,
-        reason: 'Annotations must reach the parent only via _emitAnnotation, '
+        reason:
+            'Annotations must reach the parent only via _emitAnnotation, '
             'which converts canvas -> image pixels. Found $occurrences raw '
             'call sites; a new one bypasses the conversion and stores canvas '
             'coordinates that will drift on the next resize.',
@@ -112,7 +113,8 @@ void main() {
       expect(
         _bodyOf(source, 'void _emitAnnotation('),
         contains(call),
-        reason: 'the single onAnnotationAdded call must be the one inside '
+        reason:
+            'the single onAnnotationAdded call must be the one inside '
             '_emitAnnotation',
       );
     });
@@ -121,7 +123,8 @@ void main() {
       expect(
         _bodyOf(source, 'void _emitAnnotation('),
         contains('mappedToImageSpace'),
-        reason: 'without this every newly drawn annotation is stored in canvas '
+        reason:
+            'without this every newly drawn annotation is stored in canvas '
             'coordinates',
       );
     });
@@ -130,7 +133,8 @@ void main() {
       expect(
         _bodyOf(source, 'void _replaceAnnotation('),
         contains('mappedToImageSpace'),
-        reason: 'without this every drag, resize, rotate and nudge writes back '
+        reason:
+            'without this every drag, resize, rotate and nudge writes back '
             'canvas coordinates',
       );
     });
@@ -147,7 +151,8 @@ void main() {
       expect(
         source,
         isNot(contains('annotations: widget.annotations')),
-        reason: '_AnnotationPainter and AnnotationRenderer work in canvas '
+        reason:
+            '_AnnotationPainter and AnnotationRenderer work in canvas '
             'space; handing them the image-space list paints every annotation '
             'at the wrong place and weight',
       );
@@ -181,7 +186,8 @@ void main() {
       expect(
         source,
         contains('List<Annotation> get annotations => _canvasAnnotations;'),
-        reason: 'handing widget.annotations (image pixels) to a handler places '
+        reason:
+            'handing widget.annotations (image pixels) to a handler places '
             'every gesture against the wrong geometry',
       );
     });
@@ -195,12 +201,17 @@ void main() {
       // unselectable, undeletable. The canvas has to clear it itself.
       final body = _bodyOf(source, 'void _onPanEnd(');
       final handOff = body.indexOf('_toolHandler.onPanEnd(');
-      expect(handOff, isNot(-1), reason: '_onPanEnd must delegate to the handler');
+      expect(
+        handOff,
+        isNot(-1),
+        reason: '_onPanEnd must delegate to the handler',
+      );
       final cleared = body.indexOf('_currentAnnotation = null', handOff);
       expect(
         cleared,
         isNot(-1),
-        reason: 'the canvas must clear _currentAnnotation after delegating, '
+        reason:
+            'the canvas must clear _currentAnnotation after delegating, '
             'instead of trusting whichever handler happens to answer at '
             'mouse-up to have a non-empty onPanEnd',
       );
@@ -220,19 +231,22 @@ void main() {
       expect(
         body,
         contains('toImageRect('),
-        reason: 'the handler works in canvas space and OcrService crops in '
+        reason:
+            'the handler works in canvas space and OcrService crops in '
             'image pixels; without this the wrong region is read',
       );
       expect(
         body,
         contains('if (!p.isValid) return;'),
-        reason: 'an invalid projection cannot place the region; requesting '
+        reason:
+            'an invalid projection cannot place the region; requesting '
             'anyway would pass raw canvas numbers off as image pixels',
       );
       expect(
         'widget.onExtractText?.call('.allMatches(source).length,
         1,
-        reason: 'the extraction request must leave the canvas from exactly one '
+        reason:
+            'the extraction request must leave the canvas from exactly one '
             'place, the one that converts',
       );
     });
@@ -274,13 +288,15 @@ void main() {
         expect(
           body,
           contains('if (!_canPlaceWrite(p)) return;'),
-          reason: 'an invalid projection cannot place this write; storing it '
+          reason:
+              'an invalid projection cannot place this write; storing it '
               'anyway passes canvas numbers off as image pixels',
         );
         expect(
           body,
           isNot(contains('p.isValid ?')),
-          reason: 'the ternary fallback IS the bug — it writes the unmapped '
+          reason:
+              'the ternary fallback IS the bug — it writes the unmapped '
               'canvas-space value when the projection is invalid',
         );
       });
@@ -290,7 +306,8 @@ void main() {
       expect(
         _bodyOf(source, 'bool _canPlaceWrite('),
         contains('_reportUnplaceableEdit()'),
-        reason: 'a stroke that silently fails to persist is its own bug; the '
+        reason:
+            'a stroke that silently fails to persist is its own bug; the '
             'refusal has to be audible',
       );
       final report = _bodyOf(source, 'void _reportUnplaceableEdit(');
@@ -298,7 +315,8 @@ void main() {
       expect(
         report,
         contains('Duration(seconds:'),
-        reason: 'a drag fires _replaceAnnotation on every pointer move, so an '
+        reason:
+            'a drag fires _replaceAnnotation on every pointer move, so an '
             'unthrottled report would replace the toast hundreds of times a '
             'second',
       );
@@ -318,24 +336,33 @@ void main() {
       expect(
         _bodyOf(source, 'void pushAnnotationsState('),
         contains('mappedToImageSpace'),
-        reason: 'the list a handler pushes is canvas space and has to be '
+        reason:
+            'the list a handler pushes is canvas space and has to be '
             'converted before it reaches the parent',
       );
     });
 
-    test('_handleKeyEvent suppresses single-letter tool shortcuts during inline text editing', () {
-      final handleKeyBody = _bodyOf(source, 'KeyEventResult _handleKeyEvent(');
-      expect(
-        handleKeyBody,
-        contains('_inlineTextPos != null || _inlineTextFocusNode.hasFocus'),
-        reason: 'Typing text containing letters like P, A, R, K, S must never '
-            'bubble to canvas shortcuts and jump tools while the user is typing in inline text.',
-      );
-      expect(
-        handleKeyBody,
-        contains('_commitInlineText()'),
-        reason: 'Escape key while editing inline text should commit the text cleanly.',
-      );
-    });
+    test(
+      '_handleKeyEvent suppresses single-letter tool shortcuts during inline text editing',
+      () {
+        final handleKeyBody = _bodyOf(
+          source,
+          'KeyEventResult _handleKeyEvent(',
+        );
+        expect(
+          handleKeyBody,
+          contains('_inlineTextPos != null || _inlineTextFocusNode.hasFocus'),
+          reason:
+              'Typing text containing letters like P, A, R, K, S must never '
+              'bubble to canvas shortcuts and jump tools while the user is typing in inline text.',
+        );
+        expect(
+          handleKeyBody,
+          contains('_commitInlineText()'),
+          reason:
+              'Escape key while editing inline text should commit the text cleanly.',
+        );
+      },
+    );
   });
 }

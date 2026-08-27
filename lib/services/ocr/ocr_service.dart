@@ -104,8 +104,10 @@ class OcrService {
       final result = await engine.recognize(
         Uint8List.fromList(await compute(img.encodePng, cropped)),
       );
-      final fullImageSize =
-          Size(decoded.width.toDouble(), decoded.height.toDouble());
+      final fullImageSize = Size(
+        decoded.width.toDouble(),
+        decoded.height.toDouble(),
+      );
       return _offset(result, Offset(x.toDouble(), y.toDouble()), fullImageSize);
     } catch (e) {
       debugPrint('SnipSnap OCR service error: $e');
@@ -121,18 +123,22 @@ class OcrService {
     return OcrResult(
       imageSize: imageSize,
       lines: result.lines
-          .map((l) => OcrLine(
-                text: l.text,
-                boundsPx: l.boundsPx.shift(delta),
-                confidence: l.confidence,
-                words: l.words
-                    .map((w) => OcrWord(
-                          text: w.text,
-                          boundsPx: w.boundsPx.shift(delta),
-                          confidence: w.confidence,
-                        ))
-                    .toList(),
-              ))
+          .map(
+            (l) => OcrLine(
+              text: l.text,
+              boundsPx: l.boundsPx.shift(delta),
+              confidence: l.confidence,
+              words: l.words
+                  .map(
+                    (w) => OcrWord(
+                      text: w.text,
+                      boundsPx: w.boundsPx.shift(delta),
+                      confidence: w.confidence,
+                    ),
+                  )
+                  .toList(),
+            ),
+          )
           .toList(),
     );
   }

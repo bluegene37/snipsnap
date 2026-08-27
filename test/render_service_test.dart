@@ -89,13 +89,20 @@ void main() {
 
     // Inside the stored rect; outside the misread one.
     final inside = decoded.getPixel(150, 150);
-    expect(inside.r, greaterThan(200), reason: 'annotation should be painted here');
+    expect(
+      inside.r,
+      greaterThan(200),
+      reason: 'annotation should be painted here',
+    );
     expect(inside.g, lessThan(80));
 
     // Outside the stored rect; well inside the misread one.
     final outside = decoded.getPixel(500, 500);
-    expect(outside.r, greaterThan(240),
-        reason: 'annotation must not be scaled up by the canvas factor');
+    expect(
+      outside.r,
+      greaterThan(240),
+      reason: 'annotation must not be scaled up by the canvas factor',
+    );
     expect(outside.g, greaterThan(240));
     expect(outside.b, greaterThan(240));
   });
@@ -130,30 +137,43 @@ void main() {
     }
     for (final dy in [-30, 30]) {
       final p = decoded.getPixel(400, 400 + dy);
-      expect(p.g, greaterThan(240),
-          reason: 'a 40px stroke must not reach dy=$dy; it was scaled up');
+      expect(
+        p.g,
+        greaterThan(240),
+        reason: 'a 40px stroke must not reach dy=$dy; it was scaled up',
+      );
     }
   });
 
-  test('export with no annotations returns the original bytes untouched', () async {
-    final path = await _writeWhitePng(tempDir, 120, 90);
-    final original = await File(path).readAsBytes();
+  test(
+    'export with no annotations returns the original bytes untouched',
+    () async {
+      final path = await _writeWhitePng(tempDir, 120, 90);
+      final original = await File(path).readAsBytes();
 
-    final bytes = await RenderService.renderFlattenedPng(
-      imagePath: path,
-      annotations: const [],
-      canvasSize: const Size(400, 400),
-    );
+      final bytes = await RenderService.renderFlattenedPng(
+        imagePath: path,
+        annotations: const [],
+        canvasSize: const Size(400, 400),
+      );
 
-    expect(bytes, equals(original));
-  });
+      expect(bytes, equals(original));
+    },
+  );
 
   test('pixelate blur actually replaces the underlying pixels', () async {
     // Half-black / half-white source: a mosaic over the boundary must change
     // pixels that would otherwise be pure white.
     final image = img.Image(width: 400, height: 400);
     img.fill(image, color: img.ColorRgb8(255, 255, 255));
-    img.fillRect(image, x1: 0, y1: 0, x2: 199, y2: 399, color: img.ColorRgb8(0, 0, 0));
+    img.fillRect(
+      image,
+      x1: 0,
+      y1: 0,
+      x2: 199,
+      y2: 399,
+      color: img.ColorRgb8(0, 0, 0),
+    );
     final path = '${tempDir.path}/split.png';
     await File(path).writeAsBytes(img.encodePng(image));
 
@@ -180,8 +200,11 @@ void main() {
 
     // Was pure black, sits inside the mosaic region -> original pixel is gone.
     final redacted = decoded.getPixel(160, 200);
-    expect(redacted.r, greaterThan(200),
-        reason: 'mosaic must discard the original pixels inside the region');
+    expect(
+      redacted.r,
+      greaterThan(200),
+      reason: 'mosaic must discard the original pixels inside the region',
+    );
 
     // Same column, outside the region -> untouched black.
     final untouched = decoded.getPixel(160, 380);
@@ -223,8 +246,11 @@ void main() {
 
     // Below the stored rect, inside the shifted one.
     final below = decoded.getPixel(200, 340);
-    expect(below.g, greaterThan(240),
-        reason: 'the letterbox offset must cancel, not shift the shape down');
+    expect(
+      below.g,
+      greaterThan(240),
+      reason: 'the letterbox offset must cancel, not shift the shape down',
+    );
   });
 
   test('a letterboxed projection cancels its horizontal offset', () async {
@@ -255,46 +281,54 @@ void main() {
     final decoded = img.decodePng(bytes!)!;
 
     final inside = decoded.getPixel(200, 200);
-    expect(inside.r, greaterThan(200),
-        reason: 'the letterbox offset must cancel, not push the shape off the '
-            'right-hand edge');
+    expect(
+      inside.r,
+      greaterThan(200),
+      reason:
+          'the letterbox offset must cancel, not push the shape off the '
+          'right-hand edge',
+    );
     expect(inside.g, lessThan(80));
   });
 
-  test('throws rather than silently dropping annotations on a zero canvas',
-      () async {
-    final path = await _writeWhitePng(tempDir, 200, 100);
-    final annotations = [
-      Annotation(
-        id: 'a',
-        tool: CanvasTool.shape,
-        color: const Color(0xFFFF0000),
-        strokeWidth: 4.0,
-        startPoint: const Offset(10, 10),
-        endPoint: const Offset(90, 60),
-      ),
-    ];
+  test(
+    'throws rather than silently dropping annotations on a zero canvas',
+    () async {
+      final path = await _writeWhitePng(tempDir, 200, 100);
+      final annotations = [
+        Annotation(
+          id: 'a',
+          tool: CanvasTool.shape,
+          color: const Color(0xFFFF0000),
+          strokeWidth: 4.0,
+          startPoint: const Offset(10, 10),
+          endPoint: const Offset(90, 60),
+        ),
+      ];
 
-    expect(
-      () => RenderService.renderFlattenedPng(
+      expect(
+        () => RenderService.renderFlattenedPng(
+          imagePath: path,
+          annotations: annotations,
+          canvasSize: Size.zero,
+        ),
+        throwsA(isA<StateError>()),
+      );
+    },
+  );
+
+  test(
+    'still returns original bytes when there is nothing to composite',
+    () async {
+      final path = await _writeWhitePng(tempDir, 200, 100);
+      final bytes = await RenderService.renderFlattenedPng(
         imagePath: path,
-        annotations: annotations,
+        annotations: const [],
         canvasSize: Size.zero,
-      ),
-      throwsA(isA<StateError>()),
-    );
-  });
-
-  test('still returns original bytes when there is nothing to composite',
-      () async {
-    final path = await _writeWhitePng(tempDir, 200, 100);
-    final bytes = await RenderService.renderFlattenedPng(
-      imagePath: path,
-      annotations: const [],
-      canvasSize: Size.zero,
-    );
-    expect(bytes, isNotNull);
-  });
+      );
+      expect(bytes, isNotNull);
+    },
+  );
 
   test('returns null for a missing source file instead of throwing', () async {
     final bytes = await RenderService.renderFlattenedPng(

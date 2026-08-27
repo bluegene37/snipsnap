@@ -13,7 +13,9 @@ Widget _harness({
   VoidCallback? onFlattenCanvas,
 }) {
   return SnipThemeScope(
-    theme: SnipTheme.forMode(isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light),
+    theme: SnipTheme.forMode(
+      isDarkMode ? SnipThemeMode.dark : SnipThemeMode.light,
+    ),
     child: MaterialApp(
       home: Scaffold(
         body: SizedBox(
@@ -50,7 +52,9 @@ void main() {
   // The header must never overflow: anything pushed off the edge is a control
   // the user simply cannot reach.
   for (final width in <double>[1920, 1440, 1180, 1100, 940, 900, 800, 720]) {
-    testWidgets('lays out without overflow at ${width.toInt()}px', (tester) async {
+    testWidgets('lays out without overflow at ${width.toInt()}px', (
+      tester,
+    ) async {
       tester.view.physicalSize = Size(width, 700);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -78,8 +82,9 @@ void main() {
     expect(find.byIcon(Icons.more_vert_rounded), findsOneWidget);
   });
 
-  testWidgets('drops button labels but keeps the icons when space is tight',
-      (tester) async {
+  testWidgets('drops button labels but keeps the icons when space is tight', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1000, 700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -92,96 +97,120 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('disables destructive and export actions when nothing is loaded',
-      (tester) async {
+  testWidgets(
+    'disables destructive and export actions when nothing is loaded',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 700);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        _harness(
+          width: 1440,
+          hasCapture: false,
+          canUndo: false,
+          canRedo: false,
+          canClear: false,
+        ),
+      );
+
+      ElevatedButton buttonWithText(String label) =>
+          tester.widget<ElevatedButton>(
+            find.ancestor(
+              of: find.text(label),
+              matching: find.byType(ElevatedButton),
+            ),
+          );
+
+      expect(
+        buttonWithText('Copy').onPressed,
+        isNull,
+        reason: 'no image to copy',
+      );
+      expect(
+        buttonWithText('Save As').onPressed,
+        isNull,
+        reason: 'no image to save',
+      );
+      expect(
+        buttonWithText('Flatten').onPressed,
+        isNull,
+        reason: 'no annotations to flatten',
+      );
+
+      // Clear must be disabled when there is nothing to clear — previously it
+      // was always enabled.
+      final clear = tester.widget<ElevatedButton>(
+        find.ancestor(
+          of: find.byIcon(Icons.delete_outline_rounded),
+          matching: find.byType(ElevatedButton),
+        ),
+      );
+      expect(clear.onPressed, isNull);
+    },
+  );
+
+  testWidgets('enables the edit pill only when history is available', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1440, 700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(_harness(
-      width: 1440,
-      hasCapture: false,
-      canUndo: false,
-      canRedo: false,
-      canClear: false,
-    ));
+    await tester.pumpWidget(
+      _harness(width: 1440, canUndo: true, canRedo: false),
+    );
 
-    ElevatedButton buttonWithText(String label) => tester.widget<ElevatedButton>(
-          find.ancestor(
-            of: find.text(label),
-            matching: find.byType(ElevatedButton),
-          ),
-        );
-
-    expect(buttonWithText('Copy').onPressed, isNull, reason: 'no image to copy');
-    expect(buttonWithText('Save As').onPressed, isNull, reason: 'no image to save');
-    expect(buttonWithText('Flatten').onPressed, isNull, reason: 'no annotations to flatten');
-
-    // Clear must be disabled when there is nothing to clear — previously it
-    // was always enabled.
-    final clear = tester.widget<ElevatedButton>(
+    ElevatedButton button(IconData icon) => tester.widget<ElevatedButton>(
       find.ancestor(
-        of: find.byIcon(Icons.delete_outline_rounded),
+        of: find.byIcon(icon),
         matching: find.byType(ElevatedButton),
       ),
     );
-    expect(clear.onPressed, isNull);
-  });
-
-  testWidgets('enables the edit pill only when history is available', (tester) async {
-    tester.view.physicalSize = const Size(1440, 700);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
-
-    await tester.pumpWidget(_harness(width: 1440, canUndo: true, canRedo: false));
-
-    ElevatedButton button(IconData icon) => tester.widget<ElevatedButton>(
-          find.ancestor(
-            of: find.byIcon(icon),
-            matching: find.byType(ElevatedButton),
-          ),
-        );
 
     expect(button(Icons.undo_rounded).onPressed, isNotNull);
     expect(button(Icons.redo_rounded).onPressed, isNull);
   });
 
-  testWidgets('zoom stepper appears with a capture and reports the level',
-      (tester) async {
+  testWidgets('zoom stepper appears with a capture and reports the level', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1440, 700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
     double? requested;
-    await tester.pumpWidget(SnipThemeScope(
-      theme: SnipTheme.forMode(SnipThemeMode.dark),
-      child: MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 1440,
-            child: HeaderBar(
-              onSnipInteractive: () {},
-              onImportImage: () {},
-              onUndo: () {},
-              onRedo: () {},
-              onClear: () {},
-              onCopyToClipboard: () {},
-              onSaveAs: () {},
-              onToggleSidebar: () {},
-              onOpenShortcutSettings: () {},
-              onToggleThemeMode: () {},
-              onOpenAboutDialog: () {},
-              canUndo: false,
-              canRedo: false,
-              isSidebarOpen: true,
-              hasCapture: true,
-              zoomScale: 1.5,
-              onZoomScaleChanged: (v) => requested = v,
+    await tester.pumpWidget(
+      SnipThemeScope(
+        theme: SnipTheme.forMode(SnipThemeMode.dark),
+        child: MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 1440,
+              child: HeaderBar(
+                onSnipInteractive: () {},
+                onImportImage: () {},
+                onUndo: () {},
+                onRedo: () {},
+                onClear: () {},
+                onCopyToClipboard: () {},
+                onSaveAs: () {},
+                onToggleSidebar: () {},
+                onOpenShortcutSettings: () {},
+                onToggleThemeMode: () {},
+                onOpenAboutDialog: () {},
+                canUndo: false,
+                canRedo: false,
+                isSidebarOpen: true,
+                hasCapture: true,
+                zoomScale: 1.5,
+                onZoomScaleChanged: (v) => requested = v,
+              ),
             ),
           ),
         ),
       ),
-    ));
+    );
 
     expect(find.text('150%'), findsOneWidget);
 
@@ -190,8 +219,9 @@ void main() {
   });
 
   for (final dark in [false, true]) {
-    testWidgets('lays out without overflow in ${dark ? "dark" : "light"}',
-        (tester) async {
+    testWidgets('lays out without overflow in ${dark ? "dark" : "light"}', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(1180, 700);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -207,32 +237,34 @@ void main() {
     addTearDown(tester.view.reset);
 
     bool toggled = false;
-    await tester.pumpWidget(SnipThemeScope(
-      theme: SnipTheme.forMode(SnipThemeMode.dark),
-      child: MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 1440,
-            child: HeaderBar(
-              onSnipInteractive: () {},
-              onImportImage: () {},
-              onUndo: () {},
-              onRedo: () {},
-              onClear: () {},
-              onCopyToClipboard: () {},
-              onSaveAs: () {},
-              onToggleSidebar: () {},
-              onToggleThemeMode: () => toggled = true,
-              onOpenShortcutSettings: () {},
-              onOpenAboutDialog: () {},
-              canUndo: false,
-              canRedo: false,
-              isSidebarOpen: true,
+    await tester.pumpWidget(
+      SnipThemeScope(
+        theme: SnipTheme.forMode(SnipThemeMode.dark),
+        child: MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 1440,
+              child: HeaderBar(
+                onSnipInteractive: () {},
+                onImportImage: () {},
+                onUndo: () {},
+                onRedo: () {},
+                onClear: () {},
+                onCopyToClipboard: () {},
+                onSaveAs: () {},
+                onToggleSidebar: () {},
+                onToggleThemeMode: () => toggled = true,
+                onOpenShortcutSettings: () {},
+                onOpenAboutDialog: () {},
+                canUndo: false,
+                canRedo: false,
+                isSidebarOpen: true,
+              ),
             ),
           ),
         ),
       ),
-    ));
+    );
 
     final themeButtonFinder = find.byIcon(Icons.light_mode_rounded);
     expect(themeButtonFinder, findsOneWidget);

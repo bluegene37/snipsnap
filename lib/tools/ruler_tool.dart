@@ -49,10 +49,7 @@ class RulerToolHandler extends ToolHandler {
         start = _drawStart! - half;
       }
 
-      final updated = current.copyWith(
-        startPoint: start,
-        endPoint: end,
-      );
+      final updated = current.copyWith(startPoint: start, endPoint: end);
       delegate.onCurrentAnnotationChanged(updated);
     }
   }
@@ -60,7 +57,8 @@ class RulerToolHandler extends ToolHandler {
   @override
   void onPanEnd(DragEndDetails details) {
     final current = delegate.currentAnnotation;
-    if (current != null && isCommittableDrag(current.startPoint, current.endPoint)) {
+    if (current != null &&
+        isCommittableDrag(current.startPoint, current.endPoint)) {
       delegate.onAnnotationAdded(current);
       delegate.onSelectedAnnotationIdChanged(current.id);
     }

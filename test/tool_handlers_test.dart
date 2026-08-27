@@ -130,7 +130,8 @@ class MockToolDelegate implements ToolDelegate {
   }
 
   @override
-  void onExtractText(Rect? canvasRegion) => extractTextRegions.add(canvasRegion);
+  void onExtractText(Rect? canvasRegion) =>
+      extractTextRegions.add(canvasRegion);
 
   @override
   void updateAnnotation(String id, Annotation updatedAnnotation) {
@@ -151,21 +152,27 @@ class MockToolDelegate implements ToolDelegate {
   @override
   Annotation? hitTestAnnotation(Offset pos) {
     for (final ann in addedAnnotations.reversed) {
-      if (ann.rect != null && ann.rect!.contains(pos)) return ann;
-      if (ann.startPoint != null && (ann.startPoint! - pos).distance <= 20) return ann;
+      if (ann.rect != null && ann.rect!.contains(pos)) {
+        return ann;
+      }
+      if (ann.startPoint != null && (ann.startPoint! - pos).distance <= 20) {
+        return ann;
+      }
     }
     return null;
   }
 }
 
-DragStartDetails _dragStart(Offset pos) => DragStartDetails(localPosition: pos, globalPosition: pos);
-DragUpdateDetails _dragUpdate(Offset pos) => DragUpdateDetails(localPosition: pos, globalPosition: pos);
+DragStartDetails _dragStart(Offset pos) =>
+    DragStartDetails(localPosition: pos, globalPosition: pos);
+DragUpdateDetails _dragUpdate(Offset pos) =>
+    DragUpdateDetails(localPosition: pos, globalPosition: pos);
 DragEndDetails _dragEnd() => DragEndDetails();
 TapUpDetails _tapUp(Offset pos) => TapUpDetails(
-      kind: PointerDeviceKind.mouse,
-      localPosition: pos,
-      globalPosition: pos,
-    );
+  kind: PointerDeviceKind.mouse,
+  localPosition: pos,
+  globalPosition: pos,
+);
 
 void main() {
   group('LineToolHandler', () {
@@ -173,11 +180,17 @@ void main() {
       final delegate = MockToolDelegate();
       final handler = LineToolHandler(delegate);
 
-      handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
+      handler.onPanStart(
+        _dragStart(const Offset(10, 10)),
+        const Offset(10, 10),
+      );
       expect(delegate.currentAnnotation, isNotNull);
       expect(delegate.currentAnnotation!.tool, CanvasTool.line);
 
-      handler.onPanUpdate(_dragUpdate(const Offset(100, 10)), const Offset(100, 10));
+      handler.onPanUpdate(
+        _dragUpdate(const Offset(100, 10)),
+        const Offset(100, 10),
+      );
       expect(delegate.currentAnnotation!.endPoint, const Offset(100, 10));
 
       handler.onPanEnd(_dragEnd());
@@ -193,7 +206,10 @@ void main() {
 
       handler.onPanStart(_dragStart(const Offset(0, 0)), const Offset(0, 0));
       // 2.9 degrees — below the 7.5 degree boundary, so it snaps to horizontal.
-      handler.onPanUpdate(_dragUpdate(const Offset(100, 5)), const Offset(100, 5));
+      handler.onPanUpdate(
+        _dragUpdate(const Offset(100, 5)),
+        const Offset(100, 5),
+      );
       final end = delegate.currentAnnotation!.endPoint!;
       expect(end.dy, closeTo(0.0, 1e-4));
       expect(end.dx, greaterThan(95));
@@ -204,7 +220,10 @@ void main() {
       final handler = LineToolHandler(delegate);
 
       handler.onPanStart(_dragStart(const Offset(0, 0)), const Offset(0, 0));
-      handler.onPanUpdate(_dragUpdate(const Offset(100, 18)), const Offset(100, 18));
+      handler.onPanUpdate(
+        _dragUpdate(const Offset(100, 18)),
+        const Offset(100, 18),
+      );
       final end = delegate.currentAnnotation!.endPoint!;
       // 10.2 degrees rounds to 15, so dy = |end| * sin(15deg) > 0.
       expect(end.dy, greaterThan(20));
@@ -219,8 +238,14 @@ void main() {
         ..lineStyle = LineStyle.dashed;
       final handler = ArrowToolHandler(delegate);
 
-      handler.onPanStart(_dragStart(const Offset(20, 20)), const Offset(20, 20));
-      handler.onPanUpdate(_dragUpdate(const Offset(120, 120)), const Offset(120, 120));
+      handler.onPanStart(
+        _dragStart(const Offset(20, 20)),
+        const Offset(20, 20),
+      );
+      handler.onPanUpdate(
+        _dragUpdate(const Offset(120, 120)),
+        const Offset(120, 120),
+      );
       handler.onPanEnd(_dragEnd());
 
       expect(delegate.addedAnnotations.length, 1);
@@ -233,35 +258,47 @@ void main() {
   });
 
   group('ShapeToolHandler', () {
-    test('creates shapes for all 8 ShapeKind values with fill and border radius', () {
-      for (final kind in ShapeKind.values) {
-        final delegate = MockToolDelegate()
-          ..shapeKind = kind
-          ..isFilled = true
-          ..fillColor = Colors.blue
-          ..borderRadius = 12.0;
-        final handler = ShapeToolHandler(delegate);
+    test(
+      'creates shapes for all 8 ShapeKind values with fill and border radius',
+      () {
+        for (final kind in ShapeKind.values) {
+          final delegate = MockToolDelegate()
+            ..shapeKind = kind
+            ..isFilled = true
+            ..fillColor = Colors.blue
+            ..borderRadius = 12.0;
+          final handler = ShapeToolHandler(delegate);
 
-        handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
-        handler.onPanUpdate(_dragUpdate(const Offset(110, 90)), const Offset(110, 90));
-        handler.onPanEnd(_dragEnd());
+          handler.onPanStart(
+            _dragStart(const Offset(10, 10)),
+            const Offset(10, 10),
+          );
+          handler.onPanUpdate(
+            _dragUpdate(const Offset(110, 90)),
+            const Offset(110, 90),
+          );
+          handler.onPanEnd(_dragEnd());
 
-        expect(delegate.addedAnnotations.length, 1);
-        final shape = delegate.addedAnnotations.first;
-        expect(shape.tool, CanvasTool.shape);
-        expect(shape.shapeKind, kind);
-        expect(shape.fill, isTrue);
-        expect(shape.fillColor, Colors.blue);
-        expect(shape.borderRadius, 12.0);
-      }
-    });
+          expect(delegate.addedAnnotations.length, 1);
+          final shape = delegate.addedAnnotations.first;
+          expect(shape.tool, CanvasTool.shape);
+          expect(shape.shapeKind, kind);
+          expect(shape.fill, isTrue);
+          expect(shape.fillColor, Colors.blue);
+          expect(shape.borderRadius, 12.0);
+        }
+      },
+    );
 
     test('shift locks 1:1 aspect ratio for shapes', () {
       final delegate = MockToolDelegate()..isShiftDown = true;
       final handler = ShapeToolHandler(delegate);
 
       handler.onPanStart(_dragStart(const Offset(0, 0)), const Offset(0, 0));
-      handler.onPanUpdate(_dragUpdate(const Offset(100, 50)), const Offset(100, 50));
+      handler.onPanUpdate(
+        _dragUpdate(const Offset(100, 50)),
+        const Offset(100, 50),
+      );
       handler.onPanEnd(_dragEnd());
 
       final shape = delegate.addedAnnotations.first;
@@ -271,23 +308,41 @@ void main() {
   });
 
   group('PenToolHandler', () {
-    test('captures smooth continuous freehand points without auto-deselecting', () {
-      final delegate = MockToolDelegate();
-      final handler = PenToolHandler(delegate);
+    test(
+      'captures smooth continuous freehand points without auto-deselecting',
+      () {
+        final delegate = MockToolDelegate();
+        final handler = PenToolHandler(delegate);
 
-      handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
-      handler.onPanUpdate(_dragUpdate(const Offset(15, 15)), const Offset(15, 15));
-      handler.onPanUpdate(_dragUpdate(const Offset(20, 25)), const Offset(20, 25));
-      handler.onPanUpdate(_dragUpdate(const Offset(25, 40)), const Offset(25, 40));
-      handler.onPanEnd(_dragEnd());
+        handler.onPanStart(
+          _dragStart(const Offset(10, 10)),
+          const Offset(10, 10),
+        );
+        handler.onPanUpdate(
+          _dragUpdate(const Offset(15, 15)),
+          const Offset(15, 15),
+        );
+        handler.onPanUpdate(
+          _dragUpdate(const Offset(20, 25)),
+          const Offset(20, 25),
+        );
+        handler.onPanUpdate(
+          _dragUpdate(const Offset(25, 40)),
+          const Offset(25, 40),
+        );
+        handler.onPanEnd(_dragEnd());
 
-      expect(delegate.addedAnnotations.length, 1);
-      final stroke = delegate.addedAnnotations.first;
-      expect(stroke.tool, CanvasTool.pen);
-      expect(stroke.points.length, 4);
-      // Ensure the tool was NOT switched to Select!
-      expect(delegate._activeTool, CanvasTool.select); // MockToolDelegate default
-    });
+        expect(delegate.addedAnnotations.length, 1);
+        final stroke = delegate.addedAnnotations.first;
+        expect(stroke.tool, CanvasTool.pen);
+        expect(stroke.points.length, 4);
+        // Ensure the tool was NOT switched to Select!
+        expect(
+          delegate._activeTool,
+          CanvasTool.select,
+        ); // MockToolDelegate default
+      },
+    );
   });
 
   group('HighlighterToolHandler', () {
@@ -295,9 +350,15 @@ void main() {
       final delegate = MockToolDelegate()..isShiftDown = true;
       final handler = HighlighterToolHandler(delegate);
 
-      handler.onPanStart(_dragStart(const Offset(50, 100)), const Offset(50, 100));
+      handler.onPanStart(
+        _dragStart(const Offset(50, 100)),
+        const Offset(50, 100),
+      );
       // Dragging roughly horizontally with minor vertical jitter
-      handler.onPanUpdate(_dragUpdate(const Offset(250, 108)), const Offset(250, 108));
+      handler.onPanUpdate(
+        _dragUpdate(const Offset(250, 108)),
+        const Offset(250, 108),
+      );
       handler.onPanEnd(_dragEnd());
 
       expect(delegate.addedAnnotations.length, 1);
@@ -312,51 +373,63 @@ void main() {
   });
 
   group('StepMarkerToolHandler', () {
-    test('places consecutive numbered step markers without tool deselection', () {
-      final delegate = MockToolDelegate();
-      final handler = StepMarkerToolHandler(delegate);
+    test(
+      'places consecutive numbered step markers without tool deselection',
+      () {
+        final delegate = MockToolDelegate();
+        final handler = StepMarkerToolHandler(delegate);
 
-      // Click step 1
-      handler.onTapUp(_tapUp(const Offset(40, 40)), const Offset(40, 40));
-      expect(delegate.addedAnnotations.length, 1);
-      expect(delegate.addedAnnotations[0].stepNumber, 1);
-      expect(delegate.stepCounter, 2);
+        // Click step 1
+        handler.onTapUp(_tapUp(const Offset(40, 40)), const Offset(40, 40));
+        expect(delegate.addedAnnotations.length, 1);
+        expect(delegate.addedAnnotations[0].stepNumber, 1);
+        expect(delegate.stepCounter, 2);
 
-      // Click step 2
-      handler.onTapUp(_tapUp(const Offset(80, 80)), const Offset(80, 80));
-      expect(delegate.addedAnnotations.length, 2);
-      expect(delegate.addedAnnotations[1].stepNumber, 2);
-      expect(delegate.stepCounter, 3);
+        // Click step 2
+        handler.onTapUp(_tapUp(const Offset(80, 80)), const Offset(80, 80));
+        expect(delegate.addedAnnotations.length, 2);
+        expect(delegate.addedAnnotations[1].stepNumber, 2);
+        expect(delegate.stepCounter, 3);
 
-      // Click step 3
-      handler.onTapUp(_tapUp(const Offset(120, 120)), const Offset(120, 120));
-      expect(delegate.addedAnnotations.length, 3);
-      expect(delegate.addedAnnotations[2].stepNumber, 3);
-      expect(delegate.stepCounter, 4);
-    });
+        // Click step 3
+        handler.onTapUp(_tapUp(const Offset(120, 120)), const Offset(120, 120));
+        expect(delegate.addedAnnotations.length, 3);
+        expect(delegate.addedAnnotations[2].stepNumber, 3);
+        expect(delegate.stepCounter, 4);
+      },
+    );
   });
 
   group('BlurToolHandler', () {
-    test('creates blur annotation with pixelate, gaussian, and solid styles', () {
-      for (final type in BlurType.values) {
-        final delegate = MockToolDelegate()
-          ..blurType = type
-          ..blurStrength = 22.0
-          ..borderRadius = 6.0;
-        final handler = BlurToolHandler(delegate);
+    test(
+      'creates blur annotation with pixelate, gaussian, and solid styles',
+      () {
+        for (final type in BlurType.values) {
+          final delegate = MockToolDelegate()
+            ..blurType = type
+            ..blurStrength = 22.0
+            ..borderRadius = 6.0;
+          final handler = BlurToolHandler(delegate);
 
-        handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
-        handler.onPanUpdate(_dragUpdate(const Offset(100, 60)), const Offset(100, 60));
-        handler.onPanEnd(_dragEnd());
+          handler.onPanStart(
+            _dragStart(const Offset(10, 10)),
+            const Offset(10, 10),
+          );
+          handler.onPanUpdate(
+            _dragUpdate(const Offset(100, 60)),
+            const Offset(100, 60),
+          );
+          handler.onPanEnd(_dragEnd());
 
-        expect(delegate.addedAnnotations.length, 1);
-        final blur = delegate.addedAnnotations.first;
-        expect(blur.tool, CanvasTool.blur);
-        expect(blur.blurType, type);
-        expect(blur.blurStrength, 22.0);
-        expect(blur.borderRadius, 6.0);
-      }
-    });
+          expect(delegate.addedAnnotations.length, 1);
+          final blur = delegate.addedAnnotations.first;
+          expect(blur.tool, CanvasTool.blur);
+          expect(blur.blurType, type);
+          expect(blur.blurStrength, 22.0);
+          expect(blur.borderRadius, 6.0);
+        }
+      },
+    );
   });
 
   group('RulerToolHandler', () {
@@ -366,7 +439,10 @@ void main() {
 
       handler.onPanStart(_dragStart(const Offset(0, 0)), const Offset(0, 0));
       // Drag at ~40 degrees -> snaps to exact 45 degrees
-      handler.onPanUpdate(_dragUpdate(const Offset(100, 80)), const Offset(100, 80));
+      handler.onPanUpdate(
+        _dragUpdate(const Offset(100, 80)),
+        const Offset(100, 80),
+      );
       handler.onPanEnd(_dragEnd());
 
       expect(delegate.addedAnnotations.length, 1);
@@ -422,10 +498,16 @@ void main() {
       final delegate = MockToolDelegate();
       final handler = CropToolHandler(delegate);
 
-      handler.onPanStart(_dragStart(const Offset(20, 30)), const Offset(20, 30));
+      handler.onPanStart(
+        _dragStart(const Offset(20, 30)),
+        const Offset(20, 30),
+      );
       expect(delegate.activeCropRect, const Rect.fromLTRB(20, 30, 20, 30));
 
-      handler.onPanUpdate(_dragUpdate(const Offset(200, 150)), const Offset(200, 150));
+      handler.onPanUpdate(
+        _dragUpdate(const Offset(200, 150)),
+        const Offset(200, 150),
+      );
       expect(delegate.activeCropRect, const Rect.fromLTRB(20, 30, 200, 150));
 
       handler.onPanEnd(_dragEnd());
@@ -438,8 +520,14 @@ void main() {
       final delegate = MockToolDelegate();
       final handler = SelectToolHandler(delegate);
 
-      handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
-      handler.onPanUpdate(_dragUpdate(const Offset(50, 50)), const Offset(50, 50));
+      handler.onPanStart(
+        _dragStart(const Offset(10, 10)),
+        const Offset(10, 10),
+      );
+      handler.onPanUpdate(
+        _dragUpdate(const Offset(50, 50)),
+        const Offset(50, 50),
+      );
       handler.onPanEnd(_dragEnd());
       handler.onTapUp(_tapUp(const Offset(10, 10)), const Offset(10, 10));
       expect(delegate.addedAnnotations.isEmpty, isTrue);
@@ -474,13 +562,22 @@ void main() {
       expect(handlerFor(CanvasTool.line, d), isA<LineToolHandler>());
       expect(handlerFor(CanvasTool.shape, d), isA<ShapeToolHandler>());
       expect(handlerFor(CanvasTool.pen, d), isA<PenToolHandler>());
-      expect(handlerFor(CanvasTool.highlight, d), isA<HighlighterToolHandler>());
+      expect(
+        handlerFor(CanvasTool.highlight, d),
+        isA<HighlighterToolHandler>(),
+      );
       expect(handlerFor(CanvasTool.blur, d), isA<BlurToolHandler>());
       expect(handlerFor(CanvasTool.ruler, d), isA<RulerToolHandler>());
-      expect(handlerFor(CanvasTool.stepMarker, d), isA<StepMarkerToolHandler>());
+      expect(
+        handlerFor(CanvasTool.stepMarker, d),
+        isA<StepMarkerToolHandler>(),
+      );
       expect(handlerFor(CanvasTool.text, d), isA<TextToolHandler>());
       expect(handlerFor(CanvasTool.fill, d), isA<FillToolHandler>());
-      expect(handlerFor(CanvasTool.colorPicker, d), isA<ColorPickerToolHandler>());
+      expect(
+        handlerFor(CanvasTool.colorPicker, d),
+        isA<ColorPickerToolHandler>(),
+      );
       expect(handlerFor(CanvasTool.crop, d), isA<CropToolHandler>());
       expect(handlerFor(CanvasTool.select, d), isA<SelectToolHandler>());
     });
@@ -506,8 +603,14 @@ void main() {
       ]) {
         final delegate = MockToolDelegate();
         final handler = build(delegate);
-        handler.onPanStart(_dragStart(const Offset(10, 40)), const Offset(10, 40));
-        handler.onPanUpdate(_dragUpdate(const Offset(210, 40)), const Offset(210, 40));
+        handler.onPanStart(
+          _dragStart(const Offset(10, 40)),
+          const Offset(10, 40),
+        );
+        handler.onPanUpdate(
+          _dragUpdate(const Offset(210, 40)),
+          const Offset(210, 40),
+        );
         handler.onPanEnd(_dragEnd());
         expect(
           delegate.addedAnnotations.length,
@@ -527,8 +630,14 @@ void main() {
       ]) {
         final delegate = MockToolDelegate();
         final handler = build(delegate);
-        handler.onPanStart(_dragStart(const Offset(10, 40)), const Offset(10, 40));
-        handler.onPanUpdate(_dragUpdate(const Offset(12, 41)), const Offset(12, 41));
+        handler.onPanStart(
+          _dragStart(const Offset(10, 40)),
+          const Offset(10, 40),
+        );
+        handler.onPanUpdate(
+          _dragUpdate(const Offset(12, 41)),
+          const Offset(12, 41),
+        );
         handler.onPanEnd(_dragEnd());
         expect(
           delegate.addedAnnotations,
@@ -560,7 +669,11 @@ void main() {
 
       void check(Annotation a, String label) {
         expect(a.color, Colors.orange, reason: '$label color');
-        expect(a.backgroundColor, Colors.black, reason: '$label backgroundColor');
+        expect(
+          a.backgroundColor,
+          Colors.black,
+          reason: '$label backgroundColor',
+        );
         expect(a.fillColor, Colors.teal, reason: '$label fillColor');
         expect(a.strokeWidth, 7.0, reason: '$label strokeWidth');
         expect(a.opacity, 0.6, reason: '$label opacity');
@@ -586,17 +699,28 @@ void main() {
       ]) {
         final delegate = styled();
         final handler = build(delegate);
-        handler.onPanStart(_dragStart(const Offset(10, 10)), const Offset(10, 10));
-        handler.onPanUpdate(_dragUpdate(const Offset(120, 90)), const Offset(120, 90));
+        handler.onPanStart(
+          _dragStart(const Offset(10, 10)),
+          const Offset(10, 10),
+        );
+        handler.onPanUpdate(
+          _dragUpdate(const Offset(120, 90)),
+          const Offset(120, 90),
+        );
         handler.onPanEnd(_dragEnd());
-        expect(delegate.addedAnnotations.length, 1, reason: '${handler.runtimeType}');
+        expect(
+          delegate.addedAnnotations.length,
+          1,
+          reason: '${handler.runtimeType}',
+        );
         check(delegate.addedAnnotations.single, '${handler.runtimeType}');
       }
 
       // The step marker is placed on tap rather than dragged.
       final stepDelegate = styled();
-      StepMarkerToolHandler(stepDelegate)
-          .onTapUp(_tapUp(const Offset(60, 60)), const Offset(60, 60));
+      StepMarkerToolHandler(
+        stepDelegate,
+      ).onTapUp(_tapUp(const Offset(60, 60)), const Offset(60, 60));
       check(stepDelegate.addedAnnotations.single, 'StepMarkerToolHandler');
     });
   });
@@ -606,8 +730,14 @@ void main() {
       final delegate = MockToolDelegate();
       final handler = CropToolHandler(delegate);
 
-      handler.onPanStart(_dragStart(const Offset(20, 30)), const Offset(20, 30));
-      handler.onPanUpdate(_dragUpdate(const Offset(25, 35)), const Offset(25, 35));
+      handler.onPanStart(
+        _dragStart(const Offset(20, 30)),
+        const Offset(20, 30),
+      );
+      handler.onPanUpdate(
+        _dragUpdate(const Offset(25, 35)),
+        const Offset(25, 35),
+      );
       handler.onPanEnd(_dragEnd());
 
       expect(delegate.activeCropRect, isNull);

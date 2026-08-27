@@ -121,8 +121,12 @@ class HeaderBar extends StatelessWidget {
               _buildExportGroup(t, showLabels),
               const SizedBox(width: 6),
               _HeaderButton(
-                icon: t.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                tooltip: t.isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+                icon: t.isDark
+                    ? Icons.light_mode_rounded
+                    : Icons.dark_mode_rounded,
+                tooltip: t.isDark
+                    ? 'Switch to Light Mode'
+                    : 'Switch to Dark Mode',
                 onPressed: onToggleThemeMode,
               ),
               const SizedBox(width: 6),
@@ -150,7 +154,11 @@ class HeaderBar extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
             boxShadow: const [
-              BoxShadow(color: Colors.black38, blurRadius: 6, offset: Offset(0, 2)),
+              BoxShadow(
+                color: Colors.black38,
+                blurRadius: 6,
+                offset: Offset(0, 2),
+              ),
             ],
           ),
           child: ClipRRect(
@@ -204,13 +212,18 @@ class HeaderBar extends StatelessWidget {
                     bottomLeft: Radius.circular(7),
                   ),
                   child: Tooltip(
-                    message: 'Capture Area (${_shortcut(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1')})',
+                    message:
+                        'Capture Area (${_shortcut(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1')})',
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.crop_free_rounded, color: t.emphasis, size: 16),
+                          Icon(
+                            Icons.crop_free_rounded,
+                            color: t.emphasis,
+                            size: 16,
+                          ),
                           const SizedBox(width: 6),
                           Text(
                             'Snip',
@@ -247,26 +260,39 @@ class HeaderBar extends StatelessWidget {
                     value: 'area',
                     icon: Icons.crop_free_rounded,
                     title: 'Capture Area',
-                    subtitle: _shortcut(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1'),
+                    subtitle: _shortcut(
+                      AppShortcutAction.interactiveSnip,
+                      'Cmd+Shift+1',
+                    ),
                   ),
                   _captureMenuItem(
                     t,
                     value: 'full',
                     icon: Icons.fullscreen_rounded,
                     title: 'Capture Full Screen',
-                    subtitle: _shortcut(AppShortcutAction.fullScreenSnip, 'Cmd+Shift+2'),
+                    subtitle: _shortcut(
+                      AppShortcutAction.fullScreenSnip,
+                      'Cmd+Shift+2',
+                    ),
                   ),
                   _captureMenuItem(
                     t,
                     value: 'timer',
                     icon: Icons.timer_rounded,
                     title: 'Timed Capture (3s)',
-                    subtitle: _shortcut(AppShortcutAction.timerSnip, 'Cmd+Shift+5'),
+                    subtitle: _shortcut(
+                      AppShortcutAction.timerSnip,
+                      'Cmd+Shift+5',
+                    ),
                   ),
                 ],
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Icon(Icons.arrow_drop_down_rounded, color: t.emphasis, size: 20),
+                  child: Icon(
+                    Icons.arrow_drop_down_rounded,
+                    color: t.emphasis,
+                    size: 20,
+                  ),
                 ),
               ),
             ],
@@ -277,7 +303,8 @@ class HeaderBar extends StatelessWidget {
           icon: Icons.file_open_rounded,
           label: 'Open',
           showLabel: showLabels,
-          tooltip: 'Open Image File (${_shortcut(AppShortcutAction.openImage, 'Cmd+O')})',
+          tooltip:
+              'Open Image File (${_shortcut(AppShortcutAction.openImage, 'Cmd+O')})',
           onPressed: onImportImage,
         ),
       ],
@@ -310,7 +337,10 @@ class HeaderBar extends StatelessWidget {
                     color: t.ink,
                   ),
                 ),
-                Text(subtitle, style: TextStyle(fontSize: 11, color: t.inkMuted)),
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 11, color: t.inkMuted),
+                ),
               ],
             ),
           ),
@@ -339,7 +369,8 @@ class HeaderBar extends StatelessWidget {
         const SizedBox(width: 6),
         _HeaderButton(
           icon: Icons.delete_outline_rounded,
-          tooltip: 'Clear All Annotations '
+          tooltip:
+              'Clear All Annotations '
               '(${_shortcut(AppShortcutAction.clearAnnotations, 'Cmd+Shift+K')})',
           enabled: canClear,
           onPressed: canClear ? onClear : null,
@@ -360,8 +391,9 @@ class HeaderBar extends StatelessWidget {
           icon: Icons.remove_rounded,
           tooltip: 'Zoom Out',
           enabled: canZoomOut,
-          onPressed:
-              canZoomOut ? () => onZoomScaleChanged!((zoomScale - 0.25).clamp(0.2, 4.0)) : null,
+          onPressed: canZoomOut
+              ? () => onZoomScaleChanged!((zoomScale - 0.25).clamp(0.2, 4.0))
+              : null,
         ),
         const SizedBox(width: 6),
         _HeaderButton(
@@ -375,8 +407,9 @@ class HeaderBar extends StatelessWidget {
           icon: Icons.add_rounded,
           tooltip: 'Zoom In',
           enabled: canZoomIn,
-          onPressed:
-              canZoomIn ? () => onZoomScaleChanged!((zoomScale + 0.25).clamp(0.2, 4.0)) : null,
+          onPressed: canZoomIn
+              ? () => onZoomScaleChanged!((zoomScale + 0.25).clamp(0.2, 4.0))
+              : null,
         ),
       ],
     );
@@ -390,7 +423,8 @@ class HeaderBar extends StatelessWidget {
           icon: Icons.copy_rounded,
           label: 'Copy',
           showLabel: showLabels,
-          tooltip: 'Copy Image to Clipboard '
+          tooltip:
+              'Copy Image to Clipboard '
               '(${_shortcut(AppShortcutAction.copyToClipboard, 'Cmd+C')})',
           onPressed: onCopyToClipboard,
           enabled: hasCapture,
@@ -400,7 +434,8 @@ class HeaderBar extends StatelessWidget {
           icon: Icons.layers_clear_rounded,
           label: 'Flatten',
           showLabel: showLabels,
-          tooltip: 'Bake Annotations into the Image '
+          tooltip:
+              'Bake Annotations into the Image '
               '(${_shortcut(AppShortcutAction.flattenCanvas, 'Cmd+Shift+F')})',
           onPressed: onFlattenCanvas,
           enabled: onFlattenCanvas != null,
@@ -410,7 +445,8 @@ class HeaderBar extends StatelessWidget {
           icon: Icons.download_rounded,
           label: 'Save As',
           showLabel: showLabels,
-          tooltip: 'Save Image to Disk (${_shortcut(AppShortcutAction.saveAs, 'Cmd+S')})',
+          tooltip:
+              'Save Image to Disk (${_shortcut(AppShortcutAction.saveAs, 'Cmd+S')})',
           onPressed: onSaveAs,
           enabled: hasCapture,
           isPrimary: true,
@@ -424,7 +460,9 @@ class HeaderBar extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _HeaderButton(
-          icon: isSidebarOpen ? Icons.photo_library_rounded : Icons.photo_library_outlined,
+          icon: isSidebarOpen
+              ? Icons.photo_library_rounded
+              : Icons.photo_library_outlined,
           isActive: isSidebarOpen,
           tooltip: isSidebarOpen
               ? 'Hide Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})'
@@ -436,7 +474,9 @@ class HeaderBar extends StatelessWidget {
           _HeaderButton(
             icon: isPropertiesOpen ? Icons.tune_rounded : Icons.tune_outlined,
             isActive: isPropertiesOpen,
-            tooltip: isPropertiesOpen ? 'Hide Tool Properties' : 'Show Tool Properties',
+            tooltip: isPropertiesOpen
+                ? 'Hide Tool Properties'
+                : 'Show Tool Properties',
             onPressed: onToggleProperties,
           ),
         ],
@@ -460,7 +500,12 @@ class HeaderBar extends StatelessWidget {
         _ => null,
       },
       itemBuilder: (ctx) => [
-        _overflowItem(t, 'shortcuts', Icons.keyboard_rounded, 'Keyboard Shortcuts…'),
+        _overflowItem(
+          t,
+          'shortcuts',
+          Icons.keyboard_rounded,
+          'Keyboard Shortcuts…',
+        ),
         _overflowItem(
           t,
           'theme',
@@ -482,7 +527,12 @@ class HeaderBar extends StatelessWidget {
     );
   }
 
-  PopupMenuItem<String> _overflowItem(SnipTheme t, String value, IconData icon, String label) {
+  PopupMenuItem<String> _overflowItem(
+    SnipTheme t,
+    String value,
+    IconData icon,
+    String label,
+  ) {
     return PopupMenuItem(
       value: value,
       height: 40,
@@ -548,27 +598,27 @@ class _HeaderButton extends StatelessWidget {
       if (!enabled) return BorderSide(color: t.border, width: t.hairline);
       if (isPrimary) return BorderSide(color: t.emphasis, width: 1.2);
       if (isActive) return BorderSide(color: t.selectedFill, width: t.hairline);
-      if (states.contains(WidgetState.hovered) || states.contains(WidgetState.pressed)) {
+      if (states.contains(WidgetState.hovered) ||
+          states.contains(WidgetState.pressed)) {
         return BorderSide(color: t.borderStrong, width: t.hairline);
       }
       return BorderSide(color: t.border, width: t.hairline);
     });
 
-    final style = ElevatedButton.styleFrom(
-      elevation: 0,
-      padding: EdgeInsets.symmetric(
-        horizontal: (showLabel && label != null) || icon == null ? 10 : 0,
-        vertical: 8
-      ),
-      minimumSize: const Size(36, 36),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-      ),
-    ).copyWith(
-      backgroundColor: bgColor,
-      foregroundColor: fgColor,
-      side: border,
-    );
+    final style =
+        ElevatedButton.styleFrom(
+          elevation: 0,
+          padding: EdgeInsets.symmetric(
+            horizontal: (showLabel && label != null) || icon == null ? 10 : 0,
+            vertical: 8,
+          ),
+          minimumSize: const Size(36, 36),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ).copyWith(
+          backgroundColor: bgColor,
+          foregroundColor: fgColor,
+          side: border,
+        );
 
     Widget child;
     if (icon != null && label != null && showLabel) {

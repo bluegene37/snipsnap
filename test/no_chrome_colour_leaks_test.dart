@@ -39,8 +39,12 @@ void main() {
         if (source.contains(banned)) offenders.add('$path → $banned');
       }
     }
-    expect(offenders, isEmpty,
-        reason: 'chrome colour must come from SnipTheme:\n${offenders.join('\n')}');
+    expect(
+      offenders,
+      isEmpty,
+      reason:
+          'chrome colour must come from SnipTheme:\n${offenders.join('\n')}',
+    );
   });
 
   test('no view branches on an isDarkMode boolean', () {
@@ -50,15 +54,26 @@ void main() {
         offenders.add(path);
       }
     }
-    expect(offenders, isEmpty,
-        reason: 'state must come from SnipTheme.of(context):\n${offenders.join('\n')}');
+    expect(
+      offenders,
+      isEmpty,
+      reason:
+          'state must come from SnipTheme.of(context):\n${offenders.join('\n')}',
+    );
   });
 
   test('annotation colour data survives', () {
     final source = File('lib/utils/constants.dart').readAsStringSync();
-    expect(source, contains('palette'),
-        reason: 'annotation swatches are data and must not be deleted');
-    expect(source, contains('framingGradients'),
-        reason: 'export framing gradients are user-selected and must not be deleted');
+    expect(
+      source,
+      contains('palette'),
+      reason: 'annotation swatches are data and must not be deleted',
+    );
+    expect(
+      source,
+      contains('framingGradients'),
+      reason:
+          'export framing gradients are user-selected and must not be deleted',
+    );
   });
 }

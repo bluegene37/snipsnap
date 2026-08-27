@@ -15,6 +15,7 @@ class AnnotationRenderer {
   const AnnotationRenderer._();
 
   static const double hitPadding = 10.0;
+
   /// Two-point marks whose extent includes their stroke weight.
   static const Set<CanvasTool> _strokeBoundedTools = {CanvasTool.line};
 
@@ -37,7 +38,10 @@ class AnnotationRenderer {
     final end = ann.endPoint;
     if (start == null || end == null) return (length: 0, halfWidth: 0);
 
-    var length = math.max(arrowHeadMinLength, ann.strokeWidth * arrowHeadLengthMultiplier);
+    var length = math.max(
+      arrowHeadMinLength,
+      ann.strokeWidth * arrowHeadLengthMultiplier,
+    );
     var halfWidth = length * arrowHeadAspect;
 
     final maxLength = (end - start).distance * 0.8;
@@ -67,13 +71,13 @@ class AnnotationRenderer {
   /// by this, or a drag that should have added 80px of height added 640 — the
   /// ruler "expanding extremely".
   static double acrossExtentPerStrokeWidth(CanvasTool tool) => switch (tool) {
-        CanvasTool.ruler => 1.0 + rulerCapMultiplier * 2,
-        // An arrow is as wide as its head, which flares well past the shaft —
-        // plus the half-weight `boundingRect` pads on each side, the same
-        // term the ruler's own figure carries.
-        CanvasTool.arrow => 1.0 + arrowHeadLengthMultiplier * arrowHeadAspect * 2,
-        _ => 1.0,
-      };
+    CanvasTool.ruler => 1.0 + rulerCapMultiplier * 2,
+    // An arrow is as wide as its head, which flares well past the shaft —
+    // plus the half-weight `boundingRect` pads on each side, the same
+    // term the ruler's own figure carries.
+    CanvasTool.arrow => 1.0 + arrowHeadLengthMultiplier * arrowHeadAspect * 2,
+    _ => 1.0,
+  };
 
   static const double selectionInset = 8.0;
   static const double rotationHandleGap = 24.0;
@@ -99,24 +103,43 @@ class AnnotationRenderer {
           if (p.dy < minY) minY = p.dy;
           if (p.dy > maxY) maxY = p.dy;
         }
-        return Rect.fromLTRB(minX, minY, maxX, maxY).inflate(ann.strokeWidth / 2);
+        return Rect.fromLTRB(
+          minX,
+          minY,
+          maxX,
+          maxY,
+        ).inflate(ann.strokeWidth / 2);
 
       case CanvasTool.arrow:
         if (ann.startPoint == null || ann.endPoint == null) return Rect.zero;
         if (ann.controlPoint != null) {
-          final minX = math.min(ann.startPoint!.dx, math.min(ann.endPoint!.dx, ann.controlPoint!.dx));
-          final maxX = math.max(ann.startPoint!.dx, math.max(ann.endPoint!.dx, ann.controlPoint!.dx));
-          final minY = math.min(ann.startPoint!.dy, math.min(ann.endPoint!.dy, ann.controlPoint!.dy));
-          final maxY = math.max(ann.startPoint!.dy, math.max(ann.endPoint!.dy, ann.controlPoint!.dy));
-          return Rect.fromLTRB(minX, minY, maxX, maxY).inflate(ann.strokeWidth / 2);
+          final minX = math.min(
+            ann.startPoint!.dx,
+            math.min(ann.endPoint!.dx, ann.controlPoint!.dx),
+          );
+          final maxX = math.max(
+            ann.startPoint!.dx,
+            math.max(ann.endPoint!.dx, ann.controlPoint!.dx),
+          );
+          final minY = math.min(
+            ann.startPoint!.dy,
+            math.min(ann.endPoint!.dy, ann.controlPoint!.dy),
+          );
+          final maxY = math.max(
+            ann.startPoint!.dy,
+            math.max(ann.endPoint!.dy, ann.controlPoint!.dy),
+          );
+          return Rect.fromLTRB(
+            minX,
+            minY,
+            maxX,
+            maxY,
+          ).inflate(ann.strokeWidth / 2);
         }
         // The head flares wider than the shaft, so the span alone does not
         // bound the mark: take in the head's base corners as well, or the
         // selection guide sits inside the arrow point.
-        return _boundsThrough(
-          _arrowOutlinePoints(ann),
-          ann.strokeWidth / 2,
-        );
+        return _boundsThrough(_arrowOutlinePoints(ann), ann.strokeWidth / 2);
 
       case CanvasTool.ruler:
         if (ann.startPoint == null || ann.endPoint == null) return Rect.zero;
@@ -145,11 +168,19 @@ class AnnotationRenderer {
           if (c.dy < minY) minY = c.dy;
           if (c.dy > maxY) maxY = c.dy;
         }
-        return Rect.fromLTRB(minX, minY, maxX, maxY).inflate(ann.strokeWidth / 2);
+        return Rect.fromLTRB(
+          minX,
+          minY,
+          maxX,
+          maxY,
+        ).inflate(ann.strokeWidth / 2);
 
       case CanvasTool.stepMarker:
         if (ann.startPoint == null) return Rect.zero;
-        return Rect.fromCircle(center: ann.startPoint!, radius: _stepRadius(ann));
+        return Rect.fromCircle(
+          center: ann.startPoint!,
+          radius: _stepRadius(ann),
+        );
 
       case CanvasTool.text:
         if (ann.startPoint == null || ann.text == null) return Rect.zero;
@@ -164,11 +195,28 @@ class AnnotationRenderer {
       default:
         if (ann.startPoint != null && ann.endPoint != null) {
           if (ann.tool == CanvasTool.arrow && ann.controlPoint != null) {
-            final minX = math.min(ann.startPoint!.dx, math.min(ann.endPoint!.dx, ann.controlPoint!.dx));
-            final maxX = math.max(ann.startPoint!.dx, math.max(ann.endPoint!.dx, ann.controlPoint!.dx));
-            final minY = math.min(ann.startPoint!.dy, math.min(ann.endPoint!.dy, ann.controlPoint!.dy));
-            final maxY = math.max(ann.startPoint!.dy, math.max(ann.endPoint!.dy, ann.controlPoint!.dy));
-            return Rect.fromLTRB(minX, minY, maxX, maxY).inflate(ann.strokeWidth / 2);
+            final minX = math.min(
+              ann.startPoint!.dx,
+              math.min(ann.endPoint!.dx, ann.controlPoint!.dx),
+            );
+            final maxX = math.max(
+              ann.startPoint!.dx,
+              math.max(ann.endPoint!.dx, ann.controlPoint!.dx),
+            );
+            final minY = math.min(
+              ann.startPoint!.dy,
+              math.min(ann.endPoint!.dy, ann.controlPoint!.dy),
+            );
+            final maxY = math.max(
+              ann.startPoint!.dy,
+              math.max(ann.endPoint!.dy, ann.controlPoint!.dy),
+            );
+            return Rect.fromLTRB(
+              minX,
+              minY,
+              maxX,
+              maxY,
+            ).inflate(ann.strokeWidth / 2);
           }
           final span = Rect.fromPoints(ann.startPoint!, ann.endPoint!);
           // A line, arrow or ruler *is* its stroke, so its bounds have to
@@ -214,10 +262,7 @@ class AnnotationRenderer {
 
     List<Offset> cornersAt(Offset tip, double sign) {
       final base = tip - direction * (head.length * sign);
-      return [
-        base + normal * head.halfWidth,
-        base - normal * head.halfWidth,
-      ];
+      return [base + normal * head.halfWidth, base - normal * head.halfWidth];
     }
 
     return [
@@ -283,16 +328,18 @@ class AnnotationRenderer {
         // one only near the outline itself, so clicks pass through the middle
         // to whatever sits underneath (Figma/Snagit behaviour).
         if (ann.fill) {
-          return shapePath(ann).contains(point) || _isNearShapeOutline(ann, point);
+          return shapePath(ann).contains(point) ||
+              _isNearShapeOutline(ann, point);
         }
         return _isNearShapeOutline(ann, point);
 
       case CanvasTool.crop:
       case CanvasTool.blur:
         if (ann.startPoint == null || ann.endPoint == null) return false;
-        return Rect.fromPoints(ann.startPoint!, ann.endPoint!)
-            .inflate(hitPadding)
-            .contains(point);
+        return Rect.fromPoints(
+          ann.startPoint!,
+          ann.endPoint!,
+        ).inflate(hitPadding).contains(point);
 
       case CanvasTool.arrow:
         if (ann.startPoint == null || ann.endPoint == null) return false;
@@ -302,7 +349,12 @@ class AnnotationRenderer {
           const steps = 16;
           for (int i = 1; i <= steps; i++) {
             final t = i / steps;
-            final curr = _bezierPoint(ann.startPoint!, ann.controlPoint!, ann.endPoint!, t);
+            final curr = _bezierPoint(
+              ann.startPoint!,
+              ann.controlPoint!,
+              ann.endPoint!,
+              t,
+            );
             if (_distanceToSegment(point, prev, curr) <= tolerance) {
               return true;
             }
@@ -327,7 +379,8 @@ class AnnotationRenderer {
           return (point - ann.points.first).distance <= tolerance;
         }
         for (int i = 0; i < ann.points.length - 1; i++) {
-          if (_distanceToSegment(point, ann.points[i], ann.points[i + 1]) <= tolerance) {
+          if (_distanceToSegment(point, ann.points[i], ann.points[i + 1]) <=
+              tolerance) {
             return true;
           }
         }
@@ -335,7 +388,8 @@ class AnnotationRenderer {
 
       case CanvasTool.stepMarker:
         if (ann.startPoint == null) return false;
-        return (point - ann.startPoint!).distance <= (_stepRadius(ann) + hitPadding);
+        return (point - ann.startPoint!).distance <=
+            (_stepRadius(ann) + hitPadding);
 
       case CanvasTool.text:
         final rect = boundingRect(ann);
@@ -362,13 +416,17 @@ class AnnotationRenderer {
     for (final metric in path.computeMetrics()) {
       if (metric.length == 0) continue;
       // Sample densely enough that curves stay within tolerance.
-      final steps = math.max(16, (metric.length / math.max(2.0, tolerance / 2)).ceil());
+      final steps = math.max(
+        16,
+        (metric.length / math.max(2.0, tolerance / 2)).ceil(),
+      );
       Offset? previous;
       for (int i = 0; i <= steps; i++) {
         final tangent = metric.getTangentForOffset(metric.length * i / steps);
         if (tangent == null) continue;
         final current = tangent.position;
-        if (previous != null && _distanceToSegment(point, previous, current) <= tolerance) {
+        if (previous != null &&
+            _distanceToSegment(point, previous, current) <= tolerance) {
           return true;
         }
         previous = current;
@@ -380,9 +438,13 @@ class AnnotationRenderer {
   static double _distanceToSegment(Offset p, Offset v, Offset w) {
     final l2 = (v - w).distanceSquared;
     if (l2 == 0) return (p - v).distance;
-    var t = ((p.dx - v.dx) * (w.dx - v.dx) + (p.dy - v.dy) * (w.dy - v.dy)) / l2;
+    var t =
+        ((p.dx - v.dx) * (w.dx - v.dx) + (p.dy - v.dy) * (w.dy - v.dy)) / l2;
     t = t.clamp(0.0, 1.0);
-    final projection = Offset(v.dx + t * (w.dx - v.dx), v.dy + t * (w.dy - v.dy));
+    final projection = Offset(
+      v.dx + t * (w.dx - v.dx),
+      v.dy + t * (w.dy - v.dy),
+    );
     return (p - projection).distance;
   }
 
@@ -394,7 +456,8 @@ class AnnotationRenderer {
     );
   }
 
-  static double _stepRadius(Annotation ann) => ann.fontSize > 0 ? ann.fontSize : 16.0;
+  static double _stepRadius(Annotation ann) =>
+      ann.fontSize > 0 ? ann.fontSize : 16.0;
 
   static const double _textPadX = 8.0;
   static const double _textPadY = 5.0;
@@ -568,7 +631,11 @@ class AnnotationRenderer {
     return path;
   }
 
-  static void _drawFreehand(Canvas canvas, Annotation ann, {required bool isHighlighter}) {
+  static void _drawFreehand(
+    Canvas canvas,
+    Annotation ann, {
+    required bool isHighlighter,
+  }) {
     if (ann.points.isEmpty) return;
     final path = _smoothPath(ann.points);
 
@@ -600,7 +667,12 @@ class AnnotationRenderer {
 
   // --- Lines & arrows -------------------------------------------------------
 
-  static void _drawDashedPath(Canvas canvas, Offset p1, Offset p2, Paint paint) {
+  static void _drawDashedPath(
+    Canvas canvas,
+    Offset p1,
+    Offset p2,
+    Paint paint,
+  ) {
     final distance = (p2 - p1).distance;
     if (distance == 0) return;
     final direction = (p2 - p1) / distance;
@@ -666,8 +738,14 @@ class AnnotationRenderer {
         final normal = Offset(-math.sin(angle), math.cos(angle));
         return Path()
           ..moveTo(tip.dx, tip.dy)
-          ..lineTo(baseCenter.dx + normal.dx * headHalfWidth, baseCenter.dy + normal.dy * headHalfWidth)
-          ..lineTo(baseCenter.dx - normal.dx * headHalfWidth, baseCenter.dy - normal.dy * headHalfWidth)
+          ..lineTo(
+            baseCenter.dx + normal.dx * headHalfWidth,
+            baseCenter.dy + normal.dy * headHalfWidth,
+          )
+          ..lineTo(
+            baseCenter.dx - normal.dx * headHalfWidth,
+            baseCenter.dy - normal.dy * headHalfWidth,
+          )
           ..close();
       }
 
@@ -698,13 +776,15 @@ class AnnotationRenderer {
     final headHalfWidth = head.halfWidth;
 
     Offset shorten(Offset from, double by, double dir) => Offset(
-          from.dx - dir * by * math.cos(angle),
-          from.dy - dir * by * math.sin(angle),
-        );
+      from.dx - dir * by * math.cos(angle),
+      from.dy - dir * by * math.sin(angle),
+    );
 
     // Pull the shaft back so it does not poke through the filled head.
     final shaftEnd = shorten(end, headLength * 0.75, 1);
-    final shaftStart = ann.isDoubleArrow ? shorten(start, headLength * 0.75, -1) : start;
+    final shaftStart = ann.isDoubleArrow
+        ? shorten(start, headLength * 0.75, -1)
+        : start;
 
     Path headPath(Offset tip, double dir) {
       final baseCenter = Offset(
@@ -714,8 +794,14 @@ class AnnotationRenderer {
       final normal = Offset(-math.sin(angle), math.cos(angle));
       return Path()
         ..moveTo(tip.dx, tip.dy)
-        ..lineTo(baseCenter.dx + normal.dx * headHalfWidth, baseCenter.dy + normal.dy * headHalfWidth)
-        ..lineTo(baseCenter.dx - normal.dx * headHalfWidth, baseCenter.dy - normal.dy * headHalfWidth)
+        ..lineTo(
+          baseCenter.dx + normal.dx * headHalfWidth,
+          baseCenter.dy + normal.dy * headHalfWidth,
+        )
+        ..lineTo(
+          baseCenter.dx - normal.dx * headHalfWidth,
+          baseCenter.dy - normal.dy * headHalfWidth,
+        )
         ..close();
     }
 
@@ -748,11 +834,14 @@ class AnnotationRenderer {
     switch (ann.shapeKind) {
       case ShapeKind.rectangle:
         final maxRadius = math.min(rect.width, rect.height) / 2;
-        return Path()
-          ..addRRect(RRect.fromRectAndRadius(
+        return Path()..addRRect(
+          RRect.fromRectAndRadius(
             rect,
-            Radius.circular(ann.borderRadius.clamp(0.0, math.max(0.0, maxRadius))),
-          ));
+            Radius.circular(
+              ann.borderRadius.clamp(0.0, math.max(0.0, maxRadius)),
+            ),
+          ),
+        );
 
       case ShapeKind.ellipse:
         return Path()..addOval(rect);
@@ -806,7 +895,11 @@ class AnnotationRenderer {
     return path..close();
   }
 
-  static Path _star(Rect rect, {required int points, required double innerRatio}) {
+  static Path _star(
+    Rect rect, {
+    required int points,
+    required double innerRatio,
+  }) {
     final path = Path();
     final cx = rect.center.dx;
     final cy = rect.center.dy;
@@ -830,10 +923,18 @@ class AnnotationRenderer {
   /// Rounded box with a tail on the lower-left, sized so the tail always fits.
   static Path _speechBubble(Rect rect, double borderRadius) {
     final tailHeight = math.min(rect.height * 0.22, 22.0);
-    final body = Rect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom - tailHeight);
+    final body = Rect.fromLTRB(
+      rect.left,
+      rect.top,
+      rect.right,
+      rect.bottom - tailHeight,
+    );
     if (body.height <= 0) return Path()..addRect(rect);
 
-    final radius = borderRadius.clamp(0.0, math.min(body.width, body.height) / 2);
+    final radius = borderRadius.clamp(
+      0.0,
+      math.min(body.width, body.height) / 2,
+    );
     final path = Path()
       ..addRRect(RRect.fromRectAndRadius(body, Radius.circular(radius)));
 
@@ -853,7 +954,12 @@ class AnnotationRenderer {
 
     _withShadow(canvas, ann, () {
       if (ann.fill) {
-        canvas.drawPath(path, Paint()..color = _effectiveFill(ann)..isAntiAlias = true);
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = _effectiveFill(ann)
+            ..isAntiAlias = true,
+        );
       }
       final stroke = _strokePaint(ann);
       if (ann.lineStyle == LineStyle.dashed) {
@@ -928,7 +1034,9 @@ class AnnotationRenderer {
 
     _drawBadge(
       canvas,
-      center: Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2) - normal * (capHalf + 12),
+      center:
+          Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2) -
+          normal * (capHalf + 12),
       text: rulerLabel(ann, pixelScale),
       background: _applyOpacity(ann.color, ann.opacity),
     );
@@ -943,16 +1051,29 @@ class AnnotationRenderer {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
 
     final rect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: center, width: tp.width + 14, height: tp.height + 7),
+      Rect.fromCenter(
+        center: center,
+        width: tp.width + 14,
+        height: tp.height + 7,
+      ),
       const Radius.circular(9),
     );
-    canvas.drawRRect(rect, Paint()..color = background..isAntiAlias = true);
+    canvas.drawRRect(
+      rect,
+      Paint()
+        ..color = background
+        ..isAntiAlias = true,
+    );
     tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
   }
 
@@ -1004,7 +1125,12 @@ class AnnotationRenderer {
         );
         canvas.drawImageRect(
           baseImage,
-          Rect.fromLTWH(0, 0, baseImage.width.toDouble(), baseImage.height.toDouble()),
+          Rect.fromLTWH(
+            0,
+            0,
+            baseImage.width.toDouble(),
+            baseImage.height.toDouble(),
+          ),
           imageRect,
           Paint()..filterQuality = FilterQuality.high,
         );
@@ -1039,11 +1165,22 @@ class AnnotationRenderer {
     final scaleY = baseImage.height / imageRect.height;
 
     // Source rectangle in native image pixels.
-    final srcLeft = ((rect.left - imageRect.left) * scaleX).clamp(0.0, baseImage.width.toDouble());
-    final srcTop = ((rect.top - imageRect.top) * scaleY).clamp(0.0, baseImage.height.toDouble());
-    final srcRight = ((rect.right - imageRect.left) * scaleX).clamp(0.0, baseImage.width.toDouble());
-    final srcBottom =
-        ((rect.bottom - imageRect.top) * scaleY).clamp(0.0, baseImage.height.toDouble());
+    final srcLeft = ((rect.left - imageRect.left) * scaleX).clamp(
+      0.0,
+      baseImage.width.toDouble(),
+    );
+    final srcTop = ((rect.top - imageRect.top) * scaleY).clamp(
+      0.0,
+      baseImage.height.toDouble(),
+    );
+    final srcRight = ((rect.right - imageRect.left) * scaleX).clamp(
+      0.0,
+      baseImage.width.toDouble(),
+    );
+    final srcBottom = ((rect.bottom - imageRect.top) * scaleY).clamp(
+      0.0,
+      baseImage.height.toDouble(),
+    );
     if (srcRight - srcLeft < 1 || srcBottom - srcTop < 1) return;
 
     final cols = math.max(1, (rect.width / block).floor());
@@ -1053,12 +1190,20 @@ class AnnotationRenderer {
     final srcCellW = (srcRight - srcLeft) / cols;
     final srcCellH = (srcBottom - srcTop) / rows;
 
-    final paint = Paint()..filterQuality = FilterQuality.none..isAntiAlias = false;
+    final paint = Paint()
+      ..filterQuality = FilterQuality.none
+      ..isAntiAlias = false;
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < cols; c++) {
         // Sample one source pixel per block and stretch it across the cell.
-        final sampleX = (srcLeft + srcCellW * (c + 0.5)).clamp(0.0, baseImage.width - 1.0);
-        final sampleY = (srcTop + srcCellH * (r + 0.5)).clamp(0.0, baseImage.height - 1.0);
+        final sampleX = (srcLeft + srcCellW * (c + 0.5)).clamp(
+          0.0,
+          baseImage.width - 1.0,
+        );
+        final sampleY = (srcTop + srcCellH * (r + 0.5)).clamp(
+          0.0,
+          baseImage.height - 1.0,
+        );
         canvas.drawImageRect(
           baseImage,
           Rect.fromLTWH(sampleX, sampleY, 1, 1),
@@ -1092,7 +1237,13 @@ class AnnotationRenderer {
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
     );
 
-    canvas.drawCircle(center, radius, Paint()..color = color..isAntiAlias = true);
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = color
+        ..isAntiAlias = true,
+    );
     canvas.drawCircle(
       center,
       radius,
@@ -1110,7 +1261,14 @@ class AnnotationRenderer {
           color: Colors.white.withValues(alpha: ann.opacity),
           // Shrink the glyph as the number grows so 2- and 3-digit badges stay
           // inside the circle.
-          fontSize: (radius * (step >= 100 ? 0.72 : step >= 10 ? 0.88 : 1.05)).clamp(8.0, 60.0),
+          fontSize:
+              (radius *
+                      (step >= 100
+                          ? 0.72
+                          : step >= 10
+                          ? 0.88
+                          : 1.05))
+                  .clamp(8.0, 60.0),
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -1126,9 +1284,8 @@ class AnnotationRenderer {
     final position = ann.startPoint;
     if (position == null || ann.text == null || ann.text!.isEmpty) return;
 
-    final showBg = ann.fill &&
-        ann.backgroundColor != null &&
-        ann.backgroundColor!.a > 0;
+    final showBg =
+        ann.fill && ann.backgroundColor != null && ann.backgroundColor!.a > 0;
 
     final tp = TextPainter(
       text: TextSpan(
@@ -1141,7 +1298,11 @@ class AnnotationRenderer {
           shadows: (showBg && !ann.hasShadow)
               ? null
               : const [
-                  Shadow(color: Color(0xB3000000), offset: Offset(0, 1), blurRadius: 4),
+                  Shadow(
+                    color: Color(0xB3000000),
+                    offset: Offset(0, 1),
+                    blurRadius: 4,
+                  ),
                 ],
         ),
       ),
@@ -1202,26 +1363,42 @@ class AnnotationRenderer {
         ..style = PaintingStyle.stroke,
     );
 
-    final handleFill = Paint()..color = Colors.white..style = PaintingStyle.fill;
+    final handleFill = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
     final handleBorder = Paint()
       ..color = AppDefaults.defaultColor
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke;
 
-    for (final c in [bounds.topLeft, bounds.topRight, bounds.bottomLeft, bounds.bottomRight]) {
+    for (final c in [
+      bounds.topLeft,
+      bounds.topRight,
+      bounds.bottomLeft,
+      bounds.bottomRight,
+    ]) {
       canvas.drawCircle(c, 4.5, handleFill);
       canvas.drawCircle(c, 4.5, handleBorder);
     }
 
     final topCenter = bounds.topCenter;
     final rotHandle = topCenter - const Offset(0, rotationHandleGap);
-    canvas.drawLine(topCenter, rotHandle, Paint()..color = AppDefaults.defaultColor..strokeWidth = 1.5);
+    canvas.drawLine(
+      topCenter,
+      rotHandle,
+      Paint()
+        ..color = AppDefaults.defaultColor
+        ..strokeWidth = 1.5,
+    );
     canvas.drawCircle(rotHandle, 5.5, handleFill);
     canvas.drawCircle(rotHandle, 5.5, handleBorder);
 
     // Render curvature handle for Arrows (Shottr/Snagit style)
-    if (ann.tool == CanvasTool.arrow && ann.startPoint != null && ann.endPoint != null) {
-      final curveHandlePos = ann.controlPoint ?? ((ann.startPoint! + ann.endPoint!) / 2);
+    if (ann.tool == CanvasTool.arrow &&
+        ann.startPoint != null &&
+        ann.endPoint != null) {
+      final curveHandlePos =
+          ann.controlPoint ?? ((ann.startPoint! + ann.endPoint!) / 2);
       if (ann.controlPoint != null) {
         final mid = (ann.startPoint! + ann.endPoint!) / 2;
         canvas.drawLine(
@@ -1232,8 +1409,21 @@ class AnnotationRenderer {
             ..strokeWidth = 1.2,
         );
       }
-      canvas.drawCircle(curveHandlePos, 6.0, Paint()..color = const Color(0xFFF59E0B)..style = PaintingStyle.fill);
-      canvas.drawCircle(curveHandlePos, 6.0, Paint()..color = Colors.white..strokeWidth = 2.0..style = PaintingStyle.stroke);
+      canvas.drawCircle(
+        curveHandlePos,
+        6.0,
+        Paint()
+          ..color = const Color(0xFFF59E0B)
+          ..style = PaintingStyle.fill,
+      );
+      canvas.drawCircle(
+        curveHandlePos,
+        6.0,
+        Paint()
+          ..color = Colors.white
+          ..strokeWidth = 2.0
+          ..style = PaintingStyle.stroke,
+      );
     }
 
     if (rotated) canvas.restore();

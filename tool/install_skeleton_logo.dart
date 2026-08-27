@@ -2,7 +2,8 @@ import 'dart:io';
 import 'package:image/image.dart' as img;
 
 void main() {
-  final inputPath = '/Users/bluegene37/.gemini/antigravity/brain/b5bdca92-ec10-49dc-b1fe-2060e426c79d/snipsnap_skeleton_logo_1787388521610.jpg';
+  final inputPath =
+      '/Users/bluegene37/.gemini/antigravity/brain/b5bdca92-ec10-49dc-b1fe-2060e426c79d/snipsnap_skeleton_logo_1787388521610.jpg';
   final inputFile = File(inputPath);
   if (!inputFile.existsSync()) {
     stderr.writeln('Source image not found at $inputPath');
@@ -18,7 +19,12 @@ void main() {
   stdout.writeln('Decoded image size: ${image.width}x${image.height}');
 
   // Resize to standard 1024x1024
-  final resized = img.copyResize(image, width: 1024, height: 1024, interpolation: img.Interpolation.cubic);
+  final resized = img.copyResize(
+    image,
+    width: 1024,
+    height: 1024,
+    interpolation: img.Interpolation.cubic,
+  );
 
   // Save as main app_logo.png and app_logo_skeleton_dark.png
   final pngBytes = img.encodePng(resized);
@@ -40,7 +46,9 @@ void main() {
     }
   }
 
-  File('assets/images/app_logo_skeleton_light.png').writeAsBytesSync(img.encodePng(lightImg));
+  File(
+    'assets/images/app_logo_skeleton_light.png',
+  ).writeAsBytesSync(img.encodePng(lightImg));
 
   stdout.writeln('Successfully generated and saved:');
   stdout.writeln('- assets/images/app_logo.png');

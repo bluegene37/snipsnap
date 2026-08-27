@@ -106,14 +106,19 @@ void _fill(img.Image canvas, List<List<double>> poly) {
 
 void main() {
   final big = img.Image(
-      width: _size * _ss, height: _size * _ss, numChannels: 4);
-  img.fillRect(big,
-      x1: 0,
-      y1: 0,
-      x2: _size * _ss - 1,
-      y2: _size * _ss - 1,
-      radius: 232 * _ss,
-      color: _ink);
+    width: _size * _ss,
+    height: _size * _ss,
+    numChannels: 4,
+  );
+  img.fillRect(
+    big,
+    x1: 0,
+    y1: 0,
+    x2: _size * _ss - 1,
+    y2: _size * _ss - 1,
+    radius: 232 * _ss,
+    color: _ink,
+  );
 
   // Two letters, centered as a pair around x = 512.
   for (final cx in const [343.0, 681.0]) {
@@ -121,23 +126,31 @@ void main() {
     _fill(big, _clip(letter, above: false));
     final upper = _clip(letter, above: true);
     _fill(big, [
-      for (final p in upper) [p[0] + _snapDx, p[1] + _snapDy]
+      for (final p in upper) [p[0] + _snapDx, p[1] + _snapDy],
     ]);
   }
 
-  final tile = img.copyResize(big,
-      width: _size, height: _size, interpolation: img.Interpolation.average);
-  File('assets/images/app_logo.png')
-      .writeAsBytesSync(img.encodePng(tile));
+  final tile = img.copyResize(
+    big,
+    width: _size,
+    height: _size,
+    interpolation: img.Interpolation.average,
+  );
+  File('assets/images/app_logo.png').writeAsBytesSync(img.encodePng(tile));
 
   // macOS: Apple's Big Sur template is an 824px rounded rect centered in a
   // transparent 1024px canvas.
   final margined = img.Image(width: _size, height: _size, numChannels: 4);
-  img.compositeImage(margined, img.copyResize(big, width: 824, height: 824),
-      dstX: 100, dstY: 100);
+  img.compositeImage(
+    margined,
+    img.copyResize(big, width: 824, height: 824),
+    dstX: 100,
+    dstY: 100,
+  );
   Directory('build/logo').createSync(recursive: true);
-  File('build/logo/macos_icon.png')
-      .writeAsBytesSync(img.encodePng(margined));
+  File('build/logo/macos_icon.png').writeAsBytesSync(img.encodePng(margined));
 
-  stdout.writeln('wrote assets/images/app_logo.png and build/logo/macos_icon.png');
+  stdout.writeln(
+    'wrote assets/images/app_logo.png and build/logo/macos_icon.png',
+  );
 }

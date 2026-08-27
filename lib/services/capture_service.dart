@@ -29,7 +29,8 @@ class CaptureService {
   Future<bool> hasScreenCapturePermission() async {
     if (!Platform.isMacOS) return true;
     try {
-      return await _channel.invokeMethod<bool>('screenCaptureAuthorized') ?? true;
+      return await _channel.invokeMethod<bool>('screenCaptureAuthorized') ??
+          true;
     } on MissingPluginException catch (_) {
       return true;
     } catch (e) {
@@ -68,10 +69,13 @@ class CaptureService {
     try {
       if (Platform.isMacOS) {
         try {
-          final result = await _channel.invokeMethod<String?>('captureInteractive', {
-            'targetPath': targetPath,
-          });
-          if (result != null && await File(result).exists() && (await File(result).length()) > 0) {
+          final result = await _channel.invokeMethod<String?>(
+            'captureInteractive',
+            {'targetPath': targetPath},
+          );
+          if (result != null &&
+              await File(result).exists() &&
+              (await File(result).length()) > 0) {
             return result;
           }
           if (result == null) {
@@ -79,7 +83,10 @@ class CaptureService {
             return null;
           }
         } on MissingPluginException catch (_) {
-          final result = await Process.run('/usr/sbin/screencapture', ['-i', targetPath]);
+          final result = await Process.run('/usr/sbin/screencapture', [
+            '-i',
+            targetPath,
+          ]);
           final file = File(targetPath);
           if (result.exitCode == 0 && await file.exists()) {
             final len = await file.length();
@@ -104,7 +111,8 @@ class CaptureService {
         // once, as this did, meant every interactive capture on Windows read
         // an empty clipboard and reported failure.
         final winPath = targetPath.replaceAll('/', '\\').replaceAll('"', '\\"');
-        final script = '''
+        final script =
+            '''
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 [System.Windows.Forms.Clipboard]::Clear()
 try { Start-Process "ms-screenclip:" | Out-Null }
@@ -123,13 +131,21 @@ while ((Get-Date) -lt \$deadline) {
 ''';
         // `-Sta`: the clipboard APIs require a single-threaded apartment, and
         // a capture that silently threw here would look like a cancelled snip.
-        final result = await Process.run(
-            'powershell', ['-NoProfile', '-Sta', '-Command', script]);
+        final result = await Process.run('powershell', [
+          '-NoProfile',
+          '-Sta',
+          '-Command',
+          script,
+        ]);
         if (result.exitCode != 0) return null;
         // Nothing on the clipboard within the window means the user cancelled.
         return await _acceptIfNonEmpty(targetPath);
       } else if (Platform.isLinux) {
-        var result = await Process.run('gnome-screenshot', ['-a', '-f', targetPath]);
+        var result = await Process.run('gnome-screenshot', [
+          '-a',
+          '-f',
+          targetPath,
+        ]);
         if (result.exitCode != 0) {
           result = await Process.run('maim', ['-s', targetPath]);
         }
@@ -154,10 +170,13 @@ while ((Get-Date) -lt \$deadline) {
     try {
       if (Platform.isMacOS) {
         try {
-          final result = await _channel.invokeMethod<String?>('captureFullScreen', {
-            'targetPath': targetPath,
-          });
-          if (result != null && await File(result).exists() && (await File(result).length()) > 0) {
+          final result = await _channel.invokeMethod<String?>(
+            'captureFullScreen',
+            {'targetPath': targetPath},
+          );
+          if (result != null &&
+              await File(result).exists() &&
+              (await File(result).length()) > 0) {
             return result;
           }
         } on MissingPluginException catch (_) {
@@ -166,8 +185,11 @@ while ((Get-Date) -lt \$deadline) {
           // returned, and the rest are adopted as phantom captures by the
           // library scan at next launch. `-x` suppresses the shutter sound,
           // which has already played once for the in-app trigger.
-          final result =
-              await Process.run('/usr/sbin/screencapture', ['-x', '-m', targetPath]);
+          final result = await Process.run('/usr/sbin/screencapture', [
+            '-x',
+            '-m',
+            targetPath,
+          ]);
           if (result.exitCode == 0) {
             return await _acceptIfNonEmpty(targetPath);
           }
@@ -179,7 +201,8 @@ while ((Get-Date) -lt \$deadline) {
         // is not per-monitor DPI aware by default — without it Bounds comes
         // back in virtualised coordinates and the grab is stretched or clipped
         // on any mixed-scaling setup.
-        final script = '''
+        final script =
+            '''
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();' -Name U -Namespace W
 [W.U]::SetProcessDPIAware() | Out-Null
@@ -189,7 +212,11 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
 \$g.CopyFromScreen(\$b.Location, [System.Drawing.Point]::Empty, \$b.Size)
 \$img.Save("$winPath", [System.Drawing.Imaging.ImageFormat]::Png)
 ''';
-        final result = await Process.run('powershell', ['-NoProfile', '-Command', script]);
+        final result = await Process.run('powershell', [
+          '-NoProfile',
+          '-Command',
+          script,
+        ]);
         if (result.exitCode == 0) {
           return await _acceptIfNonEmpty(targetPath);
         }

@@ -4,7 +4,8 @@ import 'package:snipsnap/models/annotation.dart';
 import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/views/components/annotation_renderer.dart';
 
-Annotation _arrow({required double strokeWidth, double length = 400}) => Annotation(
+Annotation _arrow({required double strokeWidth, double length = 400}) =>
+    Annotation(
       id: 'a',
       tool: CanvasTool.arrow,
       color: const Color(0xFF000000),
@@ -20,10 +21,16 @@ void main() {
     // to be clamped at half the arrow's span, so past a stroke weight of
     // span/8 it stopped growing while the shaft did not.
     for (final strokeWidth in const [2.0, 8.0, 20.0, 60.0, 120.0, 240.0]) {
-      final head = AnnotationRenderer.arrowHead(_arrow(strokeWidth: strokeWidth));
-      expect(head.halfWidth, greaterThan(strokeWidth / 2),
-          reason: 'at stroke $strokeWidth the head must still be the widest '
-              'part of the arrow');
+      final head = AnnotationRenderer.arrowHead(
+        _arrow(strokeWidth: strokeWidth),
+      );
+      expect(
+        head.halfWidth,
+        greaterThan(strokeWidth / 2),
+        reason:
+            'at stroke $strokeWidth the head must still be the widest '
+            'part of the arrow',
+      );
     }
   });
 
@@ -39,12 +46,16 @@ void main() {
   test('a head too big for a short arrow shrinks on both axes together', () {
     // The guard that stops a stubby arrow being all point must not distort it:
     // scaling only the length would flatten the head into a chevron.
-    final head = AnnotationRenderer.arrowHead(_arrow(strokeWidth: 60, length: 80));
+    final head = AnnotationRenderer.arrowHead(
+      _arrow(strokeWidth: 60, length: 80),
+    );
 
     expect(head.length, lessThanOrEqualTo(80 * 0.8 + 0.001));
-    expect(head.halfWidth / head.length,
-        closeTo(AnnotationRenderer.arrowHeadAspect, 0.001),
-        reason: 'the head keeps its shape when it is scaled down');
+    expect(
+      head.halfWidth / head.length,
+      closeTo(AnnotationRenderer.arrowHeadAspect, 0.001),
+      reason: 'the head keeps its shape when it is scaled down',
+    );
   });
 
   test('the selection bounds contain the head, not just the shaft', () {
@@ -56,8 +67,11 @@ void main() {
 
     expect(bounds.top, lessThanOrEqualTo(300 - head.halfWidth + 0.001));
     expect(bounds.bottom, greaterThanOrEqualTo(300 + head.halfWidth - 0.001));
-    expect(bounds.right, greaterThanOrEqualTo(500 - 0.001),
-        reason: 'the tip is still the far edge');
+    expect(
+      bounds.right,
+      greaterThanOrEqualTo(500 - 0.001),
+      reason: 'the tip is still the far edge',
+    );
   });
 
   test('a double arrow is bounded by both of its heads', () {
@@ -74,8 +88,10 @@ void main() {
     // the stroke weight, plus the half-weight padding on each side that
     // `boundingRect` adds: 4.6. Resizing divides by this, so a drag asking for
     // n pixels of height gets n rather than 4.6n.
-    expect(AnnotationRenderer.acrossExtentPerStrokeWidth(CanvasTool.arrow),
-        closeTo(4.6, 0.001));
+    expect(
+      AnnotationRenderer.acrossExtentPerStrokeWidth(CanvasTool.arrow),
+      closeTo(4.6, 0.001),
+    );
     expect(AnnotationRenderer.acrossExtentPerStrokeWidth(CanvasTool.line), 1.0);
   });
 }

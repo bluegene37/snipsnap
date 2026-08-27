@@ -93,10 +93,10 @@ class Annotation {
     double blurStrength = 14.0,
     this.isDoubleArrow = false,
     this.hasShadow = false,
-  })  : opacity = opacity.clamp(0.0, 1.0),
-        blurStrength = blurStrength.clamp(1.0, maxBlurStrength),
-        assert(strokeWidth > 0, 'strokeWidth must be > 0'),
-        assert(fontSize > 0, 'fontSize must be > 0');
+  }) : opacity = opacity.clamp(0.0, 1.0),
+       blurStrength = blurStrength.clamp(1.0, maxBlurStrength),
+       assert(strokeWidth > 0, 'strokeWidth must be > 0'),
+       assert(fontSize > 0, 'fontSize must be > 0');
 
   Annotation copyWith({
     String? id,
@@ -128,14 +128,20 @@ class Annotation {
       id: id ?? this.id,
       tool: tool ?? this.tool,
       color: color ?? this.color,
-      backgroundColor:
-          identical(backgroundColor, _unset) ? this.backgroundColor : backgroundColor as Color?,
-      fillColor: identical(fillColor, _unset) ? this.fillColor : fillColor as Color?,
+      backgroundColor: identical(backgroundColor, _unset)
+          ? this.backgroundColor
+          : backgroundColor as Color?,
+      fillColor: identical(fillColor, _unset)
+          ? this.fillColor
+          : fillColor as Color?,
       strokeWidth: strokeWidth ?? this.strokeWidth,
       points: points ?? this.points,
-      startPoint:
-          identical(startPoint, _unset) ? this.startPoint : startPoint as Offset?,
-      endPoint: identical(endPoint, _unset) ? this.endPoint : endPoint as Offset?,
+      startPoint: identical(startPoint, _unset)
+          ? this.startPoint
+          : startPoint as Offset?,
+      endPoint: identical(endPoint, _unset)
+          ? this.endPoint
+          : endPoint as Offset?,
       controlPoint: identical(controlPoint, _unset)
           ? this.controlPoint
           : controlPoint as Offset?,
@@ -187,7 +193,10 @@ class Annotation {
       points: points.map(mapPoint).toList(),
       rect: rect == null
           ? null
-          : Rect.fromPoints(mapPoint(rect!.topLeft), mapPoint(rect!.bottomRight)),
+          : Rect.fromPoints(
+              mapPoint(rect!.topLeft),
+              mapPoint(rect!.bottomRight),
+            ),
       strokeWidth: mapLength(strokeWidth),
       fontSize: mapLength(fontSize),
       borderRadius: mapLength(borderRadius),
@@ -238,11 +247,18 @@ class Annotation {
       'isDoubleArrow': isDoubleArrow,
       'hasShadow': hasShadow,
       'rotation': rotation,
-      if (controlPoint != null) 'controlPoint': {'x': controlPoint!.dx, 'y': controlPoint!.dy},
-      if (backgroundColor != null) 'backgroundColor': backgroundColor!.toARGB32(),
+      if (controlPoint != null)
+        'controlPoint': {'x': controlPoint!.dx, 'y': controlPoint!.dy},
+      if (backgroundColor != null)
+        'backgroundColor': backgroundColor!.toARGB32(),
       if (fillColor != null) 'fillColor': fillColor!.toARGB32(),
       if (rect != null)
-        'rect': {'l': rect!.left, 't': rect!.top, 'r': rect!.right, 'b': rect!.bottom},
+        'rect': {
+          'l': rect!.left,
+          't': rect!.top,
+          'r': rect!.right,
+          'b': rect!.bottom,
+        },
     };
   }
 
@@ -281,7 +297,9 @@ class Annotation {
       backgroundColor: map.containsKey('backgroundColor')
           ? Color(map['backgroundColor'] as int)
           : backgroundColor,
-      fillColor: map.containsKey('fillColor') ? Color(map['fillColor'] as int) : fillColor,
+      fillColor: map.containsKey('fillColor')
+          ? Color(map['fillColor'] as int)
+          : fillColor,
       rect: map.containsKey('rect') ? parsedRect : rect,
     );
   }
@@ -326,24 +344,31 @@ class Annotation {
 
   @override
   int get hashCode => Object.hash(
-        id,
-        tool,
-        color,
-        backgroundColor,
-        fillColor,
-        strokeWidth,
-        Object.hashAll(points),
-        startPoint,
-        endPoint,
-        controlPoint,
-        text,
-        fontSize,
-        stepNumber,
-        fill,
-        rect,
-        opacity,
-        rotation,
-        Object.hash(borderRadius, shapeKind, lineStyle, blurType, blurStrength, isDoubleArrow,
-            hasShadow),
-      );
+    id,
+    tool,
+    color,
+    backgroundColor,
+    fillColor,
+    strokeWidth,
+    Object.hashAll(points),
+    startPoint,
+    endPoint,
+    controlPoint,
+    text,
+    fontSize,
+    stepNumber,
+    fill,
+    rect,
+    opacity,
+    rotation,
+    Object.hash(
+      borderRadius,
+      shapeKind,
+      lineStyle,
+      blurType,
+      blurStrength,
+      isDoubleArrow,
+      hasShadow,
+    ),
+  );
 }

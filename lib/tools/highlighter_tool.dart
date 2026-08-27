@@ -32,12 +32,15 @@ class HighlighterToolHandler extends ToolHandler {
         final start = _drawStart!;
         final dx = (pos.dx - start.dx).abs();
         final dy = (pos.dy - start.dy).abs();
-        final constrainedPos = dx >= dy ? Offset(pos.dx, start.dy) : Offset(start.dx, pos.dy);
+        final constrainedPos = dx >= dy
+            ? Offset(pos.dx, start.dy)
+            : Offset(start.dx, pos.dy);
         _currentPoints = [start, constrainedPos];
         final updated = current.copyWith(points: _currentPoints);
         delegate.onCurrentAnnotationChanged(updated);
       } else {
-        if (_currentPoints.isEmpty || (pos - _currentPoints.last).distance >= 1.5) {
+        if (_currentPoints.isEmpty ||
+            (pos - _currentPoints.last).distance >= 1.5) {
           _currentPoints = [..._currentPoints, pos];
           final updated = current.copyWith(points: _currentPoints);
           delegate.onCurrentAnnotationChanged(updated);

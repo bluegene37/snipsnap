@@ -7,38 +7,17 @@ enum AppShortcutAction {
     'Interactive Area Snip',
     'Drag rectangle to capture portion of screen',
   ),
-  fullScreenSnip(
-    'Full Screen Snip',
-    'Capture entire desktop display',
-  ),
-  timerSnip(
-    '3s Timer Snip',
-    'Wait 3 seconds then capture',
-  ),
-  openImage(
-    'Open Image File',
-    'Import external image into editor',
-  ),
+  fullScreenSnip('Full Screen Snip', 'Capture entire desktop display'),
+  timerSnip('3s Timer Snip', 'Wait 3 seconds then capture'),
+  openImage('Open Image File', 'Import external image into editor'),
   copyToClipboard(
     'Copy to Clipboard',
     'Copy current annotated image to system clipboard',
   ),
-  saveAs(
-    'Save Image As...',
-    'Export annotated image to local file',
-  ),
-  undo(
-    'Undo Annotation',
-    'Revert last drawing action',
-  ),
-  redo(
-    'Redo Annotation',
-    'Re-apply reverted drawing action',
-  ),
-  clearAnnotations(
-    'Clear All Annotations',
-    'Remove all drawings from canvas',
-  ),
+  saveAs('Save Image As...', 'Export annotated image to local file'),
+  undo('Undo Annotation', 'Revert last drawing action'),
+  redo('Redo Annotation', 'Re-apply reverted drawing action'),
+  clearAnnotations('Clear All Annotations', 'Remove all drawings from canvas'),
   toggleHistory(
     'Toggle Screenshots Panel',
     'Show or hide bottom recent captures bar',

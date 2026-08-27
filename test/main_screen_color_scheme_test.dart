@@ -89,18 +89,26 @@ void main() {
       };
 
       everyOtherRole.forEach((name, color) {
-        expect(isNeutral(color), isTrue,
-            reason: '$mode: $name (${color.toARGB32().toRadixString(16)}) '
-                'should be neutral but carries chroma');
+        expect(
+          isNeutral(color),
+          isTrue,
+          reason:
+              '$mode: $name (${color.toARGB32().toRadixString(16)}) '
+              'should be neutral but carries chroma',
+        );
       });
 
       // The other half of the assertion: error/errorContainer must actually
       // still carry danger's chroma, so this test cannot pass by accident
       // if a future edit neutralises everything including error.
       mustCarryChroma.forEach((name, color) {
-        expect(isNeutral(color), isFalse,
-            reason: '$mode: $name has lost its chroma — should read from '
-                'SnipTheme.danger');
+        expect(
+          isNeutral(color),
+          isFalse,
+          reason:
+              '$mode: $name has lost its chroma — should read from '
+              'SnipTheme.danger',
+        );
       });
     }
   });

@@ -6,13 +6,13 @@ import 'package:snipsnap/utils/constants.dart';
 
 void main() {
   Annotation ann(Offset start) => Annotation(
-        id: 's',
-        tool: CanvasTool.line,
-        color: const Color(0xFF000000),
-        strokeWidth: 2.0,
-        startPoint: start,
-        endPoint: start + const Offset(50, 50),
-      );
+    id: 's',
+    tool: CanvasTool.line,
+    color: const Color(0xFF000000),
+    strokeWidth: 2.0,
+    startPoint: start,
+    endPoint: start + const Offset(50, 50),
+  );
 
   test('converts viewport annotations into image pixels', () {
     final result = convertLegacyAnnotations(
@@ -59,8 +59,7 @@ void main() {
       expect(result.annotations.single.startPoint, const Offset(100, 100));
     });
 
-    test(
-        'applying convertLegacyAnnotationsChecked a second time over its own '
+    test('applying convertLegacyAnnotationsChecked a second time over its own '
         'output double-scales the coordinates — the function has no way to '
         'know an annotation is already in image-pixel space, which is '
         'exactly why every call site must gate on a needs-conversion flag '

@@ -57,7 +57,10 @@ Future<void> _pumpLoaded(WidgetTester tester, Widget tree) async {
 
 Future<void> _drag(WidgetTester tester, Offset from, Offset to) async {
   await tester.runAsync(() async {
-    final gesture = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+    final gesture = await tester.startGesture(
+      from,
+      kind: PointerDeviceKind.mouse,
+    );
     await tester.pump(const Duration(milliseconds: 16));
     await gesture.moveTo(from + const Offset(2, 2));
     await tester.pump(const Duration(milliseconds: 16));
@@ -110,8 +113,9 @@ void main() {
 
   tearDown(() => dir.deleteSync(recursive: true));
 
-  testWidgets('a floating cut is never pasted into the capture switched to',
-      (tester) async {
+  testWidgets('a floating cut is never pasted into the capture switched to', (
+    tester,
+  ) async {
     // The regression: cut-and-move erases the region from the capture's file
     // immediately and holds the pixels in memory. Only a *tool* change cleared
     // that state, so switching captures carried the live cut across — and the
@@ -123,7 +127,11 @@ void main() {
     final repaintKey = GlobalKey();
     await _pumpLoaded(
       tester,
-      _canvas(imagePath: pathA, repaintKey: repaintKey, tool: CanvasTool.select),
+      _canvas(
+        imagePath: pathA,
+        repaintKey: repaintKey,
+        tool: CanvasTool.select,
+      ),
     );
 
     final box = repaintKey.currentContext!.findRenderObject() as RenderBox;
@@ -135,15 +143,23 @@ void main() {
     await _drag(tester, at(180, 170), at(210, 190));
 
     final redInAAfterCut = _redPixelCount(pathA);
-    expect(redInAAfterCut, lessThan(400 * 300),
-        reason: 'the cut must actually have removed pixels from capture A, '
-            'otherwise the rest of this test proves nothing');
+    expect(
+      redInAAfterCut,
+      lessThan(400 * 300),
+      reason:
+          'the cut must actually have removed pixels from capture A, '
+          'otherwise the rest of this test proves nothing',
+    );
     expect(_redPixelCount(pathB), 0, reason: 'capture B starts with no red');
 
     // Switch captures with the select tool still active...
     await _pumpLoaded(
       tester,
-      _canvas(imagePath: pathB, repaintKey: repaintKey, tool: CanvasTool.select),
+      _canvas(
+        imagePath: pathB,
+        repaintKey: repaintKey,
+        tool: CanvasTool.select,
+      ),
     );
     // ...then change tools, which is what used to flush the still-live cut —
     // into whichever capture happened to be on screen by then.
@@ -151,17 +167,28 @@ void main() {
       tester,
       _canvas(imagePath: pathB, repaintKey: repaintKey, tool: CanvasTool.pen),
     );
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 500)));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 500)),
+    );
     await tester.pumpAndSettle();
 
-    expect(_redPixelCount(pathB), 0,
-        reason: "capture A's cut pixels must never be written into capture B");
-    expect(_redPixelCount(pathA), greaterThan(redInAAfterCut),
-        reason: 'switching away must put the floating cut back into the '
-            'capture it came from, not strand it');
+    expect(
+      _redPixelCount(pathB),
+      0,
+      reason: "capture A's cut pixels must never be written into capture B",
+    );
+    expect(
+      _redPixelCount(pathA),
+      greaterThan(redInAAfterCut),
+      reason:
+          'switching away must put the floating cut back into the '
+          'capture it came from, not strand it',
+    );
   });
 
-  testWidgets('the crop box does not carry over to the next capture', (tester) async {
+  testWidgets('the crop box does not carry over to the next capture', (
+    tester,
+  ) async {
     // A crop box drawn on one capture stayed put across a switch, so applying
     // it cropped the new capture through the previous one's geometry.
     await tester.binding.setSurfaceSize(const Size(700, 600));
@@ -177,8 +204,11 @@ void main() {
     Offset at(double dx, double dy) => box.localToGlobal(Offset(dx, dy));
 
     await _drag(tester, at(100, 120), at(200, 200));
-    expect(find.textContaining('Apply'), findsOneWidget,
-        reason: 'the drawn box must be live before the switch');
+    expect(
+      find.textContaining('Apply'),
+      findsOneWidget,
+      reason: 'the drawn box must be live before the switch',
+    );
 
     await _pumpLoaded(
       tester,
@@ -188,8 +218,12 @@ void main() {
     // B is portrait where A is landscape, so the rectangle drawn over A falls
     // outside B's image rect and the bar would read "Apply Expansion". The
     // fresh default box is the image itself, so it reads "Apply Crop".
-    expect(find.text('Apply Crop'), findsOneWidget,
-        reason: "an 'Apply Expansion' bar here means A's crop box survived the "
-            'switch and is now hanging off the edge of B');
+    expect(
+      find.text('Apply Crop'),
+      findsOneWidget,
+      reason:
+          "an 'Apply Expansion' bar here means A's crop box survived the "
+          'switch and is now hanging off the edge of B',
+    );
   });
 }

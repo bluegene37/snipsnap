@@ -10,8 +10,10 @@ import 'package:snipsnap/services/ocr/ocr_service.dart';
 class FakeOcrEngine implements OcrEngine {
   int recognizeCalls = 0;
   Uint8List? lastBytes;
-  OcrAvailability availabilityResult =
-      const OcrAvailability(available: true, languages: ['en-US']);
+  OcrAvailability availabilityResult = const OcrAvailability(
+    available: true,
+    languages: ['en-US'],
+  );
 
   @override
   Future<OcrAvailability> availability() async => availabilityResult;
@@ -68,7 +70,10 @@ void main() {
 
   test('recognizes the whole image when no region is given', () async {
     final path = await _writePng(tempDir, 400, 200);
-    final result = await service.recognizeCapture(imagePath: path, cacheKey: 'k');
+    final result = await service.recognizeCapture(
+      imagePath: path,
+      cacheKey: 'k',
+    );
     expect(result.imageSize, const Size(400, 200));
     expect(engine.recognizeCalls, 1);
   });
@@ -112,8 +117,16 @@ void main() {
   test('does not cache region results', () async {
     final path = await _writePng(tempDir, 400, 200);
     const region = Rect.fromLTWH(0, 0, 50, 50);
-    await service.recognizeCapture(imagePath: path, cacheKey: 'k', regionPx: region);
-    await service.recognizeCapture(imagePath: path, cacheKey: 'k', regionPx: region);
+    await service.recognizeCapture(
+      imagePath: path,
+      cacheKey: 'k',
+      regionPx: region,
+    );
+    await service.recognizeCapture(
+      imagePath: path,
+      cacheKey: 'k',
+      regionPx: region,
+    );
     expect(engine.recognizeCalls, 2);
   });
 
@@ -131,23 +144,29 @@ void main() {
   test('returns empty when the engine is unavailable', () async {
     engine.availabilityResult = const OcrAvailability.unavailable('no engine');
     final path = await _writePng(tempDir, 400, 200);
-    final result = await service.recognizeCapture(imagePath: path, cacheKey: 'k');
+    final result = await service.recognizeCapture(
+      imagePath: path,
+      cacheKey: 'k',
+    );
     expect(result.isEmpty, isTrue);
     expect(engine.recognizeCalls, 0);
   });
 
-  test('crops to only the true overlap when the region hangs off the left edge', () async {
-    final path = await _writePng(tempDir, 400, 200);
-    await service.recognizeCapture(
-      imagePath: path,
-      cacheKey: 'k',
-      // True overlap with the 400x200 image is x:[0,70), width 70.
-      regionPx: const Rect.fromLTWH(-50, 0, 120, 60),
-    );
-    final decoded = img.decodeImage(engine.lastBytes!)!;
-    expect(decoded.width, 70);
-    expect(decoded.height, 60);
-  });
+  test(
+    'crops to only the true overlap when the region hangs off the left edge',
+    () async {
+      final path = await _writePng(tempDir, 400, 200);
+      await service.recognizeCapture(
+        imagePath: path,
+        cacheKey: 'k',
+        // True overlap with the 400x200 image is x:[0,70), width 70.
+        regionPx: const Rect.fromLTWH(-50, 0, 120, 60),
+      );
+      final decoded = img.decodeImage(engine.lastBytes!)!;
+      expect(decoded.width, 70);
+      expect(decoded.height, 60);
+    },
+  );
 
   test('returns empty for a region with zero overlap with the image', () async {
     final path = await _writePng(tempDir, 400, 200);
@@ -161,27 +180,33 @@ void main() {
     expect(engine.recognizeCalls, 0);
   });
 
-  test('region result imageSize matches the full image, not the crop', () async {
-    final path = await _writePng(tempDir, 400, 200);
-    final result = await service.recognizeCapture(
-      imagePath: path,
-      cacheKey: 'k',
-      regionPx: const Rect.fromLTWH(100, 50, 120, 60),
-    );
-    expect(result.imageSize, const Size(400, 200));
-  });
+  test(
+    'region result imageSize matches the full image, not the crop',
+    () async {
+      final path = await _writePng(tempDir, 400, 200);
+      final result = await service.recognizeCapture(
+        imagePath: path,
+        cacheKey: 'k',
+        regionPx: const Rect.fromLTWH(100, 50, 120, 60),
+      );
+      expect(result.imageSize, const Size(400, 200));
+    },
+  );
 
-  test('offsets word boxes nested in lines back into full-image coordinates', () async {
-    final path = await _writePng(tempDir, 400, 200);
-    final result = await service.recognizeCapture(
-      imagePath: path,
-      cacheKey: 'k',
-      regionPx: const Rect.fromLTWH(100, 50, 120, 60),
-    );
-    // The fake reports a word at (1,1) inside the crop; it must come back at
-    // (101,51) in full-image space.
-    final word = result.lines.single.words.single;
-    expect(word.boundsPx.left, 101);
-    expect(word.boundsPx.top, 51);
-  });
+  test(
+    'offsets word boxes nested in lines back into full-image coordinates',
+    () async {
+      final path = await _writePng(tempDir, 400, 200);
+      final result = await service.recognizeCapture(
+        imagePath: path,
+        cacheKey: 'k',
+        regionPx: const Rect.fromLTWH(100, 50, 120, 60),
+      );
+      // The fake reports a word at (1,1) inside the crop; it must come back at
+      // (101,51) in full-image space.
+      final word = result.lines.single.words.single;
+      expect(word.boundsPx.left, 101);
+      expect(word.boundsPx.top, 51);
+    },
+  );
 }

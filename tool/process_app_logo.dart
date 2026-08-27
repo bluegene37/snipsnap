@@ -28,7 +28,9 @@ void main() {
   final cropLeft = (cx - cropSize ~/ 2).clamp(0, source.width - cropSize);
   final cropTop = (cy - cropSize ~/ 2).clamp(0, source.height - cropSize);
 
-  stdout.writeln('Crop rect: left=$cropLeft, top=$cropTop, size=${cropSize}x$cropSize');
+  stdout.writeln(
+    'Crop rect: left=$cropLeft, top=$cropTop, size=${cropSize}x$cropSize',
+  );
 
   final cropped = img.copyCrop(
     source,
@@ -48,13 +50,25 @@ void main() {
   );
 
   File('assets/images/app_logo.png').writeAsBytesSync(img.encodePng(colorLogo));
-  File('assets/images/app_logo_square.png').writeAsBytesSync(img.encodePng(colorLogo));
-  stdout.writeln('Saved assets/images/app_logo.png and app_logo_square.png (1024x1024 color)');
+  File(
+    'assets/images/app_logo_square.png',
+  ).writeAsBytesSync(img.encodePng(colorLogo));
+  stdout.writeln(
+    'Saved assets/images/app_logo.png and app_logo_square.png (1024x1024 color)',
+  );
 
   // Create Black & White / Skeleton Monochrome versions:
   final monoLogo = img.Image(width: outSize, height: outSize, numChannels: 4);
-  final skeletonDark = img.Image(width: outSize, height: outSize, numChannels: 4);
-  final skeletonLight = img.Image(width: outSize, height: outSize, numChannels: 4);
+  final skeletonDark = img.Image(
+    width: outSize,
+    height: outSize,
+    numChannels: 4,
+  );
+  final skeletonLight = img.Image(
+    width: outSize,
+    height: outSize,
+    numChannels: 4,
+  );
 
   final darkBg = img.ColorRgba8(0x14, 0x14, 0x14, 255);
   final lightBg = img.ColorRgba8(0xF2, 0xF2, 0xF0, 255);
@@ -77,17 +91,31 @@ void main() {
 
       // Skeleton Dark (silver-white stroke on dark canvas)
       final darkVal = (20 + curved * 235).round().clamp(0, 255);
-      skeletonDark.setPixel(x, y, img.ColorRgba8(darkVal, darkVal, darkVal, 255));
+      skeletonDark.setPixel(
+        x,
+        y,
+        img.ColorRgba8(darkVal, darkVal, darkVal, 255),
+      );
 
       // Skeleton Light (deep ink stroke on light canvas)
       final lightVal = (242 - curved * 222).round().clamp(0, 255);
-      skeletonLight.setPixel(x, y, img.ColorRgba8(lightVal, lightVal, lightVal, 255));
+      skeletonLight.setPixel(
+        x,
+        y,
+        img.ColorRgba8(lightVal, lightVal, lightVal, 255),
+      );
     }
   }
 
-  File('assets/images/app_logo_mono.png').writeAsBytesSync(img.encodePng(monoLogo));
-  File('assets/images/app_logo_skeleton_dark.png').writeAsBytesSync(img.encodePng(skeletonDark));
-  File('assets/images/app_logo_skeleton_light.png').writeAsBytesSync(img.encodePng(skeletonLight));
+  File(
+    'assets/images/app_logo_mono.png',
+  ).writeAsBytesSync(img.encodePng(monoLogo));
+  File(
+    'assets/images/app_logo_skeleton_dark.png',
+  ).writeAsBytesSync(img.encodePng(skeletonDark));
+  File(
+    'assets/images/app_logo_skeleton_light.png',
+  ).writeAsBytesSync(img.encodePng(skeletonLight));
 
   stdout.writeln('Saved assets/images/app_logo_mono.png');
   stdout.writeln('Saved assets/images/app_logo_skeleton_dark.png');

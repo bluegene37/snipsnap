@@ -134,7 +134,8 @@ abstract class ToolHandler {
 ///
 /// `EditorCanvas` delegates to these rather than implementing gestures inline,
 /// so tool behaviour lives in one place (GEMINI.md 1.1).
-ToolHandler handlerFor(CanvasTool tool, ToolDelegate delegate) => switch (tool) {
+ToolHandler handlerFor(CanvasTool tool, ToolDelegate delegate) =>
+    switch (tool) {
       CanvasTool.select => SelectToolHandler(delegate),
       CanvasTool.pen => PenToolHandler(delegate),
       CanvasTool.arrow => ArrowToolHandler(delegate),

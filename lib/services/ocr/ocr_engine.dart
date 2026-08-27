@@ -51,44 +51,42 @@ class OcrResult {
   static String _str(Object? v) => v is String ? v : '';
 
   static Rect _rect(Map<Object?, Object?> m) => Rect.fromLTWH(
-        _num(m['x'], 0.0),
-        _num(m['y'], 0.0),
-        _num(m['w'], 0.0),
-        _num(m['h'], 0.0),
-      );
+    _num(m['x'], 0.0),
+    _num(m['y'], 0.0),
+    _num(m['w'], 0.0),
+    _num(m['h'], 0.0),
+  );
 
   /// Builds a result from the `snipsnap/ocr` channel payload. Natives emit
   /// top-left-origin pixel coordinates, so no flipping happens here.
   factory OcrResult.fromChannelMap(Map<Object?, Object?> map) {
-    final rawLines = map['lines'] is List<Object?> ? map['lines'] as List<Object?> : const <Object?>[];
+    final rawLines = map['lines'] is List<Object?>
+        ? map['lines'] as List<Object?>
+        : const <Object?>[];
     final width = _num(map['width'], 0.0);
     final height = _num(map['height'], 0.0);
 
     return OcrResult(
       imageSize: Size(width, height),
-      lines: rawLines
-          .whereType<Map<Object?, Object?>>()
-          .map((raw) {
-            final l = raw;
-            final rawWords = l['words'] is List<Object?> ? l['words'] as List<Object?> : const <Object?>[];
-            return OcrLine(
-              text: _str(l['text']),
-              boundsPx: _rect(l),
-              confidence: _num(l['confidence'], 0.0),
-              words: rawWords
-                  .whereType<Map<Object?, Object?>>()
-                  .map((rw) {
-                    final w = rw;
-                    return OcrWord(
-                      text: _str(w['text']),
-                      boundsPx: _rect(w),
-                      confidence: _num(w['confidence'], 0.0),
-                    );
-                  })
-                  .toList(),
+      lines: rawLines.whereType<Map<Object?, Object?>>().map((raw) {
+        final l = raw;
+        final rawWords = l['words'] is List<Object?>
+            ? l['words'] as List<Object?>
+            : const <Object?>[];
+        return OcrLine(
+          text: _str(l['text']),
+          boundsPx: _rect(l),
+          confidence: _num(l['confidence'], 0.0),
+          words: rawWords.whereType<Map<Object?, Object?>>().map((rw) {
+            final w = rw;
+            return OcrWord(
+              text: _str(w['text']),
+              boundsPx: _rect(w),
+              confidence: _num(w['confidence'], 0.0),
             );
-          })
-          .toList(),
+          }).toList(),
+        );
+      }).toList(),
     );
   }
 }
@@ -107,8 +105,8 @@ class OcrAvailability {
   });
 
   const OcrAvailability.unavailable(String this.reason)
-      : available = false,
-        languages = const [];
+    : available = false,
+      languages = const [];
 }
 
 /// Recognises text in an image. One implementation per platform.

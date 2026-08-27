@@ -26,7 +26,8 @@ class PenToolHandler extends ToolHandler {
   void onPanUpdate(DragUpdateDetails details, Offset pos) {
     final current = delegate.currentAnnotation;
     if (current != null) {
-      if (_currentPoints.isEmpty || (pos - _currentPoints.last).distance >= 1.5) {
+      if (_currentPoints.isEmpty ||
+          (pos - _currentPoints.last).distance >= 1.5) {
         _currentPoints = [..._currentPoints, pos];
         final updated = current.copyWith(points: _currentPoints);
         delegate.onCurrentAnnotationChanged(updated);

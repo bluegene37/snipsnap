@@ -35,7 +35,10 @@ Annotation _rect({
 void main() {
   group('Annotation model', () {
     test('copyWith can clear nullable colours via explicit null', () {
-      final ann = _rect().copyWith(fillColor: Colors.blue, backgroundColor: Colors.black);
+      final ann = _rect().copyWith(
+        fillColor: Colors.blue,
+        backgroundColor: Colors.black,
+      );
       expect(ann.fillColor, Colors.blue);
 
       final cleared = ann.copyWith(fillColor: null);
@@ -71,7 +74,9 @@ void main() {
       );
 
       final encoded = jsonEncode(original.toPropsJson());
-      final restored = _rect().withPropsJson(jsonDecode(encoded) as Map<String, dynamic>);
+      final restored = _rect().withPropsJson(
+        jsonDecode(encoded) as Map<String, dynamic>,
+      );
 
       expect(restored.borderRadius, 17.5);
       expect(restored.lineStyle, LineStyle.dashed);
@@ -111,12 +116,22 @@ void main() {
   });
 
   group('AnnotationRenderer geometry', () {
-    test('hollow shapes are grabbable on the outline but not through the middle', () {
-      final ann = _rect(); // 100,100 -> 200,160
-      expect(AnnotationRenderer.hitTest(ann, const Offset(100, 130)), isTrue, reason: 'left edge');
-      expect(AnnotationRenderer.hitTest(ann, const Offset(150, 130)), isFalse,
-          reason: 'hollow centre must let clicks through to items underneath');
-    });
+    test(
+      'hollow shapes are grabbable on the outline but not through the middle',
+      () {
+        final ann = _rect(); // 100,100 -> 200,160
+        expect(
+          AnnotationRenderer.hitTest(ann, const Offset(100, 130)),
+          isTrue,
+          reason: 'left edge',
+        );
+        expect(
+          AnnotationRenderer.hitTest(ann, const Offset(150, 130)),
+          isFalse,
+          reason: 'hollow centre must let clicks through to items underneath',
+        );
+      },
+    );
 
     test('filled shapes are grabbable anywhere inside', () {
       final ann = _rect(fill: true);
@@ -142,7 +157,10 @@ void main() {
     test('local/canvas space conversions are inverses', () {
       final ann = _rect(rotation: 0.9);
       const probe = Offset(133, 121);
-      final round = AnnotationRenderer.toCanvasSpace(ann, AnnotationRenderer.toLocalSpace(ann, probe));
+      final round = AnnotationRenderer.toCanvasSpace(
+        ann,
+        AnnotationRenderer.toLocalSpace(ann, probe),
+      );
       expect(round.dx, closeTo(probe.dx, 1e-9));
       expect(round.dy, closeTo(probe.dy, 1e-9));
     });
@@ -188,50 +206,90 @@ void main() {
         );
         final bounds = AnnotationRenderer.boundingRect(ann);
         expect(bounds, isNot(Rect.zero), reason: '$tool has no bounds');
-        expect(bounds.width > 0 || bounds.height > 0, isTrue, reason: '$tool has empty bounds');
+        expect(
+          bounds.width > 0 || bounds.height > 0,
+          isTrue,
+          reason: '$tool has empty bounds',
+        );
       }
     });
   });
 
   group('Shape tool', () {
-    test('every shape kind produces a closed path inside the drag rectangle', () {
-      for (final kind in ShapeKind.values) {
-        final ann = _rect(
-          start: const Offset(40, 40),
-          end: const Offset(240, 180),
-          kind: kind,
-        );
-        final bounds = AnnotationRenderer.shapePath(ann).getBounds();
-        expect(bounds.isEmpty, isFalse, reason: '$kind produced an empty path');
-        // Inscribed: never larger than the rectangle the user dragged.
-        expect(bounds.left, greaterThanOrEqualTo(39.5), reason: '$kind overflows left');
-        expect(bounds.top, greaterThanOrEqualTo(39.5), reason: '$kind overflows top');
-        expect(bounds.right, lessThanOrEqualTo(240.5), reason: '$kind overflows right');
-        expect(bounds.bottom, lessThanOrEqualTo(180.5), reason: '$kind overflows bottom');
-      }
-    });
+    test(
+      'every shape kind produces a closed path inside the drag rectangle',
+      () {
+        for (final kind in ShapeKind.values) {
+          final ann = _rect(
+            start: const Offset(40, 40),
+            end: const Offset(240, 180),
+            kind: kind,
+          );
+          final bounds = AnnotationRenderer.shapePath(ann).getBounds();
+          expect(
+            bounds.isEmpty,
+            isFalse,
+            reason: '$kind produced an empty path',
+          );
+          // Inscribed: never larger than the rectangle the user dragged.
+          expect(
+            bounds.left,
+            greaterThanOrEqualTo(39.5),
+            reason: '$kind overflows left',
+          );
+          expect(
+            bounds.top,
+            greaterThanOrEqualTo(39.5),
+            reason: '$kind overflows top',
+          );
+          expect(
+            bounds.right,
+            lessThanOrEqualTo(240.5),
+            reason: '$kind overflows right',
+          );
+          expect(
+            bounds.bottom,
+            lessThanOrEqualTo(180.5),
+            reason: '$kind overflows bottom',
+          );
+        }
+      },
+    );
 
     test('a degenerate drag yields an empty path rather than throwing', () {
       for (final kind in ShapeKind.values) {
-        final ann = _rect(start: const Offset(10, 10), end: const Offset(10, 10), kind: kind);
+        final ann = _rect(
+          start: const Offset(10, 10),
+          end: const Offset(10, 10),
+          kind: kind,
+        );
         expect(AnnotationRenderer.shapePath(ann).getBounds().isEmpty, isTrue);
       }
     });
 
-    test('hit testing respects the actual outline, not just the bounding box', () {
-      // A filled triangle: the top-left corner of its bounding box is outside
-      // the triangle itself.
-      final triangle = _rect(
-        start: const Offset(0, 0),
-        end: const Offset(200, 200),
-        fill: true,
-        kind: ShapeKind.triangle,
-      );
-      expect(AnnotationRenderer.hitTest(triangle, const Offset(100, 150)), isTrue,
-          reason: 'inside the triangle');
-      expect(AnnotationRenderer.hitTest(triangle, const Offset(15, 15)), isFalse,
-          reason: 'in the bounding box but outside the triangle');
-    });
+    test(
+      'hit testing respects the actual outline, not just the bounding box',
+      () {
+        // A filled triangle: the top-left corner of its bounding box is outside
+        // the triangle itself.
+        final triangle = _rect(
+          start: const Offset(0, 0),
+          end: const Offset(200, 200),
+          fill: true,
+          kind: ShapeKind.triangle,
+        );
+        expect(
+          AnnotationRenderer.hitTest(triangle, const Offset(100, 150)),
+          isTrue,
+          reason: 'inside the triangle',
+        );
+        expect(
+          AnnotationRenderer.hitTest(triangle, const Offset(15, 15)),
+          isFalse,
+          reason: 'in the bounding box but outside the triangle',
+        );
+      },
+    );
 
     test('hollow shapes are grabbable along a curved outline', () {
       final ellipse = _rect(
@@ -240,9 +298,15 @@ void main() {
         kind: ShapeKind.ellipse,
       );
       // Rightmost point of the ellipse.
-      expect(AnnotationRenderer.hitTest(ellipse, const Offset(200, 100)), isTrue);
+      expect(
+        AnnotationRenderer.hitTest(ellipse, const Offset(200, 100)),
+        isTrue,
+      );
       // Dead centre: hollow, so the click passes through.
-      expect(AnnotationRenderer.hitTest(ellipse, const Offset(100, 100)), isFalse);
+      expect(
+        AnnotationRenderer.hitTest(ellipse, const Offset(100, 100)),
+        isFalse,
+      );
     });
 
     test('shape kind survives a props JSON round-trip', () {
@@ -253,35 +317,40 @@ void main() {
       expect(restored.shapeKind, ShapeKind.star);
     });
 
-    test('curved Bezier arrow round-trips controlPoint and computes curved bounds & hit-test', () {
-      final arrow = Annotation(
-        id: 'a1',
-        tool: CanvasTool.arrow,
-        color: Colors.red,
-        startPoint: const Offset(0, 0),
-        endPoint: const Offset(100, 0),
-        controlPoint: const Offset(50, 50),
-        strokeWidth: 4.0,
-      );
+    test(
+      'curved Bezier arrow round-trips controlPoint and computes curved bounds & hit-test',
+      () {
+        final arrow = Annotation(
+          id: 'a1',
+          tool: CanvasTool.arrow,
+          color: Colors.red,
+          startPoint: const Offset(0, 0),
+          endPoint: const Offset(100, 0),
+          controlPoint: const Offset(50, 50),
+          strokeWidth: 4.0,
+        );
 
-      // JSON props roundtrip
-      final encoded = jsonEncode(arrow.toPropsJson());
-      final restored = arrow.withPropsJson(jsonDecode(encoded) as Map<String, dynamic>);
-      expect(restored.controlPoint, const Offset(50, 50));
+        // JSON props roundtrip
+        final encoded = jsonEncode(arrow.toPropsJson());
+        final restored = arrow.withPropsJson(
+          jsonDecode(encoded) as Map<String, dynamic>,
+        );
+        expect(restored.controlPoint, const Offset(50, 50));
 
-      // Translated
-      final moved = arrow.translated(const Offset(10, 20));
-      expect(moved.controlPoint, const Offset(60, 70));
+        // Translated
+        final moved = arrow.translated(const Offset(10, 20));
+        expect(moved.controlPoint, const Offset(60, 70));
 
-      // Bounding box includes the arc apex
-      final bounds = AnnotationRenderer.boundingRect(arrow);
-      expect(bounds.bottom, greaterThan(25.0));
+        // Bounding box includes the arc apex
+        final bounds = AnnotationRenderer.boundingRect(arrow);
+        expect(bounds.bottom, greaterThan(25.0));
 
-      // Hit testing hits the curved arc near apex
-      expect(AnnotationRenderer.hitTest(arrow, const Offset(50, 25)), isTrue);
-      // Straight line midpoint should not hit the curved arrow
-      expect(AnnotationRenderer.hitTest(arrow, const Offset(50, 0)), isFalse);
-    });
+        // Hit testing hits the curved arc near apex
+        expect(AnnotationRenderer.hitTest(arrow, const Offset(50, 25)), isTrue);
+        // Straight line midpoint should not hit the curved arrow
+        expect(AnnotationRenderer.hitTest(arrow, const Offset(50, 0)), isFalse);
+      },
+    );
 
     test('solid blackout redaction bar survives JSON round-trip', () {
       final blur = Annotation(
@@ -294,7 +363,9 @@ void main() {
       );
 
       final encoded = jsonEncode(blur.toPropsJson());
-      final restored = blur.withPropsJson(jsonDecode(encoded) as Map<String, dynamic>);
+      final restored = blur.withPropsJson(
+        jsonDecode(encoded) as Map<String, dynamic>,
+      );
       expect(restored.blurType, BlurType.solid);
     });
   });
@@ -401,16 +472,19 @@ void main() {
       expect(cleared.startPoint, const Offset(1, 2));
     });
 
-    test('withPropsJson preserves an existing rect when the map has no rect key', () {
-      final ann = Annotation(
-        id: 'x',
-        tool: CanvasTool.shape,
-        color: const Color(0xFF000000),
-        rect: const Rect.fromLTRB(10, 20, 30, 40),
-      );
-      final restored = ann.withPropsJson(const {'borderRadius': 3.0});
-      expect(restored.rect, const Rect.fromLTRB(10, 20, 30, 40));
-    });
+    test(
+      'withPropsJson preserves an existing rect when the map has no rect key',
+      () {
+        final ann = Annotation(
+          id: 'x',
+          tool: CanvasTool.shape,
+          color: const Color(0xFF000000),
+          rect: const Rect.fromLTRB(10, 20, 30, 40),
+        );
+        final restored = ann.withPropsJson(const {'borderRadius': 3.0});
+        expect(restored.rect, const Rect.fromLTRB(10, 20, 30, 40));
+      },
+    );
   });
 
   group('ruler measurement', () {

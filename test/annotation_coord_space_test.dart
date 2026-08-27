@@ -26,10 +26,7 @@ void main() {
     // applied twice — the caller is responsible for the space tag, so assert
     // the tag semantics rather than idempotency of the maths.
     expect(converted.startPoint, isNot(legacy.startPoint));
-    expect(
-      converted.mappedToCanvasSpace(p).startPoint!.dx,
-      closeTo(100, 1e-6),
-    );
+    expect(converted.mappedToCanvasSpace(p).startPoint!.dx, closeTo(100, 1e-6));
   });
 
   test('CoordSpace parses by name with a viewport fallback', () {

@@ -62,7 +62,10 @@ class ImageOperations {
     double opacity = 1.0,
     bool isGlobal = false,
   }) {
-    if (startX < 0 || startX >= image.width || startY < 0 || startY >= image.height) {
+    if (startX < 0 ||
+        startX >= image.width ||
+        startY < 0 ||
+        startY >= image.height) {
       return false;
     }
 
@@ -235,12 +238,7 @@ class ImageOperations {
       );
     }
 
-    img.compositeImage(
-      destinationImage,
-      toComposite,
-      dstX: dstX,
-      dstY: dstY,
-    );
+    img.compositeImage(destinationImage, toComposite, dstX: dstX, dstY: dstY);
   }
 
   /// Crops or expands the canvas of [sourceImage].
@@ -283,12 +281,7 @@ class ImageOperations {
     final dstX = -targetLeft;
     final dstY = -targetTop;
 
-    img.compositeImage(
-      expanded,
-      sourceImage,
-      dstX: dstX,
-      dstY: dstY,
-    );
+    img.compositeImage(expanded, sourceImage, dstX: dstX, dstY: dstY);
 
     return expanded;
   }

@@ -19,6 +19,7 @@ enum CanvasTool {
   pen,
   arrow,
   line,
+
   /// Unified vector shape tool. The concrete outline is chosen with
   /// [ShapeKind] — this replaced the separate rectangle and oval tools.
   shape,
@@ -49,38 +50,31 @@ enum ShapeKind {
 
 extension ShapeKindDisplay on ShapeKind {
   String get label => switch (this) {
-        ShapeKind.rectangle => 'Rectangle',
-        ShapeKind.ellipse => 'Ellipse',
-        ShapeKind.triangle => 'Triangle',
-        ShapeKind.diamond => 'Diamond',
-        ShapeKind.pentagon => 'Pentagon',
-        ShapeKind.hexagon => 'Hexagon',
-        ShapeKind.star => 'Star',
-        ShapeKind.speechBubble => 'Speech Bubble',
-      };
+    ShapeKind.rectangle => 'Rectangle',
+    ShapeKind.ellipse => 'Ellipse',
+    ShapeKind.triangle => 'Triangle',
+    ShapeKind.diamond => 'Diamond',
+    ShapeKind.pentagon => 'Pentagon',
+    ShapeKind.hexagon => 'Hexagon',
+    ShapeKind.star => 'Star',
+    ShapeKind.speechBubble => 'Speech Bubble',
+  };
 
   IconData get icon => switch (this) {
-        ShapeKind.rectangle => Icons.crop_square_rounded,
-        ShapeKind.ellipse => Icons.circle_outlined,
-        ShapeKind.triangle => Icons.change_history_rounded,
-        ShapeKind.diamond => Icons.diamond_outlined,
-        ShapeKind.pentagon => Icons.pentagon_outlined,
-        ShapeKind.hexagon => Icons.hexagon_outlined,
-        ShapeKind.star => Icons.star_border_rounded,
-        ShapeKind.speechBubble => Icons.chat_bubble_outline_rounded,
-      };
+    ShapeKind.rectangle => Icons.crop_square_rounded,
+    ShapeKind.ellipse => Icons.circle_outlined,
+    ShapeKind.triangle => Icons.change_history_rounded,
+    ShapeKind.diamond => Icons.diamond_outlined,
+    ShapeKind.pentagon => Icons.pentagon_outlined,
+    ShapeKind.hexagon => Icons.hexagon_outlined,
+    ShapeKind.star => Icons.star_border_rounded,
+    ShapeKind.speechBubble => Icons.chat_bubble_outline_rounded,
+  };
 }
 
-enum LineStyle {
-  solid,
-  dashed,
-}
+enum LineStyle { solid, dashed }
 
-enum BlurType {
-  gaussian,
-  pixelate,
-  solid,
-}
+enum BlurType { gaussian, pixelate, solid }
 
 class AppColors {
   // Annotation swatch palette — user data, rendered in real colour. Not
@@ -141,5 +135,3 @@ class AppDefaults {
   static const double strokeWidthThick = 8.0;
   static const double strokeWidthHeavy = 14.0;
 }
-
-

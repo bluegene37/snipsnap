@@ -47,6 +47,17 @@ dev_dependencies:
   dmg: ^0.1.10
   flutter_launcher_icons: ^0.14.4
   msix: ^3.16.7
+  inno_bundle: ^0.11.2
+
+# Inno Setup Windows installer configuration (dart run inno_bundle:build).
+inno_bundle:
+  id: 6b7e88bf-76f5-46aa-b2b9-e152504b86bb
+  name: snipsnap
+  publisher: genexis.dev
+  installer_icon: windows/runner/resources/app_icon.ico
+  admin: auto
+  languages:
+    - english
 
 # Regenerate platform icons with `dart run flutter_launcher_icons` after
 # changing assets/icon/app_icon.png (1024x1024, transparent rounded corners,

@@ -20,38 +20,40 @@ Future<Color?> _pumpFillPanel(
   // is laid out and tappable.
   await tester.binding.setSurfaceSize(const Size(420, 2600));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(SnipThemeScope(
-    theme: SnipTheme.forMode(SnipThemeMode.dark),
-    child: MaterialApp(
-      home: Scaffold(
-        body: StylePicker(
-          selectedColor: const Color(0xFFEF4444),
-          onColorChanged: (_) {},
-          onTextBackgroundColorChanged: (_) {},
-          fillColor: fillColor,
-          onFillColorChanged: onFillColorChanged,
-          strokeWidth: 4.0,
-          onStrokeWidthChanged: (_) {},
-          opacity: 1.0,
-          onOpacityChanged: (_) {},
-          fontSize: 18.0,
-          onFontSizeChanged: (_) {},
-          isFilled: true,
-          onFillChanged: (_) {},
-          borderRadius: 8.0,
-          onBorderRadiusChanged: (_) {},
-          blurStrength: 14.0,
-          onBlurStrengthChanged: (_) {},
-          activeTool: CanvasTool.shape,
-          shapeKind: ShapeKind.rectangle,
-          onShapeKindChanged: (_) {},
-          savedColors: const [Color(0xFF123456)],
-          onFlattenCanvas: () {},
-          onActivateEyedropper: () {},
+  await tester.pumpWidget(
+    SnipThemeScope(
+      theme: SnipTheme.forMode(SnipThemeMode.dark),
+      child: MaterialApp(
+        home: Scaffold(
+          body: StylePicker(
+            selectedColor: const Color(0xFFEF4444),
+            onColorChanged: (_) {},
+            onTextBackgroundColorChanged: (_) {},
+            fillColor: fillColor,
+            onFillColorChanged: onFillColorChanged,
+            strokeWidth: 4.0,
+            onStrokeWidthChanged: (_) {},
+            opacity: 1.0,
+            onOpacityChanged: (_) {},
+            fontSize: 18.0,
+            onFontSizeChanged: (_) {},
+            isFilled: true,
+            onFillChanged: (_) {},
+            borderRadius: 8.0,
+            onBorderRadiusChanged: (_) {},
+            blurStrength: 14.0,
+            onBlurStrengthChanged: (_) {},
+            activeTool: CanvasTool.shape,
+            shapeKind: ShapeKind.rectangle,
+            onShapeKindChanged: (_) {},
+            savedColors: const [Color(0xFF123456)],
+            onFlattenCanvas: () {},
+            onActivateEyedropper: () {},
+          ),
         ),
       ),
     ),
-  ));
+  );
   while (tester.takeException() != null) {}
   return fillColor;
 }
@@ -84,7 +86,8 @@ void main() {
     return out.getPixel(200, 200);
   }
 
-  Annotation filledSquare({Color? fillColor, double opacity = 1.0}) => Annotation(
+  Annotation filledSquare({Color? fillColor, double opacity = 1.0}) =>
+      Annotation(
         id: 'a',
         tool: CanvasTool.shape,
         color: const Color(0xFFFF0000),
@@ -104,8 +107,16 @@ void main() {
     // full opacity still came out pink.
     final px = await renderAndSampleCentre(filledSquare());
 
-    expect(px.r, greaterThan(240), reason: 'red channel must be the full colour');
-    expect(px.g, lessThan(20), reason: 'a 25% wash over white would leave ~191 here');
+    expect(
+      px.r,
+      greaterThan(240),
+      reason: 'red channel must be the full colour',
+    );
+    expect(
+      px.g,
+      lessThan(20),
+      reason: 'a 25% wash over white would leave ~191 here',
+    );
     expect(px.b, lessThan(20));
   });
 
@@ -125,8 +136,11 @@ void main() {
     final px = await renderAndSampleCentre(filledSquare(opacity: 0.5));
 
     expect(px.r, greaterThan(240));
-    expect(px.g, lessThan(20),
-        reason: 'a half-opacity outline must not thin the solid fill');
+    expect(
+      px.g,
+      lessThan(20),
+      reason: 'a half-opacity outline must not thin the solid fill',
+    );
   });
 
   test('the fill alpha is what makes a fill translucent', () async {
@@ -134,16 +148,23 @@ void main() {
       filledSquare(fillColor: const Color(0xFFFF0000).withValues(alpha: 0.5)),
     );
 
-    expect(px.g, greaterThan(100),
-        reason: 'half-alpha red over white must let white through');
+    expect(
+      px.g,
+      greaterThan(100),
+      reason: 'half-alpha red over white must let white through',
+    );
     expect(px.g, lessThan(200));
   });
 
-  testWidgets('the fill offers the same palette as the outline colour', (tester) async {
+  testWidgets('the fill offers the same palette as the outline colour', (
+    tester,
+  ) async {
     Color? picked;
-    await _pumpFillPanel(tester,
-        fillColor: const Color(0xFF10B981),
-        onFillColorChanged: (c) => picked = c);
+    await _pumpFillPanel(
+      tester,
+      fillColor: const Color(0xFF10B981),
+      onFillColorChanged: (c) => picked = c,
+    );
 
     expect(find.text('FILL COLOUR'), findsOneWidget);
     expect(find.text('FILL OPACITY'), findsOneWidget);
@@ -159,41 +180,60 @@ void main() {
         .map((d) => d.color?.toARGB32())
         .toSet();
     for (final c in AppColors.palette) {
-      expect(circles, contains(c.toARGB32()),
-          reason: '$c must be offered as a fill');
+      expect(
+        circles,
+        contains(c.toARGB32()),
+        reason: '$c must be offered as a fill',
+      );
     }
-    expect(circles, contains(const Color(0xFF123456).toARGB32()),
-        reason: 'saved colours are offered for the fill too');
+    expect(
+      circles,
+      contains(const Color(0xFF123456).toARGB32()),
+      reason: 'saved colours are offered for the fill too',
+    );
     expect(picked, isNull);
   });
 
-  testWidgets('the fill opacity slider writes the alpha channel', (tester) async {
+  testWidgets('the fill opacity slider writes the alpha channel', (
+    tester,
+  ) async {
     Color? picked;
     // A distinctive starting alpha, so the fill slider is tellable apart from
     // the annotation-wide opacity slider, which also runs 0..1.
-    await _pumpFillPanel(tester,
-        fillColor: const Color(0xFF10B981).withValues(alpha: 0.6),
-        onFillColorChanged: (c) => picked = c);
+    await _pumpFillPanel(
+      tester,
+      fillColor: const Color(0xFF10B981).withValues(alpha: 0.6),
+      onFillColorChanged: (c) => picked = c,
+    );
 
     // The fill's transparency rides in its own colour's alpha rather than a
     // separate field, so it persists and exports with no model change.
-    final sliders = find.byType(Slider).evaluate().map((e) => e.widget as Slider);
+    final sliders = find
+        .byType(Slider)
+        .evaluate()
+        .map((e) => e.widget as Slider);
     final fillSlider = sliders.firstWhere((s) => (s.value - 0.6).abs() < 0.001);
     fillSlider.onChanged!(0.4);
     await tester.pumpAndSettle();
 
     expect(picked, isNotNull);
     expect(picked!.a, closeTo(0.4, 0.01));
-    expect(picked!.toARGB32() & 0x00FFFFFF, const Color(0xFF10B981).toARGB32() & 0x00FFFFFF,
-        reason: 'only the alpha changes; the hue is left alone');
+    expect(
+      picked!.toARGB32() & 0x00FFFFFF,
+      const Color(0xFF10B981).toARGB32() & 0x00FFFFFF,
+      reason: 'only the alpha changes; the hue is left alone',
+    );
   });
 
-  testWidgets('choosing a fill hue keeps the transparency already set',
-      (tester) async {
+  testWidgets('choosing a fill hue keeps the transparency already set', (
+    tester,
+  ) async {
     Color? picked;
-    await _pumpFillPanel(tester,
-        fillColor: const Color(0xFF10B981).withValues(alpha: 0.3),
-        onFillColorChanged: (c) => picked = c);
+    await _pumpFillPanel(
+      tester,
+      fillColor: const Color(0xFF10B981).withValues(alpha: 0.3),
+      onFillColorChanged: (c) => picked = c,
+    );
 
     // Otherwise picking a colour silently snaps the fill back to fully opaque.
     // The tooltip drops the alpha, so the outline grid carries the same label.
@@ -202,7 +242,8 @@ void main() {
     await tester.tap(
       find
           .byTooltip(
-              '#${target.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}')
+            '#${target.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
+          )
           .last,
     );
     await tester.pumpAndSettle();
@@ -211,16 +252,19 @@ void main() {
     expect(picked!.a, closeTo(0.3, 0.01));
   });
 
-  testWidgets('the fill swatches stay solid however transparent the fill is',
-      (tester) async {
+  testWidgets('the fill swatches stay solid however transparent the fill is', (
+    tester,
+  ) async {
     // The transparency belongs to the mark being edited, not to the control
     // that picks its colour: painting the swatches tinted faded the whole row
     // out as the slider came down, until choosing a colour meant guessing
     // between near-identical ghosts.
     Color? picked;
-    await _pumpFillPanel(tester,
-        fillColor: AppColors.palette.first.withValues(alpha: 0.15),
-        onFillColorChanged: (c) => picked = c);
+    await _pumpFillPanel(
+      tester,
+      fillColor: AppColors.palette.first.withValues(alpha: 0.15),
+      onFillColorChanged: (c) => picked = c,
+    );
 
     final circles = tester
         .widgetList<Container>(find.byType(Container))
@@ -232,17 +276,28 @@ void main() {
         .toList();
 
     for (final c in AppColors.palette) {
-      expect(circles.map((d) => d.toARGB32()), contains(c.toARGB32()),
-          reason: '$c must still be painted at full strength');
-      expect(circles.where((d) => d.toARGB32() == c.withValues(alpha: 0.15).toARGB32()),
-          isEmpty,
-          reason: 'no swatch may be painted at the fill transparency');
+      expect(
+        circles.map((d) => d.toARGB32()),
+        contains(c.toARGB32()),
+        reason: '$c must still be painted at full strength',
+      );
+      expect(
+        circles.where(
+          (d) => d.toARGB32() == c.withValues(alpha: 0.15).toARGB32(),
+        ),
+        isEmpty,
+        reason: 'no swatch may be painted at the fill transparency',
+      );
     }
 
     // ...but picking one still applies the transparency that is set.
-    await tester.tap(find.byTooltip(
-      '#${AppColors.palette[1].toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
-    ).last);
+    await tester.tap(
+      find
+          .byTooltip(
+            '#${AppColors.palette[1].toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
+          )
+          .last,
+    );
     await tester.pumpAndSettle();
     expect(picked, isNotNull);
     expect(picked!.a, closeTo(0.15, 0.01));

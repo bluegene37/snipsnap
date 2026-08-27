@@ -75,8 +75,15 @@ class RenderService {
     if (baseImage == null) return null;
 
     try {
-      final imageSize = Size(baseImage.width.toDouble(), baseImage.height.toDouble());
-      final hasFraming = framingPadding > 0 || cornerRadius > 0 || shadowBlur > 0 || framingGradient != null;
+      final imageSize = Size(
+        baseImage.width.toDouble(),
+        baseImage.height.toDouble(),
+      );
+      final hasFraming =
+          framingPadding > 0 ||
+          cornerRadius > 0 ||
+          shadowBlur > 0 ||
+          framingGradient != null;
 
       if (annotations.isEmpty && !hasFraming) {
         // Nothing to composite — hand back the original bytes untouched so a
@@ -84,7 +91,10 @@ class RenderService {
         return await File(imagePath).readAsBytes();
       }
 
-      final imageRect = imageRectInCanvas(imageSize: imageSize, canvasSize: canvasSize);
+      final imageRect = imageRectInCanvas(
+        imageSize: imageSize,
+        canvasSize: canvasSize,
+      );
 
       // An empty rect means the editor canvas was never laid out. Rendering
       // through it would place nothing correctly, so fail loudly instead of
@@ -102,8 +112,18 @@ class RenderService {
       final pad = framingPadding;
       final outWidth = (baseImage.width + pad * 2).round();
       final outHeight = (baseImage.height + pad * 2).round();
-      final outRect = Rect.fromLTWH(0, 0, outWidth.toDouble(), outHeight.toDouble());
-      final innerImageRect = Rect.fromLTWH(pad, pad, imageSize.width, imageSize.height);
+      final outRect = Rect.fromLTWH(
+        0,
+        0,
+        outWidth.toDouble(),
+        outHeight.toDouble(),
+      );
+      final innerImageRect = Rect.fromLTWH(
+        pad,
+        pad,
+        imageSize.width,
+        imageSize.height,
+      );
 
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder, outRect);
@@ -116,20 +136,35 @@ class RenderService {
       }
 
       if (hasFraming && shadowBlur > 0) {
-        final shadowRRect = RRect.fromRectAndRadius(innerImageRect, Radius.circular(cornerRadius));
+        final shadowRRect = RRect.fromRectAndRadius(
+          innerImageRect,
+          Radius.circular(cornerRadius),
+        );
         final shadowPaint = Paint()
           ..color = const Color(0x66000000)
           ..maskFilter = MaskFilter.blur(BlurStyle.normal, shadowBlur);
-        canvas.drawRRect(shadowRRect.shift(Offset(0, shadowBlur * 0.3)), shadowPaint);
+        canvas.drawRRect(
+          shadowRRect.shift(Offset(0, shadowBlur * 0.3)),
+          shadowPaint,
+        );
       }
 
       canvas.save();
       if (cornerRadius > 0) {
-        canvas.clipRRect(RRect.fromRectAndRadius(innerImageRect, Radius.circular(cornerRadius)));
+        canvas.clipRRect(
+          RRect.fromRectAndRadius(
+            innerImageRect,
+            Radius.circular(cornerRadius),
+          ),
+        );
       }
       canvas.translate(pad, pad);
 
-      canvas.drawImage(baseImage, Offset.zero, Paint()..filterQuality = FilterQuality.high);
+      canvas.drawImage(
+        baseImage,
+        Offset.zero,
+        Paint()..filterQuality = FilterQuality.high,
+      );
 
       // Switch into canvas (viewport) coordinates so annotation geometry can be
       // replayed verbatim through the shared renderer. The stored annotations
@@ -173,7 +208,9 @@ class RenderService {
       }
 
       try {
-        final byteData = await rendered.toByteData(format: ui.ImageByteFormat.png);
+        final byteData = await rendered.toByteData(
+          format: ui.ImageByteFormat.png,
+        );
         return byteData?.buffer.asUint8List();
       } finally {
         rendered.dispose();

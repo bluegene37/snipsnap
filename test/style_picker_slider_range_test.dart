@@ -31,30 +31,32 @@ Future<List<Slider>> _slidersFor(
   // in build(), so it needs a SnipThemeScope ancestor to pump at all — this
   // is infrastructure, not a behavioural change; the mode itself is
   // irrelevant to what these tests assert (slider clamping).
-  await tester.pumpWidget(SnipThemeScope(
-    theme: SnipTheme.forMode(SnipThemeMode.dark),
-    child: MaterialApp(
-      home: Scaffold(
-        body: StylePicker(
-          selectedColor: Colors.red,
-          onColorChanged: (_) {},
-          strokeWidth: strokeWidth,
-          onStrokeWidthChanged: (_) {},
-          opacity: opacity,
-          onOpacityChanged: (_) {},
-          fontSize: fontSize,
-          onFontSizeChanged: (_) {},
-          isFilled: false,
-          onFillChanged: (_) {},
-          borderRadius: borderRadius,
-          onBorderRadiusChanged: (_) {},
-          blurStrength: blurStrength,
-          onBlurStrengthChanged: (_) {},
-          activeTool: tool,
+  await tester.pumpWidget(
+    SnipThemeScope(
+      theme: SnipTheme.forMode(SnipThemeMode.dark),
+      child: MaterialApp(
+        home: Scaffold(
+          body: StylePicker(
+            selectedColor: Colors.red,
+            onColorChanged: (_) {},
+            strokeWidth: strokeWidth,
+            onStrokeWidthChanged: (_) {},
+            opacity: opacity,
+            onOpacityChanged: (_) {},
+            fontSize: fontSize,
+            onFontSizeChanged: (_) {},
+            isFilled: false,
+            onFillChanged: (_) {},
+            borderRadius: borderRadius,
+            onBorderRadiusChanged: (_) {},
+            blurStrength: blurStrength,
+            onBlurStrengthChanged: (_) {},
+            activeTool: tool,
+          ),
         ),
       ),
     ),
-  ));
+  );
   // Drains the harness-only layout overflow described above, which would
   // otherwise fail the test on its own. A missing clamp still fails loudly:
   // the assert fires inside `Slider`'s constructor while the children list is
@@ -69,8 +71,9 @@ void main() {
   // Shrink the window enough and any of them can land outside the slider's
   // declared range.
 
-  testWidgets('a font size below the slider minimum is clamped, not asserted',
-      (tester) async {
+  testWidgets('a font size below the slider minimum is clamped, not asserted', (
+    tester,
+  ) async {
     // 60pt stored on a 4K screenshot shown in a small window projects to well
     // under the 10pt floor.
     final sliders = await _slidersFor(
@@ -83,13 +86,15 @@ void main() {
       blurStrength: 14.0,
     );
 
-    final fontSlider =
-        sliders.singleWhere((s) => s.min == 10.0 && s.max == 60.0);
+    final fontSlider = sliders.singleWhere(
+      (s) => s.min == 10.0 && s.max == 60.0,
+    );
     expect(fontSlider.value, 10.0);
   });
 
-  testWidgets('an opacity below the slider minimum is clamped, not asserted',
-      (tester) async {
+  testWidgets('an opacity below the slider minimum is clamped, not asserted', (
+    tester,
+  ) async {
     final sliders = await _slidersFor(
       tester,
       tool: CanvasTool.text,
@@ -100,13 +105,15 @@ void main() {
       blurStrength: 14.0,
     );
 
-    final opacitySlider =
-        sliders.singleWhere((s) => s.min == 0.1 && s.max == 1.0);
+    final opacitySlider = sliders.singleWhere(
+      (s) => s.min == 0.1 && s.max == 1.0,
+    );
     expect(opacitySlider.value, 0.1);
   });
 
-  testWidgets('no slider is ever fed a value outside its own range',
-      (tester) async {
+  testWidgets('no slider is ever fed a value outside its own range', (
+    tester,
+  ) async {
     // The general invariant, so a slider added later is covered too. Every
     // scalar is pushed past both ends of its range at once.
     for (final tool in const [
@@ -127,10 +134,16 @@ void main() {
         );
         expect(sliders, isNotEmpty, reason: 'tool=$tool extreme=$extreme');
         for (final s in sliders) {
-          expect(s.value, greaterThanOrEqualTo(s.min),
-              reason: 'tool=$tool extreme=$extreme');
-          expect(s.value, lessThanOrEqualTo(s.max),
-              reason: 'tool=$tool extreme=$extreme');
+          expect(
+            s.value,
+            greaterThanOrEqualTo(s.min),
+            reason: 'tool=$tool extreme=$extreme',
+          );
+          expect(
+            s.value,
+            lessThanOrEqualTo(s.max),
+            reason: 'tool=$tool extreme=$extreme',
+          );
         }
       }
     }

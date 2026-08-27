@@ -28,16 +28,18 @@ class DatabaseService {
       final annRows = await db.getAnnotationsForCapture(row.id);
       final parsed = _annotationsFor(annRows);
 
-      items.add(CaptureItem(
-        id: row.id,
-        filePath: row.filePath,
-        title: row.title,
-        createdAt: row.createdAt,
-        width: row.width,
-        height: row.height,
-        annotations: parsed.annotations,
-        annotationsNeedConversion: parsed.needsConversion,
-      ));
+      items.add(
+        CaptureItem(
+          id: row.id,
+          filePath: row.filePath,
+          title: row.title,
+          createdAt: row.createdAt,
+          width: row.width,
+          height: row.height,
+          annotations: parsed.annotations,
+          annotationsNeedConversion: parsed.needsConversion,
+        ),
+      );
     }
     return items;
   }
@@ -85,14 +87,16 @@ class DatabaseService {
   /// guard lives. Placing it here rather than at the call sites means no
   /// present or future caller can bypass it.
   static Future<void> saveCaptureToDb(CaptureItem item) async {
-    await db.insertOrUpdateCapture(CapturesCompanion(
-      id: Value(item.id),
-      filePath: Value(item.filePath),
-      title: Value(item.title),
-      createdAt: Value(item.createdAt),
-      width: Value(item.width),
-      height: Value(item.height),
-    ));
+    await db.insertOrUpdateCapture(
+      CapturesCompanion(
+        id: Value(item.id),
+        filePath: Value(item.filePath),
+        title: Value(item.title),
+        createdAt: Value(item.createdAt),
+        width: Value(item.width),
+        height: Value(item.height),
+      ),
+    );
 
     // The capture row above is coordinate-space-free metadata (path, title,
     // recovered pixel dimensions) and is always safe to refresh — recovered
@@ -128,7 +132,8 @@ class DatabaseService {
   }
 
   /// Load custom shortcuts from Drift SQLite DB
-  static Future<Map<AppShortcutAction, CustomShortcut>> loadShortcutsFromDb() async {
+  static Future<Map<AppShortcutAction, CustomShortcut>>
+  loadShortcutsFromDb() async {
     final rows = await db.getAllShortcuts();
     final map = <AppShortcutAction, CustomShortcut>{};
 
@@ -151,17 +156,21 @@ class DatabaseService {
   }
 
   /// Save shortcuts to Drift SQLite DB
-  static Future<void> saveShortcutsToDb(Map<AppShortcutAction, CustomShortcut> shortcuts) async {
+  static Future<void> saveShortcutsToDb(
+    Map<AppShortcutAction, CustomShortcut> shortcuts,
+  ) async {
     final companions = shortcuts.values
-        .map((s) => ShortcutsCompanion(
-              action: Value(s.action.name),
-              keyId: Value(s.keyId),
-              keyLabel: Value(s.keyLabel),
-              meta: Value(s.meta),
-              ctrl: Value(s.ctrl),
-              shift: Value(s.shift),
-              alt: Value(s.alt),
-            ))
+        .map(
+          (s) => ShortcutsCompanion(
+            action: Value(s.action.name),
+            keyId: Value(s.keyId),
+            keyLabel: Value(s.keyLabel),
+            meta: Value(s.meta),
+            ctrl: Value(s.ctrl),
+            shift: Value(s.shift),
+            alt: Value(s.alt),
+          ),
+        )
         .toList();
     await db.saveAllShortcuts(companions);
   }
@@ -202,7 +211,12 @@ class DatabaseService {
       try {
         final list = jsonDecode(a.pointsJson!) as List<dynamic>;
         points = list
-            .map((p) => Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()))
+            .map(
+              (p) => Offset(
+                (p['x'] as num).toDouble(),
+                (p['y'] as num).toDouble(),
+              ),
+            )
             .toList();
       } catch (e) {
         debugPrint('SnipSnap DB error: $e');
@@ -219,15 +233,21 @@ class DatabaseService {
       text: a.textContent,
       stepNumber: a.stepNumber != 0 ? a.stepNumber : null,
       points: points,
-      startPoint: a.startX != null && a.startY != null ? Offset(a.startX!, a.startY!) : null,
-      endPoint: a.endX != null && a.endY != null ? Offset(a.endX!, a.endY!) : null,
+      startPoint: a.startX != null && a.startY != null
+          ? Offset(a.startX!, a.startY!)
+          : null,
+      endPoint: a.endX != null && a.endY != null
+          ? Offset(a.endX!, a.endY!)
+          : null,
       opacity: a.opacity ?? 1.0,
     );
 
     // v3+ rows carry every extra property in one blob.
     if (a.propsJson != null && a.propsJson!.isNotEmpty) {
       try {
-        annotation = annotation.withPropsJson(jsonDecode(a.propsJson!) as Map<String, dynamic>);
+        annotation = annotation.withPropsJson(
+          jsonDecode(a.propsJson!) as Map<String, dynamic>,
+        );
       } catch (e) {
         debugPrint('SnipSnap DB error: $e');
       }
@@ -245,8 +265,9 @@ class DatabaseService {
                   (map['b'] as num).toDouble(),
                 )
               : null,
-          backgroundColor:
-              map.containsKey('bgColor') ? Color(map['bgColor'] as int) : null,
+          backgroundColor: map.containsKey('bgColor')
+              ? Color(map['bgColor'] as int)
+              : null,
           rotation: (map['rot'] as num?)?.toDouble(),
         );
       } catch (e) {
@@ -278,9 +299,11 @@ class DatabaseService {
       isFilled: Value(a.fill),
       textContent: Value(a.text),
       stepNumber: Value(a.stepNumber ?? 0),
-      pointsJson: Value(a.points.isEmpty
-          ? null
-          : jsonEncode(a.points.map((p) => {'x': p.dx, 'y': p.dy}).toList())),
+      pointsJson: Value(
+        a.points.isEmpty
+            ? null
+            : jsonEncode(a.points.map((p) => {'x': p.dx, 'y': p.dy}).toList()),
+      ),
       propsJson: Value(jsonEncode(a.toPropsJson())),
       createdAt: Value(DateTime.now()),
       startX: Value(a.startPoint?.dx),

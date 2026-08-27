@@ -23,23 +23,25 @@ void main() {
   tearDown(() async => db.close());
 
   Future<void> seed(String id, String path) async {
-    await DatabaseService.saveCaptureToDb(CaptureItem(
-      id: id,
-      filePath: path,
-      title: id,
-      createdAt: DateTime.now(),
-      width: 100,
-      height: 80,
-      annotations: [
-        Annotation(
-          id: '$id-a1',
-          tool: CanvasTool.line,
-          color: const Color(0xFF000000),
-          startPoint: const Offset(1, 2),
-          endPoint: const Offset(3, 4),
-        ),
-      ],
-    ));
+    await DatabaseService.saveCaptureToDb(
+      CaptureItem(
+        id: id,
+        filePath: path,
+        title: id,
+        createdAt: DateTime.now(),
+        width: 100,
+        height: 80,
+        annotations: [
+          Annotation(
+            id: '$id-a1',
+            tool: CanvasTool.line,
+            color: const Color(0xFF000000),
+            startPoint: const Offset(1, 2),
+            endPoint: const Offset(3, 4),
+          ),
+        ],
+      ),
+    );
   }
 
   test('deleting a capture removes its row and its annotations', () async {
@@ -57,31 +59,39 @@ void main() {
     final remaining = await db.getAllCaptures();
     expect(remaining.map((c) => c.id), ['keep']);
     expect(await db.getAnnotationsForCapture('drop'), isEmpty);
-    expect(await db.getAnnotationsForCapture('keep'), hasLength(1),
-        reason: 'the surviving capture keeps its markup');
+    expect(
+      await db.getAnnotationsForCapture('keep'),
+      hasLength(1),
+      reason: 'the surviving capture keeps its markup',
+    );
   });
 
-  test('saveHistory alone cannot delete, so the delete call is load-bearing',
-      () async {
-    // Pins the reason the fix was needed rather than the fix itself: if
-    // `saveHistory` ever grew the ability to prune, the extra delete would be
-    // redundant and this test says so out loud.
-    await seed('keep', '/tmp/keep.png');
-    await seed('drop', '/tmp/drop.png');
+  test(
+    'saveHistory alone cannot delete, so the delete call is load-bearing',
+    () async {
+      // Pins the reason the fix was needed rather than the fix itself: if
+      // `saveHistory` ever grew the ability to prune, the extra delete would be
+      // redundant and this test says so out loud.
+      await seed('keep', '/tmp/keep.png');
+      await seed('drop', '/tmp/drop.png');
 
-    await StorageService.saveHistory([
-      CaptureItem(
-        id: 'keep',
-        filePath: '/tmp/keep.png',
-        title: 'keep',
-        createdAt: DateTime.now(),
-        width: 100,
-        height: 80,
-      ),
-    ]);
+      await StorageService.saveHistory([
+        CaptureItem(
+          id: 'keep',
+          filePath: '/tmp/keep.png',
+          title: 'keep',
+          createdAt: DateTime.now(),
+          width: 100,
+          height: 80,
+        ),
+      ]);
 
-    expect((await db.getAllCaptures()).map((c) => c.id), containsAll(['keep', 'drop']));
-  });
+      expect(
+        (await db.getAllCaptures()).map((c) => c.id),
+        containsAll(['keep', 'drop']),
+      );
+    },
+  );
 
   test('the gallery delete handler calls through to the database', () {
     // Source-level, because the handler is an inline closure on `GallerySidebar`

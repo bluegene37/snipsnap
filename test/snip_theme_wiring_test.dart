@@ -22,10 +22,9 @@ String _src(String path) => File(path).readAsStringSync();
 /// `lib/main.dart`'s comment says the word "MaterialApp" nine times while
 /// building none. Matching raw source would fail on the explanation rather
 /// than on the code.
-String _code(String path) => _src(path)
-    .split('\n')
-    .where((l) => !l.trimLeft().startsWith('//'))
-    .join('\n');
+String _code(String path) => _src(
+  path,
+).split('\n').where((l) => !l.trimLeft().startsWith('//')).join('\n');
 
 void main() {
   test('the app is wrapped in a SnipThemeScope', () {
@@ -48,31 +47,40 @@ void main() {
     expect(
       source,
       isNot(contains('MaterialApp(')),
-      reason: 'lib/main.dart must hand MainScreen straight to runApp — '
+      reason:
+          'lib/main.dart must hand MainScreen straight to runApp — '
           'MainScreen builds the app\'s only MaterialApp, below SnipThemeScope',
     );
     expect(source, contains('runApp(const MainScreen())'));
   });
 
-  test('main_screen opens dialogs from a context inside its own MaterialApp', () {
-    // The other half of the same fix. `_MainScreenState.context` sits above
-    // the MaterialApp that its own build() mounts, so once main.dart stopped
-    // supplying an outer app there was no Navigator and no
-    // MaterialLocalizations above it at all — showDialog asserts
-    // `No MaterialLocalizations found` before it even reaches the navigator.
-    // Every showDialog call here must therefore go through the navigatorKey.
-    final source = _code('lib/views/main_screen.dart');
-    expect(source, contains('navigatorKey: _navigatorKey'));
-    expect(
-      source,
-      isNot(contains('context: context,')),
-      reason: 'showDialog must take _dialogContext (the navigator\'s own '
-          'context), never this State\'s context',
-    );
-    expect(RegExp(r'context: _dialogContext!,').allMatches(source).length, 3,
-        reason: 'all three showDialog call sites (About, Keyboard Shortcuts, '
-            'Save As) must route through the navigator context');
-  });
+  test(
+    'main_screen opens dialogs from a context inside its own MaterialApp',
+    () {
+      // The other half of the same fix. `_MainScreenState.context` sits above
+      // the MaterialApp that its own build() mounts, so once main.dart stopped
+      // supplying an outer app there was no Navigator and no
+      // MaterialLocalizations above it at all — showDialog asserts
+      // `No MaterialLocalizations found` before it even reaches the navigator.
+      // Every showDialog call here must therefore go through the navigatorKey.
+      final source = _code('lib/views/main_screen.dart');
+      expect(source, contains('navigatorKey: _navigatorKey'));
+      expect(
+        source,
+        isNot(contains('context: context,')),
+        reason:
+            'showDialog must take _dialogContext (the navigator\'s own '
+            'context), never this State\'s context',
+      );
+      expect(
+        RegExp(r'context: _dialogContext!,').allMatches(source).length,
+        3,
+        reason:
+            'all three showDialog call sites (About, Keyboard Shortcuts, '
+            'Save As) must route through the navigator context',
+      );
+    },
+  );
 
   test('main_screen no longer hardcodes the violet accent', () {
     final source = _src('lib/views/main_screen.dart');

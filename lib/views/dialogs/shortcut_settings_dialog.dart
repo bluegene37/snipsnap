@@ -65,7 +65,8 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
       }
 
       // Check if pressed key is only a modifier
-      final isModifier = key == LogicalKeyboardKey.meta ||
+      final isModifier =
+          key == LogicalKeyboardKey.meta ||
           key == LogicalKeyboardKey.metaLeft ||
           key == LogicalKeyboardKey.metaRight ||
           key == LogicalKeyboardKey.control ||
@@ -106,7 +107,8 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
       // shortcut that silently does nothing and blames the app.
       if (ShortcutService.isReservedBySystem(newShortcut)) {
         setState(() {
-          _errorMessage = 'The system already uses this shortcut. Pick another.';
+          _errorMessage =
+              'The system already uses this shortcut. Pick another.';
         });
         return;
       }
@@ -128,7 +130,8 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
 
       if (conflictingAction != null) {
         setState(() {
-          _errorMessage = 'Shortcut conflicts with "${conflictingAction!.displayName}"!';
+          _errorMessage =
+              'Shortcut conflicts with "${conflictingAction!.displayName}"!';
         });
       } else {
         setState(() {
@@ -217,7 +220,10 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
               if (_errorMessage != null)
                 Container(
                   margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     // A shortcut conflict is an error state — the danger
                     // token, never an inline red, is this design's one
@@ -229,12 +235,20 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.warning_amber_rounded, color: t.danger, size: 18),
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        color: t.danger,
+                        size: 18,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
-                          style: TextStyle(color: t.ink, fontSize: 12, fontWeight: FontWeight.w500),
+                          style: TextStyle(
+                            color: t.ink,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
                     ],
@@ -245,14 +259,18 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
               Expanded(
                 child: ListView.separated(
                   itemCount: AppShortcutAction.values.length,
-                  separatorBuilder: (ctx, index) => Divider(color: t.border, height: 1),
+                  separatorBuilder: (ctx, index) =>
+                      Divider(color: t.border, height: 1),
                   itemBuilder: (ctx, index) {
                     final action = AppShortcutAction.values[index];
                     final shortcut = _shortcuts[action]!;
                     final isEditing = _editingAction == action;
 
                     return Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 10,
+                        horizontal: 8,
+                      ),
                       // The row currently awaiting a hotkey press is a
                       // highlight, not the app's exclusive-active control
                       // (controlDecoration's non-exclusive shape gives the
@@ -263,7 +281,9 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                       decoration: BoxDecoration(
                         color: isEditing ? t.selectedFill : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
-                        border: isEditing ? Border.all(color: t.borderStrong, width: 1.5) : null,
+                        border: isEditing
+                            ? Border.all(color: t.borderStrong, width: 1.5)
+                            : null,
                       ),
                       child: Row(
                         children: [
@@ -301,7 +321,10 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                           // Shortcut display pills
                           if (isEditing)
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
                               decoration: BoxDecoration(
                                 // The one thing actively happening right
                                 // now (awaiting a keypress) — the exclusive
@@ -342,11 +365,17 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: t.inkMuted,
                                 side: BorderSide(color: t.border),
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
                                 minimumSize: const Size(60, 32),
                               ),
                               onPressed: _cancelEditing,
-                              child: const Text('Cancel', style: TextStyle(fontSize: 11)),
+                              child: const Text(
+                                'Cancel',
+                                style: TextStyle(fontSize: 11),
+                              ),
                             )
                           else
                             ElevatedButton(
@@ -354,14 +383,23 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                                 backgroundColor: t.surfaceRaised,
                                 foregroundColor: t.ink,
                                 elevation: 0,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
                                 minimumSize: const Size(60, 32),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                               ),
                               onPressed: () => _startEditing(action),
-                              child: const Text('Edit', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                              child: const Text(
+                                'Edit',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
                         ],
                       ),
@@ -379,11 +417,12 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   TextButton.icon(
-                    style: TextButton.styleFrom(
-                      foregroundColor: t.inkMuted,
-                    ),
+                    style: TextButton.styleFrom(foregroundColor: t.inkMuted),
                     icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Reset Defaults', style: TextStyle(fontSize: 12)),
+                    label: const Text(
+                      'Reset Defaults',
+                      style: TextStyle(fontSize: 12),
+                    ),
                     onPressed: _resetDefaults,
                   ),
                   Row(
@@ -392,7 +431,10 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                         style: OutlinedButton.styleFrom(
                           foregroundColor: t.inkMuted,
                           side: BorderSide(color: t.border),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
                         ),
                         onPressed: () => Navigator.of(context).pop(),
                         child: const Text('Cancel'),
@@ -405,14 +447,20 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
                           backgroundColor: t.surfaceRaised,
                           foregroundColor: t.emphasis,
                           side: BorderSide(color: t.emphasis, width: 1.2),
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 10,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
                           elevation: 0,
                         ),
                         onPressed: _saveAndClose,
-                        child: const Text('Save Shortcuts', style: TextStyle(fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'Save Shortcuts',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ],
                   ),
@@ -438,37 +486,39 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: keys
-          .map((k) => Container(
-                margin: const EdgeInsets.only(left: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: t.surfaceRaised,
-                  borderRadius: BorderRadius.circular(5),
-                  border: Border.all(color: t.border),
-                  // Decorative elevation shadow under a kbd-style badge,
-                  // sitting on this dialog's own t.surface/t.surfaceRaised
-                  // panel chrome (not arbitrary image content) — kept a
-                  // fixed, mode-invariant literal like the app's other
-                  // incidental drop shadows (e.g. OcrResultPanel's own
-                  // boxShadow below).
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 2,
-                      offset: Offset(0, 1),
-                    )
-                  ],
-                ),
-                child: Text(
-                  k,
-                  style: TextStyle(
-                    color: t.ink,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace',
+          .map(
+            (k) => Container(
+              margin: const EdgeInsets.only(left: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: t.surfaceRaised,
+                borderRadius: BorderRadius.circular(5),
+                border: Border.all(color: t.border),
+                // Decorative elevation shadow under a kbd-style badge,
+                // sitting on this dialog's own t.surface/t.surfaceRaised
+                // panel chrome (not arbitrary image content) — kept a
+                // fixed, mode-invariant literal like the app's other
+                // incidental drop shadows (e.g. OcrResultPanel's own
+                // boxShadow below).
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 2,
+                    offset: Offset(0, 1),
                   ),
+                ],
+              ),
+              child: Text(
+                k,
+                style: TextStyle(
+                  color: t.ink,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'monospace',
                 ),
-              ))
+              ),
+            ),
+          )
           .toList(),
     );
   }

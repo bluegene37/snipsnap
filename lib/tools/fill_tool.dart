@@ -24,10 +24,7 @@ class FillToolHandler extends ToolHandler {
     // can shadow large areas of the screenshot. Falling through to the bitmap
     // flood fill matches what the user is pointing at: the pixels.
     if (hit != null && hit.tool == CanvasTool.shape) {
-      final updated = hit.copyWith(
-        fill: true,
-        fillColor: delegate.activeColor,
-      );
+      final updated = hit.copyWith(fill: true, fillColor: delegate.activeColor);
       delegate.updateAnnotation(hit.id, updated);
       delegate.onSelectedAnnotationIdChanged(hit.id);
     } else {
