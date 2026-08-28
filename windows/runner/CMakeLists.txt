@@ -21,6 +21,12 @@ add_executable(${BINARY_NAME} WIN32
 # that need different build settings.
 apply_standard_settings(${BINARY_NAME})
 
+# C++/WinRT (ocr_handler.cpp) needs coroutine support. Under the standard
+# settings' C++17 it reaches for <experimental/coroutine>, which MSVC 14.51+
+# rejects outright (STL1011); C++20 gives it the standard <coroutine> instead.
+# Overrides the cxx_std_17 from apply_standard_settings for this target only.
+target_compile_features(${BINARY_NAME} PRIVATE cxx_std_20)
+
 # Add preprocessor definitions for the build version.
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MAJOR=${FLUTTER_VERSION_MAJOR}")
