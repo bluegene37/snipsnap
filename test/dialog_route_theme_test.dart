@@ -148,7 +148,7 @@ void main() {
       );
 
       expect(find.byType(AboutSnipSnapDialog), findsOneWidget);
-      expect(find.text('snipsnap'), findsOneWidget);
+      expect(find.text('SnipSnap'), findsOneWidget);
       // Proof it resolved the scope rather than merely mounting: this colour
       // can only have come from SnipTheme.of inside the route.
       expect(
@@ -280,7 +280,7 @@ void main() {
       // the OUTER navigator — above the scope. And SnipThemeScope is an
       // InheritedWidget, not an InheritedTheme, so InheritedTheme.capture
       // does not carry it across the route either.
-      expect(find.text('snipsnap'), findsNothing);
+      expect(find.text('SnipSnap'), findsNothing);
       expect(error, isNotNull);
       expect('$error', contains('No SnipThemeScope found in the widget tree'));
     });
@@ -300,7 +300,7 @@ void main() {
       // mounts, so once nothing else supplies a root app there is no
       // Navigator and no MaterialLocalizations to be found. Hence the
       // navigatorKey in main_screen.dart: the fix is two halves, not one.
-      expect(find.text('snipsnap'), findsNothing);
+      expect(find.text('SnipSnap'), findsNothing);
       expect(error, isNotNull);
       expect('$error', contains('No MaterialLocalizations found'));
     });
@@ -316,7 +316,7 @@ void main() {
         ),
       );
 
-      expect(find.text('snipsnap'), findsNothing);
+      expect(find.text('SnipSnap'), findsNothing);
       expect(error, isNotNull);
       expect('$error', contains('No SnipThemeScope found in the widget tree'));
     });

@@ -176,7 +176,7 @@ class HeaderBar extends StatelessWidget {
         if (showText) ...[
           const SizedBox(width: 9),
           Text(
-            'snipsnap',
+            'SnipSnap',
             style: TextStyle(
               color: t.ink,
               fontSize: 17,
@@ -512,7 +512,7 @@ class HeaderBar extends StatelessWidget {
           t.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
           t.isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
         ),
-        _overflowItem(t, 'about', Icons.info_outline_rounded, 'About snipsnap'),
+        _overflowItem(t, 'about', Icons.info_outline_rounded, 'About SnipSnap'),
       ],
       child: Container(
         width: 36,

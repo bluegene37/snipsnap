@@ -36,7 +36,7 @@ $pubspec = Get-Content (Join-Path $RepoRoot 'pubspec.yaml') -Raw
 $match = [regex]::Match($pubspec, '(?m)^version:\s*(\d+\.\d+\.\d+)(?:\+(\d+))?')
 if (-not $match.Success) { throw 'Could not parse "version:" from pubspec.yaml' }
 $Version = $match.Groups[1].Value
-Write-Host "    snipsnap $Version"
+Write-Host "    SnipSnap $Version"
 
 # --- 2. Build ----------------------------------------------------------------
 if ($SkipFlutterBuild) {

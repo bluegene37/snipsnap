@@ -41,7 +41,7 @@ Uint8List? floodFillPng(FloodFillRequest req) {
   return Uint8List.fromList(img.encodePng(image));
 }
 
-/// Clean, high-performance bitmap operations for Snipsnap (Fill, Selection, Crop/Expand).
+/// Clean, high-performance bitmap operations for SnipSnap (Fill, Selection, Crop/Expand).
 class ImageOperations {
   const ImageOperations._();
 

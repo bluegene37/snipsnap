@@ -42,7 +42,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1360, 850);
-  if (!window.Create(L"snipsnap", origin, size)) {
+  if (!window.Create(L"SnipSnap", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

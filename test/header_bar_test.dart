@@ -71,7 +71,7 @@ void main() {
 
     await tester.pumpWidget(_harness(width: 1440));
 
-    expect(find.text('snipsnap'), findsOneWidget);
+    expect(find.text('SnipSnap'), findsOneWidget);
     expect(find.text('Snip'), findsOneWidget);
     expect(find.text('Open'), findsOneWidget);
     expect(find.text('Copy'), findsOneWidget);

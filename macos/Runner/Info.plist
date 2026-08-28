@@ -35,6 +35,6 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>snipsnap needs screen recording access to capture and annotate the content you select on screen. Captures stay on this Mac.</string>
+	<string>SnipSnap needs screen recording access to capture and annotate the content you select on screen. Captures stay on this Mac.</string>
 </dict>
 </plist>

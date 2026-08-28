@@ -1288,7 +1288,7 @@ class _MainScreenState extends State<MainScreen> {
     if (await _captureService.hasScreenCapturePermission()) return true;
     if (!mounted) return false;
     _showToast(
-      'snipsnap needs Screen Recording access. Grant it in System '
+      'SnipSnap needs Screen Recording access. Grant it in System '
       'Settings > Privacy & Security, then relaunch the app.',
     );
     return false;
@@ -1879,7 +1879,7 @@ class _MainScreenState extends State<MainScreen> {
       child: MaterialApp(
         navigatorKey: _navigatorKey,
         scaffoldMessengerKey: _scaffoldMessengerKey,
-        title: 'snipsnap - Screen Capture & Markup',
+        title: 'SnipSnap - Screen Capture & Markup',
         debugShowCheckedModeBanner: false,
         theme: snipThemeData(theme),
         home: Scaffold(

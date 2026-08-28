@@ -3349,7 +3349,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
             ),
             const SizedBox(height: 20),
             Text(
-              'Welcome to snipsnap',
+              'Welcome to SnipSnap',
               style: TextStyle(
                 color: t.ink,
                 fontSize: 22,

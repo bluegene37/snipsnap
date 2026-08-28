@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=snipsnap
+Name=SnipSnap
 Comment=Screen capture, annotation, and OCR
 Exec=snipsnap
 Icon=dev.genexis.snipsnap
