@@ -1,0 +1,5 @@
+# Check text files out as LF on every platform. Windows CI runners ship with
+# core.autocrlf=true, and a CRLF checkout breaks the source-scanning tests
+# that anchor on '\n'-delimited method bodies (they read lib/ sources with
+# indexOf('\n  }') and friends).
+* text=auto eol=lf

@@ -32,7 +32,12 @@ Future<Directory> _bootApp(WidgetTester tester) async {
       );
   final db = AppDatabase(NativeDatabase.memory());
   DatabaseService.db = db;
-  addTearDown(db.close);
+  // Deliberately never closed. flutter_test keeps the widget tree mounted
+  // after a test body ends; the NEXT test's pumpWidget is what unmounts this
+  // MainScreen, and its dispose() saves the active capture to this database.
+  // A tearDown close therefore races that save and surfaces as
+  // "Can't re-open a database after closing it" in the following test.
+  // The in-memory database is reclaimed when the test isolate exits.
 
   final captures = Directory('${dir.path}/SnipSnap/Captures')
     ..createSync(recursive: true);

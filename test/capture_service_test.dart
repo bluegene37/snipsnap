@@ -6,6 +6,14 @@ import 'package:snipsnap/services/capture_service.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  // The capture flows below assert on the `snipsnap/capture` method channel,
+  // which only the macOS branch of CaptureService uses. On Windows and Linux
+  // the service shells out to real OS tools (PowerShell / gnome-screenshot),
+  // so on those hosts the tests would launch actual capture UIs and hang.
+  final skipOffMacOS = Platform.isMacOS
+      ? null
+      : 'CaptureService only routes through the native channel on macOS';
+
   late CaptureService captureService;
   late Directory tempDir;
   final List<MethodCall> methodCalls = [];
@@ -78,6 +86,7 @@ void main() {
       expect(methodCalls.first.method, 'captureInteractive');
       expect(methodCalls.first.arguments, isA<Map<dynamic, dynamic>>());
     },
+    skip: skipOffMacOS,
   );
 
   test(
@@ -90,6 +99,7 @@ void main() {
       expect(methodCalls.length, 1);
       expect(methodCalls.first.method, 'captureInteractive');
     },
+    skip: skipOffMacOS,
   );
 
   test(
@@ -103,6 +113,7 @@ void main() {
       expect(methodCalls.length, 1);
       expect(methodCalls.first.method, 'captureFullScreen');
     },
+    skip: skipOffMacOS,
   );
 
   test('importImage copies external image into storage directory', () async {
