@@ -272,4 +272,56 @@ void main() {
     await tester.tap(themeButtonFinder);
     expect(toggled, isTrue);
   });
+
+  testWidgets('overflow menu triggers onOpenUserManual', (tester) async {
+    tester.view.physicalSize = const Size(1440, 700);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    bool manualOpened = false;
+    await tester.pumpWidget(
+      SnipThemeScope(
+        theme: SnipTheme.forMode(SnipThemeMode.dark),
+        child: MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 1440,
+              child: HeaderBar(
+                onSnipInteractive: () {},
+                onImportImage: () {},
+                onUndo: () {},
+                onRedo: () {},
+                onClear: () {},
+                onCopyToClipboard: () {},
+                onSaveAs: () {},
+                onToggleSidebar: () {},
+                onToggleThemeMode: () {},
+                onOpenShortcutSettings: () {},
+                onOpenAboutDialog: () {},
+                onOpenUserManual: () => manualOpened = true,
+                canUndo: false,
+                canRedo: false,
+                isSidebarOpen: true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final moreFinder = find.byTooltip('More Options');
+    expect(moreFinder, findsOneWidget);
+
+    await tester.tap(moreFinder);
+    await tester.pumpAndSettle();
+
+    final manualOptionFinder = find.text('User Guide & Manual (F1)');
+    expect(manualOptionFinder, findsOneWidget);
+
+    await tester.tap(manualOptionFinder);
+    await tester.pumpAndSettle();
+
+    expect(manualOpened, isTrue);
+  });
 }
+

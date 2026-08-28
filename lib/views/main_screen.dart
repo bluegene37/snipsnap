@@ -35,6 +35,7 @@ import 'components/update_gate.dart';
 import 'dialogs/about_dialog.dart';
 import 'dialogs/save_as_dialog.dart';
 import 'dialogs/shortcut_settings_dialog.dart';
+import 'dialogs/user_manual_dialog.dart';
 import 'editor_canvas.dart';
 import 'gallery_sidebar.dart';
 
@@ -595,6 +596,30 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  void _openUserManualDialog([String? initialTopic]) {
+    final topic = initialTopic ?? switch (_activeTool) {
+      CanvasTool.ocr => 'ocr_text',
+      CanvasTool.arrow ||
+      CanvasTool.shape ||
+      CanvasTool.line ||
+      CanvasTool.pen ||
+      CanvasTool.highlight ||
+      CanvasTool.text ||
+      CanvasTool.stepMarker ||
+      CanvasTool.blur ||
+      CanvasTool.ruler ||
+      CanvasTool.fill ||
+      CanvasTool.colorPicker => 'annotation_tools',
+      _ => 'getting_started',
+    };
+
+    UserManualDialog.show(
+      _dialogContext!,
+      initialTopicId: topic,
+      onOpenShortcuts: _openShortcutSettingsDialog,
+    );
+  }
+
   int _findMaxStepNumber(List<Annotation> anns) {
     int maxStep = 0;
     for (final a in anns) {
@@ -887,6 +912,21 @@ class _MainScreenState extends State<MainScreen> {
         };
       }
     }
+
+    // Help & Manual shortcuts (F1, Cmd+?, Ctrl+?)
+    bindings[const SingleActivator(LogicalKeyboardKey.f1)] = () {
+      if (_isTextFieldFocused) return;
+      _openUserManualDialog();
+    };
+    bindings[const SingleActivator(LogicalKeyboardKey.slash, meta: true, shift: true)] = () {
+      if (_isTextFieldFocused) return;
+      _openUserManualDialog();
+    };
+    bindings[const SingleActivator(LogicalKeyboardKey.slash, control: true, shift: true)] = () {
+      if (_isTextFieldFocused) return;
+      _openUserManualDialog();
+    };
+
     _shortcutBindingsCache = bindings;
     _shortcutBindingsKey = key;
     return bindings;
@@ -1925,6 +1965,7 @@ class _MainScreenState extends State<MainScreen> {
                       onOpenShortcutSettings: _openShortcutSettingsDialog,
                       onToggleThemeMode: _toggleThemeMode,
                       onOpenAboutDialog: _openAboutDialog,
+                      onOpenUserManual: _openUserManualDialog,
                       canUndo: _undoStack.isNotEmpty,
                       canRedo: _redoStack.isNotEmpty,
                       canClear: _annotations.isNotEmpty,

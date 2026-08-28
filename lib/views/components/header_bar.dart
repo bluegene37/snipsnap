@@ -33,6 +33,7 @@ class HeaderBar extends StatelessWidget {
   final VoidCallback onOpenShortcutSettings;
   final VoidCallback onToggleThemeMode;
   final VoidCallback onOpenAboutDialog;
+  final VoidCallback? onOpenUserManual;
   final bool canUndo;
   final bool canRedo;
   final bool canClear;
@@ -66,6 +67,7 @@ class HeaderBar extends StatelessWidget {
     required this.onOpenShortcutSettings,
     required this.onToggleThemeMode,
     required this.onOpenAboutDialog,
+    this.onOpenUserManual,
     required this.canUndo,
     required this.canRedo,
     this.canClear = false,
@@ -505,12 +507,20 @@ class HeaderBar extends StatelessWidget {
         side: BorderSide(color: t.border),
       ),
       onSelected: (val) => switch (val) {
+        'manual' => onOpenUserManual?.call(),
         'shortcuts' => onOpenShortcutSettings(),
         'theme' => onToggleThemeMode(),
         'about' => onOpenAboutDialog(),
         _ => null,
       },
       itemBuilder: (ctx) => [
+        if (onOpenUserManual != null)
+          _overflowItem(
+            t,
+            'manual',
+            Icons.menu_book_rounded,
+            'User Guide & Manual (F1)',
+          ),
         _overflowItem(
           t,
           'shortcuts',
@@ -551,12 +561,16 @@ class HeaderBar extends StatelessWidget {
         children: [
           Icon(icon, size: 18, color: t.ink),
           const SizedBox(width: 10),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: t.ink,
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: t.ink,
+              ),
             ),
           ),
         ],
