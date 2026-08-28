@@ -31,6 +31,7 @@ dependencies:
   hotkey_manager: ^0.2.3
   drift: ^2.34.3
   sqlite3_flutter_libs: ^0.6.0+eol
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:

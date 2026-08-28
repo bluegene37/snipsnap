@@ -38,8 +38,11 @@ When bumping the version, also update:
 
 1. `pubspec.yaml` → `msix_config.msix_version` — four segments, `<version>.0`
    (e.g. `1.2.0` → `1.2.0.0`).
-2. `lib/views/dialogs/about_dialog.dart` — the hardcoded
-   `'Version 1.0.0 (Build 1)'` string (asserted by `test/about_dialog_test.dart`).
+2. `lib/app_info.dart` → `AppInfo.appVersion` / `AppInfo.appBuild` — the
+   in-app constants behind the About dialog **and the in-app update
+   checker**. `test/update/app_info_test.dart` fails if they drift from
+   `pubspec.yaml`. If `appVersion` lags, the shipped app re-offers the very
+   release the user is already running.
 
 Rules:
 
@@ -54,7 +57,7 @@ Rules:
 1. **Bump Version & Update References**
    - Update `version:` in `pubspec.yaml` (e.g. `1.0.0+1`).
    - Update `msix_config.msix_version` in `pubspec.yaml` (e.g. `1.0.0.0`).
-   - Update the version string in `lib/views/dialogs/about_dialog.dart`.
+   - Update `AppInfo.appVersion` / `AppInfo.appBuild` in `lib/app_info.dart`.
 
 2. **Verify Locally**
    ```bash
@@ -65,7 +68,7 @@ Rules:
 
 3. **Commit & Push Changes**
    ```bash
-   git add pubspec.yaml lib/views/dialogs/about_dialog.dart
+   git add pubspec.yaml lib/app_info.dart
    git commit -m "chore(release): bump version to 1.0.0"
    git push origin main
    ```
@@ -84,6 +87,35 @@ Rules:
 |---|---|---|
 | Windows Installer (`.exe`) | `dart run inno_bundle:build --release --no-app` | `build/windows/x64/installer/Release/snipsnap-1.0.0-windows-installer.exe` |
 | macOS Disk Image (`.dmg`) | `scripts/build_macos_dmg.sh` | `build/macos/snipsnap-1.0.0.dmg` |
+
+## In-App Update Checker Contract
+
+The app checks `https://api.github.com/repos/bluegene37/snipsnap/releases/latest`
+on startup (throttled to once per 24 h) and via the header's "Check for
+Updates" button (`lib/services/update/`). For updates to reach users, every
+release must keep to this contract:
+
+1. **Tags are semver**: `vX.Y.Z`. A release whose tag is not a version is
+   ignored by the app (it will not crash, but users see nothing).
+2. **Asset names keep their platform suffixes** (matched case-insensitively):
+   - Windows: `…-Installer.exe` (preferred; any `.exe` is the fallback) —
+     the app downloads it and runs it with Inno's
+     `/SILENT /CLOSEAPPLICATIONS /NORESTART` for in-place upgrades.
+   - macOS: `….dmg` — the app opens the release page in the browser.
+   - Linux: `….deb` preferred, `….tar.gz` fallback.
+   A release with no matching asset still surfaces; the release page URL is
+   the universal fallback.
+3. **`lib/app_info.dart` is bumped in lockstep with `pubspec.yaml`**
+   (test-enforced, see Versioning above).
+4. The `/releases/latest` endpoint excludes drafts and prereleases by
+   design — publishing a prerelease never prompts users.
+5. The checker activates on the **next** release users install; installs
+   that predate the updater cannot self-update.
+6. The repo must stay public: the unauthenticated GitHub API is the feed.
+   If it ever goes private, the updater needs an auth strategy first.
+
+Updater state (last-check timestamp, cached release JSON, skipped version)
+lives in `shared_preferences`, never in the Drift capture database.
 
 ## Website Download Links
 
@@ -138,6 +170,6 @@ dart run flutter_launcher_icons
 - [ ] `dart format --output=none --set-exit-if-changed .` clean
 - [ ] `flutter analyze --fatal-infos` clean
 - [ ] `flutter test` green
-- [ ] Version bumped in all places (`pubspec.yaml`, `about_dialog.dart`)
+- [ ] Version bumped in all places (`pubspec.yaml`, `lib/app_info.dart`)
 - [ ] Git tag `v<version>` pushed to remote repository
 - [ ] GitHub Actions release pipeline completed and artifacts verified

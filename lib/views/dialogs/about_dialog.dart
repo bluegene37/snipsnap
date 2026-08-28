@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../app_info.dart';
 import '../../utils/snip_theme.dart';
 
 class AboutSnipSnapDialog extends StatelessWidget {
@@ -55,7 +56,7 @@ class AboutSnipSnapDialog extends StatelessWidget {
 
             // App Name & Version
             Text(
-              'SnipSnap',
+              AppInfo.appName,
               style: TextStyle(
                 color: t.ink,
                 fontSize: 24,
@@ -65,7 +66,7 @@ class AboutSnipSnapDialog extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Version 1.0.0 (Build 1)',
+              'Version ${AppInfo.appVersion} (Build ${AppInfo.appBuild})',
               style: TextStyle(color: t.inkMuted, fontSize: 13),
             ),
 

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../models/app_shortcut.dart';
+import '../../services/update/update_controller.dart';
 import '../../utils/snip_theme.dart';
+import 'update_check_button.dart';
 
 /// Top application bar.
 ///
@@ -42,6 +44,10 @@ class HeaderBar extends StatelessWidget {
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
 
+  /// When set, a "Check for Updates" button appears next to the theme
+  /// toggle. Null keeps the header updater-free (e.g. in isolated tests).
+  final UpdateController? updateController;
+
   const HeaderBar({
     super.key,
     required this.onSnipInteractive,
@@ -68,6 +74,7 @@ class HeaderBar extends StatelessWidget {
     this.shortcuts,
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
+    this.updateController,
   });
 
   String _shortcut(AppShortcutAction action, String fallback) {
@@ -119,6 +126,10 @@ class HeaderBar extends StatelessWidget {
               _divider(t.border),
               const SizedBox(width: 6),
               _buildExportGroup(t, showLabels),
+              if (updateController != null) ...[
+                const SizedBox(width: 6),
+                UpdateCheckButton(controller: updateController!),
+              ],
               const SizedBox(width: 6),
               _HeaderButton(
                 icon: t.isDark
