@@ -119,9 +119,11 @@ Future<void> _drag(WidgetTester tester, Offset from, Offset to) async {
 }
 
 Future<void> _undo(WidgetTester tester) async {
-  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+  final modifier =
+      Platform.isMacOS ? LogicalKeyboardKey.meta : LogicalKeyboardKey.control;
+  await tester.sendKeyDownEvent(modifier);
   await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
-  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+  await tester.sendKeyUpEvent(modifier);
   await _settle(tester);
   await tester.runAsync(
     () => Future<void>.delayed(const Duration(milliseconds: 300)),
