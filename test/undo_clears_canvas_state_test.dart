@@ -32,12 +32,11 @@ Future<Directory> _bootApp(WidgetTester tester) async {
       );
   final db = AppDatabase(NativeDatabase.memory());
   DatabaseService.db = db;
-  // Deliberately never closed. flutter_test keeps the widget tree mounted
-  // after a test body ends; the NEXT test's pumpWidget is what unmounts this
-  // MainScreen, and its dispose() saves the active capture to this database.
-  // A tearDown close therefore races that save and surfaces as
-  // "Can't re-open a database after closing it" in the following test.
-  // The in-memory database is reclaimed when the test isolate exits.
+  // Deliberately never closed. MainScreen's dispose() (run by _cleanUp's
+  // unmount in teardown) saves the active capture to this database; a
+  // tearDown close would race that save and surface as "Can't re-open a
+  // database after closing it". The in-memory database is reclaimed when the
+  // test isolate exits.
 
   final captures = Directory('${dir.path}/SnipSnap/Captures')
     ..createSync(recursive: true);
@@ -118,6 +117,31 @@ Future<void> _drag(WidgetTester tester, Offset from, Offset to) async {
   await _settle(tester);
 }
 
+/// Unmounts the app, then deletes [dir].
+///
+/// The gallery sidebar shows the seeded capture through `Image.file`, whose
+/// `FileImage` memory-maps the PNG in the engine. Windows keeps the file
+/// locked while that mapping is alive, so a bare `deleteSync` in teardown
+/// throws PathAccessException there (POSIX allows unlinking mapped files,
+/// which is why only Windows CI failed). Unmounting and emptying the image
+/// caches releases the mapping; the retry loop absorbs the engine releasing
+/// the handle asynchronously, and a still-locked dir is abandoned rather than
+/// failed over — it lives under the OS temp directory.
+Future<void> _cleanUp(WidgetTester tester, Directory dir) async {
+  await tester.pumpWidget(const SizedBox());
+  await _settle(tester);
+  imageCache.clear();
+  imageCache.clearLiveImages();
+  for (var attempt = 0; attempt < 10; attempt++) {
+    try {
+      dir.deleteSync(recursive: true);
+      return;
+    } on FileSystemException {
+      sleep(const Duration(milliseconds: 100));
+    }
+  }
+}
+
 Future<void> _undo(WidgetTester tester) async {
   final modifier = Platform.isMacOS
       ? LogicalKeyboardKey.metaLeft
@@ -146,7 +170,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final dir = await _bootApp(tester);
-    addTearDown(() => dir.deleteSync(recursive: true));
+    addTearDown(() => _cleanUp(tester, dir));
 
     final origin = tester
         .renderObject<RenderBox>(_canvas)
@@ -200,7 +224,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final dir = await _bootApp(tester);
-    addTearDown(() => dir.deleteSync(recursive: true));
+    addTearDown(() => _cleanUp(tester, dir));
 
     final origin = tester
         .renderObject<RenderBox>(_canvas)
