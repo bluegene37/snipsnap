@@ -67,11 +67,14 @@ private func mouseEvent(_ type: NSEvent.EventType, _ p: NSPoint) -> NSEvent {
                             clickCount: 1, pressure: 1)!
 }
 
-private func keyEvent() -> NSEvent {
+private func keyEvent(_ keyCode: UInt16 = 12, _ chars: String = "q") -> NSEvent {
   return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                          windowNumber: 0, context: nil, characters: "q",
-                          charactersIgnoringModifiers: "q", isARepeat: false, keyCode: 12)!
+                          windowNumber: 0, context: nil, characters: chars,
+                          charactersIgnoringModifiers: chars, isARepeat: false, keyCode: keyCode)!
 }
+
+private let escapeKey: UInt16 = 53
+private let returnKey: UInt16 = 36
 
 /// Builds the real overlay view over an 800x600 image in a 400x300 point frame
 /// (backing scale 2.0, i.e. a Retina display).
@@ -115,7 +118,11 @@ private func makeView(
     }
   }
 
-  print("\n=== Behaviour 2: drag captures the selected region ===")
+  // The drag no longer captures on mouse-up. It settles the selection, which
+  // then waits for a confirm — the Capture button or Return — so the region can
+  // be nudged first. These checks therefore drag, assert that nothing has been
+  // grabbed yet, and only then confirm.
+  print("\n=== Behaviour 2: a drag settles, and confirming captures it ===")
   do {
     var captured: CGImage??
     let v = makeView(onCapture: { captured = .some($0) }, onCancel: { captured = .some(nil) })
@@ -124,8 +131,11 @@ private func makeView(
     v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 10, y: 10)))
     v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 190, y: 140)))
     v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 190, y: 140)))
+    check("releasing the drag does NOT capture", captured == nil,
+          "the selection has to stay adjustable")
+    v.keyDown(with: keyEvent(returnKey, "\r"))
     if let img = captured ?? nil {
-      check("drag returns a cropped image", img.width != 800 || img.height != 600,
+      check("confirming returns a cropped image", img.width != 800 || img.height != 600,
             "\(img.width)x\(img.height)")
       check("  ...at 2x the point size (180x130 pts -> 360x260 px)",
             img.width == 360 && img.height == 260, "\(img.width)x\(img.height)")
@@ -133,7 +143,7 @@ private func makeView(
       check("  ...from the region the user actually dragged over",
             c == "blue(BL)", "got \(c), expected blue(BL); red(TL) would mean the Y axis is flipped")
     } else {
-      check("drag returns a cropped image", false, "no image")
+      check("confirming returns a cropped image", false, "no image")
     }
   }
   do {
@@ -143,6 +153,7 @@ private func makeView(
     v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 390, y: 290)))
     v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 210, y: 160)))
     v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 210, y: 160)))
+    v.keyDown(with: keyEvent(returnKey, "\r"))
     if let img = captured ?? nil {
       let c = centreColour(img)
       check("a drag up-and-left normalises", img.width == 360 && img.height == 260,
@@ -153,16 +164,32 @@ private func makeView(
     }
   }
 
-  print("\n=== Behaviour 3: any key or right-click cancels ===")
+  // Escape cancels; other keys are ignored. This used to be "any key cancels",
+  // which was safe when a capture ended on mouse-up — but the selection now
+  // sits waiting to be adjusted, and a stray keystroke must not throw away a
+  // region the user is still positioning. Return has to survive the trip here
+  // too, or the confirm key would cancel instead.
+  print("\n=== Behaviour 3: Escape or right-click cancels; other keys do not ===")
   do {
     var cancelled = false
     var captured = false
     let v = makeView(onCapture: { _ in captured = true }, onCancel: { cancelled = true })
     v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 10, y: 10)))
     v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 190, y: 140)))
-    v.keyDown(with: keyEvent())
-    check("a key press mid-drag cancels", cancelled && !captured,
+    v.keyDown(with: keyEvent(escapeKey, "\u{1b}"))
+    check("Escape mid-drag cancels", cancelled && !captured,
           "cancelled=\(cancelled) captured=\(captured)")
+  }
+  do {
+    var cancelled = false
+    var captured = false
+    let v = makeView(onCapture: { _ in captured = true }, onCancel: { cancelled = true })
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 10, y: 10)))
+    v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 190, y: 140)))
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 190, y: 140)))
+    v.keyDown(with: keyEvent())  // a plain "q"
+    check("an unrelated key leaves the selection alone",
+          !cancelled && !captured, "cancelled=\(cancelled) captured=\(captured)")
   }
   do {
     var cancelled = false
@@ -178,7 +205,7 @@ private func makeView(
     let v = makeView(onCapture: { _ in captureCount += 1 }, onCancel: { cancelCount += 1 })
     v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 10, y: 10)))
     v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 190, y: 140)))
-    v.keyDown(with: keyEvent())
+    v.keyDown(with: keyEvent(escapeKey, "\u{1b}"))
     v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 190, y: 140)))
     check("a cancelled drag does not then capture on mouse-up",
           captureCount == 0, "cancel=\(cancelCount) capture=\(captureCount)")
@@ -210,13 +237,24 @@ private func makeView(
           "a capture from the global hotkey always arrives with another app frontmost")
   }
 
+  // A stray mouse-up used to have to resolve the capture, because the overlay
+  // had no other resting state: the Dart side was awaiting one answer and a
+  // lost gesture meant it never came, hanging the app on its capture scrim.
+  // The overlay now legitimately sits open waiting for input, so cancelling on
+  // an unpaired mouse-up would kill it on the first stray click — and the hang
+  // it guarded against is gone, because the user still has the Capture button,
+  // Return, Escape and right-click. What matters is that the overlay is still
+  // *able* to resolve afterwards, which is what this checks.
   print("\n=== Edge: mouse-up with no preceding mouse-down ===")
   do {
     var settled = false
     let v = makeView(onCapture: { _ in settled = true }, onCancel: { settled = true })
     v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 50, y: 50)))
-    check("a stray mouse-up resolves the pending capture",
-          settled, "if this fails the Dart future never completes and the app hangs on the capture scrim")
+    check("a stray mouse-up does not resolve the capture", !settled,
+          "the overlay stays open rather than cancelling under the user")
+    v.keyDown(with: keyEvent(escapeKey, "\u{1b}"))
+    check("  ...and the overlay can still be resolved afterwards", settled,
+          "if this fails the Dart future never completes and the app hangs on the capture scrim")
   }
 
   print("\n=== Badge text ===")

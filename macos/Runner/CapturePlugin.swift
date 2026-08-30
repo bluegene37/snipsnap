@@ -356,6 +356,22 @@ private class CaptureOverlayView: NSView {
   private let gripSize: CGFloat = 10
   private let minSelectionSide: CGFloat = 8
 
+  // MARK: - Palette
+  //
+  // Coffee, not the stock system blue. The backdrop wash is warm rather than
+  // neutral black, which reads as a tint over the desktop instead of a grey
+  // veil — and because the selection itself is knocked clear, the region being
+  // captured still shows its true colours.
+
+  /// Roasted brown: selection outline, grip strokes, Capture button fill.
+  private let coffee = NSColor(red: 0.435, green: 0.306, blue: 0.216, alpha: 1.0)
+  /// Crema: the lighter warm tone the button lifts to on hover.
+  private let crema = NSColor(red: 0.784, green: 0.635, blue: 0.478, alpha: 1.0)
+  /// Warm espresso wash over everything outside the selection.
+  private let backdrop = NSColor(red: 0.13, green: 0.09, blue: 0.06, alpha: 0.42)
+  /// Near-black bean for the dimension badge.
+  private let bean = NSColor(red: 0.11, green: 0.075, blue: 0.05, alpha: 0.88)
+
   /// Whether this overlay has already handed back a result.
   ///
   /// The Flutter call is awaiting exactly one answer, and there is more than
@@ -684,7 +700,7 @@ private class CaptureOverlayView: NSView {
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
 
-    NSColor(white: 0.0, alpha: 0.35).setFill()
+    backdrop.setFill()
     dirtyRect.fill()
 
     let showChrome: Bool
@@ -708,7 +724,7 @@ private class CaptureOverlayView: NSView {
     NSColor.white.setStroke()
     strokePath.stroke()
 
-    let accent = NSColor(red: 0.15, green: 0.55, blue: 1.0, alpha: 1.0)
+    let accent = coffee
     if selRect.width > 3 && selRect.height > 3 {
       let innerPath = NSBezierPath(rect: selRect.insetBy(dx: 1, dy: 1))
       innerPath.lineWidth = 1.0
@@ -763,7 +779,7 @@ private class CaptureOverlayView: NSView {
     }
 
     let badgeRect = NSRect(x: badgeX, y: badgeY, width: badgeW, height: badgeH)
-    NSColor(white: 0.1, alpha: 0.85).setFill()
+    bean.setFill()
     NSBezierPath(roundedRect: badgeRect, xRadius: 4, yRadius: 4).fill()
     attrString.draw(at: NSPoint(x: badgeX + padH, y: badgeY + padV))
   }
@@ -817,7 +833,7 @@ private class CaptureOverlayView: NSView {
     captureButtonRect = rect
 
     let path = NSBezierPath(roundedRect: rect, xRadius: buttonH / 2, yRadius: buttonH / 2)
-    (captureButtonHot ? accent.blended(withFraction: 0.18, of: .white) ?? accent : accent).setFill()
+    (captureButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : accent).setFill()
     path.fill()
     NSColor(white: 1.0, alpha: 0.35).setStroke()
     path.lineWidth = 1
