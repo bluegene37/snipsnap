@@ -131,6 +131,46 @@ void main() {
     expect(h.cancels, 1);
   });
 
+  testWidgets('the X beside Capture cancels', (tester) async {
+    // Escape and right-click already cancelled, but neither announces itself.
+    final h = await _pump(tester);
+    await _drag(tester, const Offset(100, 100), const Offset(400, 300));
+
+    expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.close_rounded));
+    await tester.pumpAndSettle();
+
+    expect(h.cancels, 1);
+    expect(h.captured, isEmpty, reason: 'cancelling must not capture');
+  });
+
+  testWidgets('neither control is offered before a region exists', (
+    tester,
+  ) async {
+    await _pump(tester);
+    expect(find.text('Capture'), findsNothing);
+    expect(find.byIcon(Icons.close_rounded), findsNothing);
+  });
+
+  testWidgets('both controls stay on screen at the bottom edge', (
+    tester,
+  ) async {
+    // The pair is placed as one block, so the X cannot be pushed off while
+    // Capture stays visible.
+    final h = await _pump(tester);
+    await _drag(tester, const Offset(80, 400), const Offset(760, 596));
+
+    final size = tester.getSize(find.byType(CaptureOverlay));
+    for (final f in [find.text('Capture'), find.byIcon(Icons.close_rounded)]) {
+      final r = tester.getRect(f);
+      expect(r.left, greaterThanOrEqualTo(0));
+      expect(r.top, greaterThanOrEqualTo(0));
+      expect(r.right, lessThanOrEqualTo(size.width));
+      expect(r.bottom, lessThanOrEqualTo(size.height));
+    }
+    expect(h.captured, isEmpty);
+  });
+
   testWidgets('Return with nothing selected does nothing', (tester) async {
     final h = await _pump(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);

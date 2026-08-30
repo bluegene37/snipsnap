@@ -353,6 +353,11 @@ private class CaptureOverlayView: NSView {
   private var captureButtonRect: NSRect = .zero
   private var captureButtonHot = false
 
+  /// Where the cancel control was last drawn. Escape and right-click already
+  /// cancel, but neither announces itself — this is the visible way out.
+  private var cancelButtonRect: NSRect = .zero
+  private var cancelButtonHot = false
+
   private let gripSize: CGFloat = 10
   private let minSelectionSide: CGFloat = 8
 
@@ -437,9 +442,11 @@ private class CaptureOverlayView: NSView {
 
   override func mouseMoved(with event: NSEvent) {
     let point = convert(event.locationInWindow, from: nil)
-    let hot = !captureButtonRect.isEmpty && captureButtonRect.contains(point)
-    if hot != captureButtonHot {
-      captureButtonHot = hot
+    let captureHot = !captureButtonRect.isEmpty && captureButtonRect.contains(point)
+    let cancelHot = !cancelButtonRect.isEmpty && cancelButtonRect.contains(point)
+    if captureHot != captureButtonHot || cancelHot != cancelButtonHot {
+      captureButtonHot = captureHot
+      cancelButtonHot = cancelHot
       needsDisplay = true
     }
   }
@@ -454,6 +461,9 @@ private class CaptureOverlayView: NSView {
     }
     if !captureButtonRect.isEmpty {
       addCursorRect(captureButtonRect, cursor: .pointingHand)
+    }
+    if !cancelButtonRect.isEmpty {
+      addCursorRect(cancelButtonRect, cursor: .pointingHand)
     }
   }
 
@@ -550,6 +560,10 @@ private class CaptureOverlayView: NSView {
     dragOrigin = point
 
     if case .adjusting = mode, let sel = selection {
+      if !cancelButtonRect.isEmpty && cancelButtonRect.contains(point) {
+        settleCancelled()
+        return
+      }
       if !captureButtonRect.isEmpty && captureButtonRect.contains(point) {
         captureCurrentSelection()
         return
@@ -710,6 +724,7 @@ private class CaptureOverlayView: NSView {
     }
     guard showChrome, let selRect = selection, selRect.width > 0, selRect.height > 0 else {
       captureButtonRect = .zero
+      cancelButtonRect = .zero
       return
     }
 
@@ -746,6 +761,7 @@ private class CaptureOverlayView: NSView {
       drawCaptureButton(for: selRect, accent: accent)
     } else {
       captureButtonRect = .zero
+      cancelButtonRect = .zero
     }
   }
 
@@ -812,9 +828,13 @@ private class CaptureOverlayView: NSView {
     let gap: CGFloat = 6
     let padH: CGFloat = 11
     let padV: CGFloat = 6
-    let buttonW = padH * 2 + iconW + gap + textSize.width
+    let pillW = padH * 2 + iconW + gap + textSize.width
     let buttonH = max(textSize.height + padV * 2, 24)
     let margin: CGFloat = 8
+    // Capture and cancel are placed as one block, so the edge-flipping below
+    // can never leave the X off screen while Capture stays visible.
+    let controlGap: CGFloat = 7
+    let buttonW = pillW + controlGap + buttonH
 
     // Below the selection by default, above it when that would run off the
     // bottom, and pulled inside when the selection reaches both edges.
@@ -829,8 +849,15 @@ private class CaptureOverlayView: NSView {
     if x < 4 { x = 4 }
     if x + buttonW > bounds.width - 4 { x = bounds.width - buttonW - 4 }
 
-    let rect = NSRect(x: x, y: y, width: buttonW, height: buttonH)
+    let block = NSRect(x: x, y: y, width: buttonW, height: buttonH)
+    let rect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
     captureButtonRect = rect
+    cancelButtonRect = NSRect(
+      x: block.maxX - buttonH,
+      y: block.minY,
+      width: buttonH,
+      height: buttonH
+    )
 
     let path = NSBezierPath(roundedRect: rect, xRadius: buttonH / 2, yRadius: buttonH / 2)
     (captureButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : accent).setFill()
@@ -845,6 +872,31 @@ private class CaptureOverlayView: NSView {
     attrString.draw(
       at: NSPoint(x: rect.minX + padH + iconW + gap, y: rect.midY - textSize.height / 2)
     )
+
+    drawCancelButton(in: cancelButtonRect, accent: accent)
+  }
+
+  /// The way out, drawn quieter than Capture: this is the escape hatch, not
+  /// the thing to reach for.
+  private func drawCancelButton(in rect: NSRect, accent: NSColor) {
+    let path = NSBezierPath(ovalIn: rect)
+    (cancelButtonHot ? accent : bean).setFill()
+    path.fill()
+    NSColor(white: 1.0, alpha: 0.35).setStroke()
+    path.lineWidth = 1
+    path.stroke()
+
+    let inset = rect.width * 0.32
+    let box = rect.insetBy(dx: inset, dy: inset)
+    let cross = NSBezierPath()
+    cross.move(to: NSPoint(x: box.minX, y: box.minY))
+    cross.line(to: NSPoint(x: box.maxX, y: box.maxY))
+    cross.move(to: NSPoint(x: box.minX, y: box.maxY))
+    cross.line(to: NSPoint(x: box.maxX, y: box.minY))
+    cross.lineWidth = 1.8
+    cross.lineCapStyle = .round
+    NSColor.white.setStroke()
+    cross.stroke()
   }
 
   /// A small camera outline, drawn rather than pulled from SF Symbols so the
@@ -886,6 +938,12 @@ private class CaptureOverlayView: NSView {
     lens.lineWidth = 1.4
     lens.stroke()
   }
+
+  /// Button geometry, for the behaviour harness in
+  /// `tool/capture_overlay_harness`. Both are computed during `draw`, so a
+  /// caller has to render the view before reading them.
+  var captureButtonRectForTesting: NSRect { captureButtonRect }
+  var cancelButtonRectForTesting: NSRect { cancelButtonRect }
 
   private func normalizedRect(from p1: NSPoint, to p2: NSPoint) -> NSRect {
     let x = min(p1.x, p2.x)

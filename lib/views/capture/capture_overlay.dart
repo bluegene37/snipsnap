@@ -69,7 +69,16 @@ class _CaptureOverlayState extends State<CaptureOverlay> {
   Size _lastSize = Size.zero;
   final FocusNode _focusNode = FocusNode();
 
-  static const Size _buttonSize = Size(122, 34);
+  static const double _pillWidth = 122;
+  static const double _controlHeight = 34;
+  static const double _controlGap = 8;
+
+  /// Placement is computed for the pair as one block, so the model's
+  /// edge-flipping keeps both buttons on screen together.
+  static const Size _buttonSize = Size(
+    _pillWidth + _controlGap + _controlHeight,
+    _controlHeight,
+  );
 
   @override
   void dispose() {
@@ -185,7 +194,21 @@ class _CaptureOverlayState extends State<CaptureOverlay> {
                   top: buttonRect.top,
                   width: buttonRect.width,
                   height: buttonRect.height,
-                  child: _CaptureButton(onPressed: _confirm),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: _pillWidth,
+                        height: _controlHeight,
+                        child: _CaptureButton(onPressed: _confirm),
+                      ),
+                      const SizedBox(width: _controlGap),
+                      SizedBox(
+                        width: _controlHeight,
+                        height: _controlHeight,
+                        child: _CancelButton(onPressed: widget.onCancel),
+                      ),
+                    ],
+                  ),
                 ),
             ],
           );
@@ -274,6 +297,57 @@ class _CaptureButtonState extends State<_CaptureButton> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Discards the capture. Escape and right-click already do this, but neither
+/// is visible — a control next to Capture is the only way out that announces
+/// itself.
+class _CancelButton extends StatefulWidget {
+  const _CancelButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  State<_CancelButton> createState() => _CancelButtonState();
+}
+
+class _CancelButtonState extends State<_CancelButton> {
+  bool _hot = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hot = true),
+      onExit: (_) => setState(() => _hot = false),
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: Semantics(
+          button: true,
+          label: 'Cancel capture',
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              // Deliberately quieter than Capture: this is the way out, not
+              // the thing to reach for.
+              color: _hot ? CaptureColors.coffee : CaptureColors.bean,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x55000000),
+                  blurRadius: 10,
+                  offset: Offset(0, 3),
+                ),
+              ],
+            ),
+            child: const Center(
+              child: Icon(Icons.close_rounded, size: 17, color: Colors.white),
+            ),
           ),
         ),
       ),

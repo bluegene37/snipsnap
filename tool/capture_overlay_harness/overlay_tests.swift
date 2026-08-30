@@ -91,6 +91,13 @@ private func makeView(
   )
 }
 
+/// Forces a draw pass, which is what computes the button rects — they track
+/// the selection around the screen, so they are only meaningful once drawn.
+@MainActor private func renderOverlay(_ v: CaptureOverlayView) {
+  let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds)!
+  v.cacheDisplay(in: v.bounds, to: rep)
+}
+
 @MainActor func runHarness() {
   print("=== Behaviour 1: click with no drag captures the whole display ===")
   do {
@@ -255,6 +262,57 @@ private func makeView(
     v.keyDown(with: keyEvent(escapeKey, "\u{1b}"))
     check("  ...and the overlay can still be resolved afterwards", settled,
           "if this fails the Dart future never completes and the app hangs on the capture scrim")
+  }
+
+  // The overlay had no visible way out: Escape and right-click both cancel, but
+  // neither announces itself. The X sits beside Capture, and the pair is placed
+  // as one block so edge-flipping can never strand one of them off screen.
+  print("\n=== Cancel control beside Capture ===")
+  do {
+    let v = makeView(onCapture: { _ in }, onCancel: {})
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 60, y: 60)))
+    v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 260, y: 200)))
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 260, y: 200)))
+    renderOverlay(v)
+
+    let capture = v.captureButtonRectForTesting
+    let cancel = v.cancelButtonRectForTesting
+    check("both controls are laid out", !capture.isEmpty && !cancel.isEmpty,
+          "capture=\(capture) cancel=\(cancel)")
+    check("  ...the X sits to the right of Capture", cancel.minX >= capture.maxX,
+          "capture.maxX=\(capture.maxX) cancel.minX=\(cancel.minX)")
+    check("  ...they do not overlap", !capture.intersects(cancel))
+    check("  ...and both are inside the overlay",
+          v.bounds.contains(capture) && v.bounds.contains(cancel),
+          "bounds=\(v.bounds)")
+  }
+  do {
+    var cancelled = false
+    var captured = false
+    let v = makeView(onCapture: { _ in captured = true }, onCancel: { cancelled = true })
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 60, y: 60)))
+    v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 260, y: 200)))
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 260, y: 200)))
+    renderOverlay(v)
+
+    let hit = NSPoint(x: v.cancelButtonRectForTesting.midX,
+                      y: v.cancelButtonRectForTesting.midY)
+    v.mouseDown(with: mouseEvent(.leftMouseDown, hit))
+    check("clicking the X cancels", cancelled && !captured,
+          "cancelled=\(cancelled) captured=\(captured)")
+  }
+  do {
+    // A selection pinned to the bottom-right is where a naive placement puts
+    // one of the two controls off screen.
+    let v = makeView(onCapture: { _ in }, onCancel: {})
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 200, y: 4)))
+    v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 398, y: 160)))
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 398, y: 160)))
+    renderOverlay(v)
+    check("both stay on screen against the bottom-right corner",
+          v.bounds.contains(v.captureButtonRectForTesting)
+            && v.bounds.contains(v.cancelButtonRectForTesting),
+          "capture=\(v.captureButtonRectForTesting) cancel=\(v.cancelButtonRectForTesting)")
   }
 
   print("\n=== Badge text ===")
