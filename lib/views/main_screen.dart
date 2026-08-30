@@ -27,6 +27,7 @@ import '../utils/constants.dart';
 import '../utils/image_eviction.dart';
 import '../utils/image_operations.dart';
 import '../utils/snip_theme.dart';
+import 'components/canvas_busy_overlay.dart';
 import 'components/header_bar.dart';
 import 'components/ocr_result_panel.dart';
 import 'components/style_picker.dart';
@@ -313,6 +314,14 @@ class _MainScreenState extends State<MainScreen> {
   bool _isCapturing = false;
   bool _darkMode = true;
 
+  /// Caption for the progress overlay shown over the canvas, or null when
+  /// idle. Driven only by [_runBusy].
+  String? _busyMessage;
+
+  /// Fires [_busyGrace] after a long operation starts, unless it finished
+  /// first. Held so [_runBusy] and [dispose] can cancel it.
+  Timer? _busyTimer;
+
   /// The resolved theme for the current [_darkMode] state.
   ///
   /// `MainScreen` is the widget that *establishes* [SnipThemeScope] — its
@@ -560,6 +569,7 @@ class _MainScreenState extends State<MainScreen> {
     _lifecycleListener.dispose();
     // Flush any annotation edit still waiting on the debounce timer.
     _persistDebounce?.cancel();
+    _busyTimer?.cancel();
     final pending = _activeCapture;
     // Same reasoning as the guard in _syncCurrentCaptureAnnotations: a
     // capture still waiting on legacy-coordinate conversion must not be
@@ -597,21 +607,23 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _openUserManualDialog([String? initialTopic]) {
-    final topic = initialTopic ?? switch (_activeTool) {
-      CanvasTool.ocr => 'ocr_text',
-      CanvasTool.arrow ||
-      CanvasTool.shape ||
-      CanvasTool.line ||
-      CanvasTool.pen ||
-      CanvasTool.highlight ||
-      CanvasTool.text ||
-      CanvasTool.stepMarker ||
-      CanvasTool.blur ||
-      CanvasTool.ruler ||
-      CanvasTool.fill ||
-      CanvasTool.colorPicker => 'annotation_tools',
-      _ => 'getting_started',
-    };
+    final topic =
+        initialTopic ??
+        switch (_activeTool) {
+          CanvasTool.ocr => 'ocr_text',
+          CanvasTool.arrow ||
+          CanvasTool.shape ||
+          CanvasTool.line ||
+          CanvasTool.pen ||
+          CanvasTool.highlight ||
+          CanvasTool.text ||
+          CanvasTool.stepMarker ||
+          CanvasTool.blur ||
+          CanvasTool.ruler ||
+          CanvasTool.fill ||
+          CanvasTool.colorPicker => 'annotation_tools',
+          _ => 'getting_started',
+        };
 
     UserManualDialog.show(
       _dialogContext!,
@@ -918,11 +930,19 @@ class _MainScreenState extends State<MainScreen> {
       if (_isTextFieldFocused) return;
       _openUserManualDialog();
     };
-    bindings[const SingleActivator(LogicalKeyboardKey.slash, meta: true, shift: true)] = () {
+    bindings[const SingleActivator(
+      LogicalKeyboardKey.slash,
+      meta: true,
+      shift: true,
+    )] = () {
       if (_isTextFieldFocused) return;
       _openUserManualDialog();
     };
-    bindings[const SingleActivator(LogicalKeyboardKey.slash, control: true, shift: true)] = () {
+    bindings[const SingleActivator(
+      LogicalKeyboardKey.slash,
+      control: true,
+      shift: true,
+    )] = () {
       if (_isTextFieldFocused) return;
       _openUserManualDialog();
     };
@@ -1574,16 +1594,18 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
 
-    final bytes = await _renderAnnotatedBytes();
-    if (bytes != null) {
-      final tempPath = await StorageService.saveTempImage(bytes);
-      final success = await ClipboardService.copyImageToClipboard(tempPath);
-      if (success) {
-        _showToast('Copied screenshot to clipboard!');
-      } else {
-        _showToast('Failed to copy image');
+    await _runBusy('Copying\u2026', () async {
+      final bytes = await _renderAnnotatedBytes();
+      if (bytes != null) {
+        final tempPath = await StorageService.saveTempImage(bytes);
+        final success = await ClipboardService.copyImageToClipboard(tempPath);
+        if (success) {
+          _showToast('Copied screenshot to clipboard!');
+        } else {
+          _showToast('Failed to copy image');
+        }
       }
-    }
+    });
   }
 
   Future<void> _handleSaveAs() async {
@@ -1598,7 +1620,10 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
 
-    final bytes = await _renderAnnotatedBytes();
+    Uint8List? bytes;
+    await _runBusy('Preparing export\u2026', () async {
+      bytes = await _renderAnnotatedBytes();
+    });
     if (bytes == null) {
       _showToast('Failed to render screenshot bytes');
       return;
@@ -1614,58 +1639,62 @@ class _MainScreenState extends State<MainScreen> {
           initialName: capture.title,
           onConfirm: (options) async {
             await Future<void>.delayed(const Duration(milliseconds: 150));
-            final gradient =
-                (options.gradientIndex != null &&
-                    options.gradientIndex! >= 0 &&
-                    options.gradientIndex! < AppColors.framingGradients.length)
-                ? AppColors.framingGradients[options.gradientIndex!]
-                : null;
+            await _runBusy('Saving\u2026', () async {
+              final gradient =
+                  (options.gradientIndex != null &&
+                      options.gradientIndex! >= 0 &&
+                      options.gradientIndex! <
+                          AppColors.framingGradients.length)
+                  ? AppColors.framingGradients[options.gradientIndex!]
+                  : null;
 
-            final wantsFraming =
-                options.framingPadding > 0 ||
-                options.cornerRadius > 0 ||
-                options.shadowBlur > 0 ||
-                gradient != null;
+              final wantsFraming =
+                  options.framingPadding > 0 ||
+                  options.cornerRadius > 0 ||
+                  options.shadowBlur > 0 ||
+                  gradient != null;
 
-            Uint8List exportBytes = bytes;
-            if (wantsFraming) {
-              // Re-renders from scratch because framing changes the output
-              // dimensions. The canvas can have gone away since the dialog
-              // opened, so this call carries the same loud-failure contract as
-              // the one in _renderAnnotatedBytes.
-              try {
-                exportBytes =
-                    await RenderService.renderFlattenedPng(
-                      imagePath: capture.filePath,
-                      annotations: _annotations,
-                      canvasSize: _canvasSize,
-                      framingPadding: options.framingPadding,
-                      cornerRadius: options.cornerRadius,
-                      shadowBlur: options.shadowBlur,
-                      framingGradient: gradient,
-                    ) ??
-                    bytes;
-              } on StateError catch (e) {
-                debugPrint('SnipSnap export error: $e');
-                _showToast(
-                  'Could not export: the editor is not ready. Try again.',
-                );
-                return;
+              Uint8List exportBytes = bytes!;
+              if (wantsFraming) {
+                // Re-renders from scratch because framing changes the output
+                // dimensions. The canvas can have gone away since the dialog
+                // opened, so this call carries the same loud-failure contract as
+                // the one in _renderAnnotatedBytes.
+                try {
+                  exportBytes =
+                      await RenderService.renderFlattenedPng(
+                        imagePath: capture.filePath,
+                        annotations: _annotations,
+                        canvasSize: _canvasSize,
+                        framingPadding: options.framingPadding,
+                        cornerRadius: options.cornerRadius,
+                        shadowBlur: options.shadowBlur,
+                        framingGradient: gradient,
+                      ) ??
+                      bytes!;
+                } on StateError catch (e) {
+                  debugPrint('SnipSnap export error: $e');
+                  _showToast(
+                    'Could not export: the editor is not ready. Try again.',
+                  );
+                  return;
+                }
               }
-            }
 
-            final savedPath = await StorageService.exportImageDialogWithFormat(
-              bytes: exportBytes,
-              fileName: options.fileName,
-              isJpg: options.format == SaveFormat.jpg,
-              jpgQuality: options.quality,
-              customFolderPath: options.customFolderPath,
-            );
-            if (savedPath != null) {
-              _showToast('Saved screenshot to: ${p.basename(savedPath)}');
-            } else {
-              _showToast('Save cancelled');
-            }
+              final savedPath =
+                  await StorageService.exportImageDialogWithFormat(
+                    bytes: exportBytes,
+                    fileName: options.fileName,
+                    isJpg: options.format == SaveFormat.jpg,
+                    jpgQuality: options.quality,
+                    customFolderPath: options.customFolderPath,
+                  );
+              if (savedPath != null) {
+                _showToast('Saved screenshot to: ${p.basename(savedPath)}');
+              } else {
+                _showToast('Save cancelled');
+              }
+            });
           },
         ),
       ),
@@ -1706,32 +1735,34 @@ class _MainScreenState extends State<MainScreen> {
     // an aborted flatten should leave no orphan undo entry behind.
     if (_blockedByPendingConversion('flatten')) return;
 
-    // Render before the undo push, not after: rendering does not touch the
-    // file, and pushing first left an orphan checkpoint behind whenever the
-    // render came back null — an undo step that restores exactly what is
-    // already on screen.
-    final bytes = await _renderAnnotatedBytes();
-    if (bytes == null) {
-      _showToast('Failed to flatten canvas');
-      return;
-    }
+    await _runBusy('Flattening\u2026', () async {
+      // Render before the undo push, not after: rendering does not touch the
+      // file, and pushing first left an orphan checkpoint behind whenever the
+      // render came back null — an undo step that restores exactly what is
+      // already on screen.
+      final bytes = await _renderAnnotatedBytes();
+      if (bytes == null) {
+        _showToast('Failed to flatten canvas');
+        return;
+      }
 
-    // The render above can take seconds on a large capture. Anything that
-    // changed the selection in the meantime makes this flatten meaningless.
-    if (!mounted || _activeCapture?.id != capture.id) return;
+      // The render above can take seconds on a large capture. Anything that
+      // changed the selection in the meantime makes this flatten meaningless.
+      if (!mounted || _activeCapture?.id != capture.id) return;
 
-    await _pushUndoState(captureImage: true);
-    await _replaceActiveImageBytes(bytes, targetPath: capture.filePath);
+      await _pushUndoState(captureImage: true);
+      await _replaceActiveImageBytes(bytes, targetPath: capture.filePath);
 
-    if (!mounted || _activeCapture?.id != capture.id) return;
-    setState(() {
-      _bumpImageRevision();
-      _annotations = [];
-      _stepCounter = 1;
+      if (!mounted || _activeCapture?.id != capture.id) return;
+      setState(() {
+        _bumpImageRevision();
+        _annotations = [];
+        _stepCounter = 1;
+      });
+      _syncCurrentCaptureAnnotations();
+
+      _showToast('Canvas flattened! Annotations baked into image.');
     });
-    _syncCurrentCaptureAnnotations();
-
-    _showToast('Canvas flattened! Annotations baked into image.');
   }
 
   void _handleSampleColor(Color color) {
@@ -1787,96 +1818,139 @@ class _MainScreenState extends State<MainScreen> {
     // entirely instead of refusing.
     if (_blockedByPendingConversion('crop')) return;
 
-    try {
-      final canvasSize = _canvasSize;
-      final originalBytes = await File(capture.filePath).readAsBytes();
+    await _runBusy('Cropping\u2026', () async {
+      try {
+        final canvasSize = _canvasSize;
+        final originalBytes = await File(capture.filePath).readAsBytes();
 
-      // Push the pre-crop image *and* annotations so a single undo restores
-      // both.
-      await _pushUndoState(imageBytes: originalBytes);
+        // Push the pre-crop image *and* annotations so a single undo restores
+        // both.
+        await _pushUndoState(imageBytes: originalBytes);
 
-      // Bake annotations in before cropping so markup survives the operation
-      // instead of being discarded.
-      final sourceBytes = _annotations.isEmpty
-          ? originalBytes
-          : (await _renderAnnotatedBytes() ?? originalBytes);
+        // Bake annotations in before cropping so markup survives the operation
+        // instead of being discarded.
+        final sourceBytes = _annotations.isEmpty
+            ? originalBytes
+            : (await _renderAnnotatedBytes() ?? originalBytes);
 
-      final decoded = await compute(img.decodeImage, sourceBytes);
-      if (decoded == null) return;
+        final decoded = await compute(img.decodeImage, sourceBytes);
+        if (decoded == null) return;
 
-      final imageRect = RenderService.imageRectInCanvas(
-        imageSize: Size(decoded.width.toDouble(), decoded.height.toDouble()),
-        canvasSize: canvasSize,
-      );
-      if (imageRect.isEmpty) {
-        // Same reasoning as the export path: without a laid-out canvas the crop
-        // rectangle cannot be placed on the image at all, and silently doing
-        // nothing reads to the user as a broken button.
-        _showToast('Could not crop: the editor is not ready. Try again.');
-        return;
-      }
-
-      // Canvas coordinates -> native image pixels.
-      final scaleX = decoded.width / imageRect.width;
-      final scaleY = decoded.height / imageRect.height;
-
-      final relLeft = cropRect.left - imageRect.left;
-      final relTop = cropRect.top - imageRect.top;
-      final relRight = cropRect.right - imageRect.left;
-      final relBottom = cropRect.bottom - imageRect.top;
-      if (relRight - relLeft <= 5 || relBottom - relTop <= 5) return;
-
-      final targetLeft = (relLeft * scaleX).round();
-      final targetTop = (relTop * scaleY).round();
-      final targetWidth = ((relRight - relLeft) * scaleX).round();
-      final targetHeight = ((relBottom - relTop) * scaleY).round();
-
-      final result = ImageOperations.expandOrCropCanvas(
-        sourceImage: decoded,
-        targetLeft: targetLeft,
-        targetTop: targetTop,
-        targetWidth: targetWidth,
-        targetHeight: targetHeight,
-      );
-
-      final encoded = await compute(img.encodePng, result);
-
-      // The render, decode and encode above are seconds of work on a large
-      // capture. Writing the result now, without re-checking, would crop
-      // whichever capture the user has since selected.
-      if (!mounted || _activeCapture?.id != capture.id) return;
-      await _replaceActiveImageBytes(encoded, targetPath: capture.filePath);
-      if (!mounted || _activeCapture?.id != capture.id) return;
-
-      setState(() {
-        _bumpImageRevision();
-        _annotations = [];
-        _selectedAnnotationId = null;
-        _activeTool = CanvasTool.select;
-        // The file on disk is a different size now. The recorded dimensions
-        // feed every projection built from this capture — the toolbar's
-        // canvas -> image conversion and the legacy annotation migration — so
-        // leaving them stale silently rescales everything drawn after a crop.
-        _activeCapture = capture.copyWith(
-          width: result.width,
-          height: result.height,
+        final imageRect = RenderService.imageRectInCanvas(
+          imageSize: Size(decoded.width.toDouble(), decoded.height.toDouble()),
+          canvasSize: canvasSize,
         );
-      });
-      _syncCurrentCaptureAnnotations();
+        if (imageRect.isEmpty) {
+          // Same reasoning as the export path: without a laid-out canvas the crop
+          // rectangle cannot be placed on the image at all, and silently doing
+          // nothing reads to the user as a broken button.
+          _showToast('Could not crop: the editor is not ready. Try again.');
+          return;
+        }
 
-      final isExpanded =
-          targetLeft < 0 ||
-          targetTop < 0 ||
-          targetLeft + targetWidth > decoded.width ||
-          targetTop + targetHeight > decoded.height;
-      _showToast(
-        isExpanded
-            ? 'Canvas expanded to ${result.width} × ${result.height} px (Cmd+Z to undo)'
-            : 'Cropped to ${result.width} × ${result.height} px (Cmd+Z to undo)',
-      );
-    } catch (e) {
-      debugPrint('SnipSnap crop error: $e');
-      _showToast('Failed to crop image');
+        // Canvas coordinates -> native image pixels.
+        final scaleX = decoded.width / imageRect.width;
+        final scaleY = decoded.height / imageRect.height;
+
+        final relLeft = cropRect.left - imageRect.left;
+        final relTop = cropRect.top - imageRect.top;
+        final relRight = cropRect.right - imageRect.left;
+        final relBottom = cropRect.bottom - imageRect.top;
+        if (relRight - relLeft <= 5 || relBottom - relTop <= 5) return;
+
+        final targetLeft = (relLeft * scaleX).round();
+        final targetTop = (relTop * scaleY).round();
+        final targetWidth = ((relRight - relLeft) * scaleX).round();
+        final targetHeight = ((relBottom - relTop) * scaleY).round();
+
+        final result = ImageOperations.expandOrCropCanvas(
+          sourceImage: decoded,
+          targetLeft: targetLeft,
+          targetTop: targetTop,
+          targetWidth: targetWidth,
+          targetHeight: targetHeight,
+        );
+
+        final encoded = await compute(img.encodePng, result);
+
+        // The render, decode and encode above are seconds of work on a large
+        // capture. Writing the result now, without re-checking, would crop
+        // whichever capture the user has since selected.
+        if (!mounted || _activeCapture?.id != capture.id) return;
+        await _replaceActiveImageBytes(encoded, targetPath: capture.filePath);
+        if (!mounted || _activeCapture?.id != capture.id) return;
+
+        setState(() {
+          _bumpImageRevision();
+          _annotations = [];
+          _selectedAnnotationId = null;
+          _activeTool = CanvasTool.select;
+          // The file on disk is a different size now. The recorded dimensions
+          // feed every projection built from this capture — the toolbar's
+          // canvas -> image conversion and the legacy annotation migration — so
+          // leaving them stale silently rescales everything drawn after a crop.
+          _activeCapture = capture.copyWith(
+            width: result.width,
+            height: result.height,
+          );
+        });
+        _syncCurrentCaptureAnnotations();
+
+        final isExpanded =
+            targetLeft < 0 ||
+            targetTop < 0 ||
+            targetLeft + targetWidth > decoded.width ||
+            targetTop + targetHeight > decoded.height;
+        _showToast(
+          isExpanded
+              ? 'Canvas expanded to ${result.width} × ${result.height} px (Cmd+Z to undo)'
+              : 'Cropped to ${result.width} × ${result.height} px (Cmd+Z to undo)',
+        );
+      } catch (e) {
+        debugPrint('SnipSnap crop error: $e');
+        _showToast('Failed to crop image');
+      }
+    });
+  }
+
+  /// How long a long-running operation may take before the overlay appears.
+  ///
+  /// Withheld rather than shown immediately because on a small capture these
+  /// operations finish in a fraction of a second, and a full-canvas scrim that
+  /// flashes for 80ms reads as a glitch — worse than the silence it replaces.
+  /// Past this point the wait is long enough that the user needs telling.
+  static const Duration _busyGrace = Duration(milliseconds: 180);
+
+  /// Runs [action] behind the canvas progress overlay, captioned [message].
+  ///
+  /// Crop, flatten, export and copy each run a full render -> decode -> encode
+  /// cycle — "seconds of work on a large capture", as `_handleApplyCrop`'s own
+  /// comment puts it. None of them said anything while it ran: the canvas sat
+  /// unchanged, the button looked dead, and then the result appeared all at
+  /// once. This is the one place that tells the user otherwise.
+  ///
+  /// Re-entrant calls are dropped. These handlers already carry
+  /// `_activeCapture?.id != capture.id` guards because the selection can move
+  /// under them, and a second crop started on top of a running one is the same
+  /// hazard from the other direction — the overlay makes it look impossible,
+  /// so this makes it actually impossible rather than relying on the user not
+  /// reaching the header buttons the overlay does not cover.
+  Future<void> _runBusy(String message, Future<void> Function() action) async {
+    if (_busyTimer != null || _busyMessage != null) return;
+
+    _busyTimer = Timer(_busyGrace, () {
+      if (mounted) setState(() => _busyMessage = message);
+    });
+    try {
+      await action();
+    } finally {
+      _busyTimer?.cancel();
+      _busyTimer = null;
+      if (mounted && _busyMessage != null) {
+        setState(() => _busyMessage = null);
+      } else {
+        _busyMessage = null;
+      }
     }
   }
 
@@ -2345,28 +2419,18 @@ class _MainScreenState extends State<MainScreen> {
                           // — see SnipTheme.scrim's own doc comment.
                           if (_isCapturing)
                             const Positioned.fill(
-                              child: ColoredBox(
-                                color: SnipTheme.scrim,
-                                child: Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      CircularProgressIndicator(
-                                        color: Colors.white,
-                                      ),
-                                      SizedBox(height: 16),
-                                      Text(
-                                        'Waiting for screen capture...',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                              child: CanvasBusyOverlay(
+                                message: 'Waiting for screen capture...',
                               ),
+                            ),
+
+                          // Long image operations: crop, flatten, export,
+                          // copy. Same scrim as the capture overlay above and
+                          // for the same reason — see [_runBusy], which is the
+                          // only thing that sets this.
+                          if (_busyMessage != null && !_isCapturing)
+                            Positioned.fill(
+                              child: CanvasBusyOverlay(message: _busyMessage!),
                             ),
                         ],
                       ),
