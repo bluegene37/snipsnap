@@ -335,6 +335,9 @@ class AnnotationRenderer {
 
       case CanvasTool.crop:
       case CanvasTool.blur:
+      // A patch is opaque pixels, so the whole rect is grabbable — unlike a
+      // hollow shape, there is nothing to click "through".
+      case CanvasTool.imagePatch:
         if (ann.startPoint == null || ann.endPoint == null) return false;
         return Rect.fromPoints(
           ann.startPoint!,
@@ -492,12 +495,18 @@ class AnnotationRenderer {
   /// affects no geometry — only the ruler's reported measurement, which has to
   /// be in the image's own pixels rather than in display pixels that change
   /// with the window size.
+  /// [patchImages] supplies the decoded bitmap for each [CanvasTool.imagePatch]
+  /// annotation, keyed by annotation id. Painting is synchronous and decoding
+  /// is not, so the caller decodes ahead: the editor keeps a cache alongside
+  /// its annotation list, and the export path decodes before it starts
+  /// recording. A patch with no entry is skipped rather than drawn empty.
   static void paintAll(
     Canvas canvas,
     List<Annotation> annotations, {
     ui.Image? baseImage,
     Rect? imageRect,
     double pixelScale = 1.0,
+    Map<String, ui.Image>? patchImages,
   }) {
     for (final ann in annotations) {
       paint(
@@ -506,6 +515,7 @@ class AnnotationRenderer {
         baseImage: baseImage,
         imageRect: imageRect,
         pixelScale: pixelScale,
+        patchImages: patchImages,
       );
     }
   }
@@ -516,6 +526,7 @@ class AnnotationRenderer {
     ui.Image? baseImage,
     Rect? imageRect,
     double pixelScale = 1.0,
+    Map<String, ui.Image>? patchImages,
   }) {
     final bounds = boundingRect(ann);
     final rotated = ann.rotation != 0.0 && bounds != Rect.zero;
@@ -547,10 +558,33 @@ class AnnotationRenderer {
         _drawStepMarker(canvas, ann);
       case CanvasTool.text:
         _drawText(canvas, ann);
+      case CanvasTool.imagePatch:
+        _drawImagePatch(canvas, ann, patchImages?[ann.id]);
       default:
     }
 
     if (rotated) canvas.restore();
+  }
+
+  /// Draws a cut-out region into the rect it has been moved to.
+  ///
+  /// [image] is null until the decode lands, and on the frame a patch is first
+  /// created. Drawing nothing is right for both: the alternative is a black
+  /// rectangle where the pixels belong.
+  static void _drawImagePatch(Canvas canvas, Annotation ann, ui.Image? image) {
+    if (image == null) return;
+    if (ann.startPoint == null || ann.endPoint == null) return;
+    final dst = Rect.fromPoints(ann.startPoint!, ann.endPoint!);
+    if (dst.isEmpty) return;
+
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      dst,
+      Paint()
+        ..filterQuality = FilterQuality.medium
+        ..color = const Color(0xFFFFFFFF).withValues(alpha: ann.opacity),
+    );
   }
 
   static Color _applyOpacity(Color color, double opacity) {

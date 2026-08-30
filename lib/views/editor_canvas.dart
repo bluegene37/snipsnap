@@ -249,6 +249,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// Marks the zoom viewport so pointer positions can be resolved against it.
   final GlobalKey _viewportKey = GlobalKey();
 
+  /// Decoded pixels for every `CanvasTool.imagePatch` annotation on the canvas,
+  /// keyed by annotation id. Rebuilt by [_syncPatchImages] whenever the set of
+  /// patches changes, and swapped in wholesale so the painter can tell "some
+  /// bitmap is new" by reference alone.
+  Map<String, ui.Image> _patchImages = const {};
+
   /// True while a space-held drag is moving the viewport rather than drawing.
   bool _isPanningView = false;
 
@@ -360,6 +366,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     super.initState();
     _checkFileExists();
     _loadBaseImage();
+    _syncPatchImages();
     _transformationController = TransformationController();
     if (widget.zoomScale != 1.0) {
       // Post-frame: the viewport has no size until it has been laid out, and
@@ -373,6 +380,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   @override
   void dispose() {
+    for (final image in _patchImages.values) {
+      image.dispose();
+    }
+    _patchImages = const {};
     _baseImage?.dispose();
     _baseImage = null;
     _cachedSourceImage = null;
@@ -417,6 +428,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 .abs() >
             0.001) {
       _zoomToCentre(widget.zoomScale);
+    }
+
+    if (!identical(oldWidget.annotations, widget.annotations)) {
+      _syncPatchImages();
     }
 
     // A different list from the parent is authoritative: the only override
@@ -700,6 +715,52 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   void _setTransform(Matrix4 matrix) {
     _transformationController.value = _constrain(matrix);
+  }
+
+  /// Keeps [_patchImages] in step with the patch annotations on the canvas.
+  ///
+  /// Decoding is async and painting is not, so the bitmaps are decoded here
+  /// and handed to the painter already usable; a patch with no entry yet is
+  /// simply not drawn for a frame. Images for patches that have gone — deleted,
+  /// undone, or belonging to a capture we switched away from — are disposed,
+  /// because these are native handles and leaking them is exactly what
+  /// AGENTS.md §2.1 is about.
+  Future<void> _syncPatchImages() async {
+    final wanted = <String, Uint8List>{};
+    for (final ann in widget.annotations) {
+      if (ann.tool != CanvasTool.imagePatch) continue;
+      final bytes = ann.patchBytes;
+      if (bytes != null) wanted[ann.id] = bytes;
+    }
+
+    final haveIds = _patchImages.keys.toSet();
+    if (haveIds.length == wanted.length && haveIds.every(wanted.containsKey)) {
+      return;
+    }
+
+    final next = <String, ui.Image>{};
+    for (final entry in wanted.entries) {
+      final existing = _patchImages[entry.key];
+      if (existing != null) {
+        next[entry.key] = existing;
+        continue;
+      }
+      final decoded = await RenderService.decodeImageBytes(entry.value);
+      if (decoded != null) next[entry.key] = decoded;
+    }
+
+    // Anything the new map does not carry over is ours to release.
+    for (final entry in _patchImages.entries) {
+      if (!identical(next[entry.key], entry.value)) entry.value.dispose();
+    }
+
+    if (!mounted) {
+      for (final image in next.values) {
+        image.dispose();
+      }
+      return;
+    }
+    setState(() => _patchImages = next);
   }
 
   /// Scales to [targetScale] while holding [focalPoint] (viewport coordinates)
@@ -2255,11 +2316,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     if (widget.activeTool == CanvasTool.select) {
       if (_floatingSelectionRect != null &&
           !_floatingSelectionRect!.contains(pos)) {
-        // Drop it where it landed, but leave the outline pickable so a
-        // mis-placed move can be nudged instead of undone. A second click
-        // outside finds nothing extracted and clears the outline, so the
-        // gesture still dismisses the selection — it just takes two.
-        _commitFloatingSelection(keepSelection: _hasExtractedSelection);
+        // Drops the piece as a movable object, not as pasted pixels — see
+        // `_commitFloatingSelection`.
+        _commitFloatingSelection();
       }
       if (hit != null) {
         setState(() => _selectedAnnotationId = hit.id);
@@ -2537,15 +2596,54 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// capture, and using them would stamp one capture's pixels into another
   /// capture's file. Every other caller wants the live values and passes
   /// neither.
-  /// [keepSelection] leaves the outline behind at the spot the piece landed,
-  /// with `_hasExtractedSelection` reset, so the next drag inside it re-cuts
-  /// that region through the same path a fresh marquee uses. Dropping a cut
-  /// used to end it outright: the pixels were baked in and the only way to
-  /// nudge a mis-placed move was to undo the whole thing.
+  /// Turns the floating cut into a [CanvasTool.imagePatch] annotation carrying
+  /// its own pixels, at the rect it was dropped on.
+  ///
+  /// Reported through `onAnnotationsLiveUpdated`, which does *not* push an undo
+  /// state: the cut already pushed one before it took the pixels out of the
+  /// bitmap (see the `onBeforeCanvasFill` call in `_extractFloatingSelection`),
+  /// and that snapshot covers the annotation list too. A second push here would
+  /// give the user an undo step that removes the patch but leaves the hole.
+  Future<void> _dropCutAsObject(Rect rect, img.Image cutImg) async {
+    final projection = _projection;
+    if (!_canPlaceWrite(projection)) return;
+
+    final png = await compute(img.encodePng, cutImg);
+    if (!mounted) return;
+
+    final patch = Annotation(
+      id: const Uuid().v4(),
+      tool: CanvasTool.imagePatch,
+      // Unused by the patch painter, which draws pixels — but `color` is
+      // required and a transparent one cannot be mistaken for a real choice.
+      color: const Color(0x00000000),
+      startPoint: rect.topLeft,
+      endPoint: rect.bottomRight,
+      patchBytes: Uint8List.fromList(png),
+    ).mappedToImageSpace(projection);
+
+    widget.onAnnotationsLiveUpdated?.call([...widget.annotations, patch]);
+    // Selected on arrival, so the piece the user just dropped is the thing the
+    // handles are on and one drag moves it again.
+    if (mounted) setState(() => _selectedAnnotationId = patch.id);
+  }
+
+  /// Ends the floating cut.
+  ///
+  /// On the live capture the piece becomes a [CanvasTool.imagePatch]
+  /// annotation carrying its own pixels, so it stays selectable, movable,
+  /// resizable and deletable until Flatten bakes it in — Snagit's model.
+  /// Dropping a cut used to paste it straight back into the bitmap, which
+  /// meant a mis-placed move could only be undone, never nudged.
+  ///
+  /// [toPath] and [throughImageRect] are the capture-switch path, which has to
+  /// write into the capture the region was cut *out* of. That one still pastes
+  /// into the file: the annotation list on screen belongs to the capture we
+  /// have just moved to, so an object there would attach the pixels to the
+  /// wrong image.
   Future<void> _commitFloatingSelection({
     String? toPath,
     Rect? throughImageRect,
-    bool keepSelection = false,
   }) async {
     if (!_hasExtractedSelection ||
         _cutSelectionImage == null ||
@@ -2570,6 +2668,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     var wroteBitmap = false;
 
     try {
+      if (!isForeignTarget) {
+        await _dropCutAsObject(currentRect, cutImg);
+        return;
+      }
+
       // `_cachedSourceImage` tracks whatever the canvas is showing now, which
       // is the wrong bitmap once the target is a capture we have switched
       // away from — decode that file fresh instead, and leave the cache alone.
@@ -2618,14 +2721,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         setState(() {
           _floatingSelectionUiImage = null;
           _cutSelectionImage = null;
-          if (keepSelection && wroteBitmap) {
-            // The piece is in the bitmap now, so the origin for any re-cut is
-            // where it landed, not where it was first taken from.
-            _floatingSelectionOriginRect = currentRect;
-          } else {
-            _floatingSelectionRect = null;
-            _floatingSelectionOriginRect = null;
-          }
+          _floatingSelectionRect = null;
+          _floatingSelectionOriginRect = null;
           _hasExtractedSelection = false;
         });
         await _loadBaseImage();
@@ -3213,6 +3310,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                           projection,
                                         ),
                                         pixelScale: projection.scale,
+                                        patchImages: _patchImages,
                                         currentAnnotation: _currentAnnotation,
                                         selectedAnnotationId:
                                             _selectedAnnotationId,
@@ -4269,6 +4367,11 @@ class _AnnotationPainter extends CustomPainter {
   final ui.Image? baseImage;
   final bool showHud;
 
+  /// Decoded pixels for every `CanvasTool.imagePatch` annotation, keyed by id.
+  /// Owned by the State — see `_syncPatchImages` — because painting is
+  /// synchronous and decoding is not.
+  final Map<String, ui.Image> patchImages;
+
   /// Image pixels per canvas unit, for the ruler's measurement readout. The
   /// painter cannot derive it — the State owns the projection — so it is passed
   /// in from `build`.
@@ -4277,6 +4380,7 @@ class _AnnotationPainter extends CustomPainter {
   _AnnotationPainter({
     required this.annotations,
     required this.pixelScale,
+    required this.patchImages,
     this.currentAnnotation,
     this.selectedAnnotationId,
     this.editingAnnotationId,
@@ -4306,6 +4410,7 @@ class _AnnotationPainter extends CustomPainter {
       baseImage: image,
       imageRect: imageRect,
       pixelScale: pixelScale,
+      patchImages: patchImages,
     );
 
     if (selectedAnnotationId != null &&
@@ -4332,7 +4437,10 @@ class _AnnotationPainter extends CustomPainter {
         oldDelegate.selectedAnnotationId != selectedAnnotationId ||
         oldDelegate.editingAnnotationId != editingAnnotationId ||
         oldDelegate.baseImage != baseImage ||
-        oldDelegate.showHud != showHud;
+        oldDelegate.showHud != showHud ||
+        // Identity: the State swaps in a whole new map when a decode lands, so
+        // a changed reference is exactly "some patch bitmap is new".
+        !identical(oldDelegate.patchImages, patchImages);
   }
 }
 

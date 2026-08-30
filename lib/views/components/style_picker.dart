@@ -456,7 +456,7 @@ class StylePicker extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '• Drag over the image to create a selection.\n• Drag inside to cut & move.\n• Click away to drop it — the outline stays, so you can drag it again.\n• Esc or Enter finishes the selection.\n• Press Delete to erase to transparent.\n• Click any annotation on canvas to edit its properties.',
+                      '• Drag over the image to create a selection.\n• Drag inside to cut & move.\n• Dropping it leaves a movable piece — click it any time to move, resize or delete it.\n• Flatten bakes the pieces into the image.\n• Press Delete to erase to transparent.\n• Click any annotation on canvas to edit its properties.',
                       style: TextStyle(
                         color: subTextColor,
                         fontSize: 11,

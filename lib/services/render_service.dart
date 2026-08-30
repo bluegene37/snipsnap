@@ -6,6 +6,7 @@ import 'package:flutter/painting.dart';
 
 import '../models/annotation.dart';
 import '../utils/canvas_projection.dart';
+import '../utils/constants.dart';
 import '../views/components/annotation_renderer.dart';
 
 /// Flattens a capture plus its vector annotations into a PNG at the source
@@ -52,6 +53,41 @@ class RenderService {
       debugPrint('SnipSnap decode error: $e');
       return null;
     }
+  }
+
+  /// Decodes PNG [bytes] into a `ui.Image`. Callers own the result and must
+  /// call `dispose()` on it.
+  static Future<ui.Image?> decodeImageBytes(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      codec.dispose();
+      return frame.image;
+    } catch (e) {
+      debugPrint('SnipSnap decode error: $e');
+      return null;
+    }
+  }
+
+  /// Decodes every [CanvasTool.imagePatch] annotation's pixels, keyed by
+  /// annotation id, for handing to [AnnotationRenderer.paintAll].
+  ///
+  /// The renderer paints synchronously, so a patch whose bytes have not been
+  /// decoded by the time it runs is skipped — which on the export path would
+  /// mean silently dropping a moved region out of the saved file. Hence
+  /// decoding up front, before any recording starts.
+  static Future<Map<String, ui.Image>> decodePatchImages(
+    List<Annotation> annotations,
+  ) async {
+    final out = <String, ui.Image>{};
+    for (final ann in annotations) {
+      if (ann.tool != CanvasTool.imagePatch) continue;
+      final bytes = ann.patchBytes;
+      if (bytes == null) continue;
+      final image = await decodeImageBytes(bytes);
+      if (image != null) out[ann.id] = image;
+    }
+    return out;
   }
 
   /// Renders [imagePath] with [annotations] burned in, at native resolution,
@@ -175,6 +211,14 @@ class RenderService {
       // Guaranteed non-empty here whenever there is anything to map: the check
       // above already threw. A framing-only export can still reach this point
       // with an empty rect, hence the guard on the annotation list.
+      // Decoded before recording starts, and disposed below: these are native
+      // image handles (AGENTS.md §2.1), and the renderer skips any patch it has
+      // no bitmap for — which here would mean silently dropping a moved region
+      // out of the saved file.
+      final patchImages = annotations.isEmpty
+          ? const <String, ui.Image>{}
+          : await decodePatchImages(annotations);
+
       if (annotations.isNotEmpty) {
         final projection = CanvasProjection(
           imageSize: imageSize,
@@ -191,8 +235,13 @@ class RenderService {
           baseImage: baseImage,
           imageRect: imageRect,
           pixelScale: scale,
+          patchImages: patchImages,
         );
         canvas.restore();
+      }
+
+      for (final image in patchImages.values) {
+        image.dispose();
       }
 
       canvas.restore();
