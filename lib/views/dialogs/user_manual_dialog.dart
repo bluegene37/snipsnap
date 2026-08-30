@@ -61,9 +61,7 @@ class _UserManualDialogState extends State<UserManualDialog> {
     if (_searchQuery.trim().isEmpty) {
       return UserManualData.topics;
     }
-    return UserManualData.topics
-        .where((t) => t.matches(_searchQuery))
-        .toList();
+    return UserManualData.topics.where((t) => t.matches(_searchQuery)).toList();
   }
 
   ManualTopic? get _activeTopic {
@@ -91,9 +89,7 @@ class _UserManualDialogState extends State<UserManualDialog> {
         width: 860,
         height: 640,
         clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(16)),
         child: Column(
           children: [
             // Top Window Title Bar
@@ -108,11 +104,7 @@ class _UserManualDialogState extends State<UserManualDialog> {
                   _buildSidebar(t, filteredTopics),
 
                   // Vertical Divider
-                  VerticalDivider(
-                    width: 1,
-                    thickness: 1,
-                    color: t.border,
-                  ),
+                  VerticalDivider(width: 1, thickness: 1, color: t.border),
 
                   // Right Detail Content Area
                   Expanded(
@@ -198,11 +190,22 @@ class _UserManualDialogState extends State<UserManualDialog> {
                 isDense: true,
                 hintText: 'Search guides & shortcuts...',
                 hintStyle: TextStyle(fontSize: 12, color: t.inkMuted),
-                prefixIcon: Icon(Icons.search_rounded, size: 16, color: t.inkMuted),
-                prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  size: 16,
+                  color: t.inkMuted,
+                ),
+                prefixIconConstraints: const BoxConstraints(
+                  minWidth: 32,
+                  minHeight: 32,
+                ),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
-                        icon: Icon(Icons.clear_rounded, size: 14, color: t.inkMuted),
+                        icon: Icon(
+                          Icons.clear_rounded,
+                          size: 14,
+                          color: t.inkMuted,
+                        ),
                         splashRadius: 14,
                         onPressed: () {
                           _searchController.clear();
@@ -212,10 +215,16 @@ class _UserManualDialogState extends State<UserManualDialog> {
                         },
                       )
                     : null,
-                suffixIconConstraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                suffixIconConstraints: const BoxConstraints(
+                  minWidth: 28,
+                  minHeight: 28,
+                ),
                 filled: true,
                 fillColor: t.surfaceRaised,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: t.border),
@@ -245,7 +254,10 @@ class _UserManualDialogState extends State<UserManualDialog> {
                     ),
                   )
                 : SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     child: Column(
                       children: topics.map((topic) {
                         final isSelected = topic.id == _selectedTopicId;
@@ -261,63 +273,81 @@ class _UserManualDialogState extends State<UserManualDialog> {
                             },
                             borderRadius: BorderRadius.circular(8),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: isSelected ? t.selectedFill : Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: isSelected ? t.borderStrong : Colors.transparent,
-                                width: 1,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? t.selectedFill
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? t.borderStrong
+                                      : Colors.transparent,
+                                  width: 1,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    topic.icon,
+                                    size: 16,
+                                    color: isSelected ? t.ink : t.inkMuted,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      topic.title,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: isSelected
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                        color: isSelected ? t.ink : t.inkMuted,
+                                      ),
+                                    ),
+                                  ),
+                                  if (topic.badge != null) ...[
+                                    const SizedBox(width: 4),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 5,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isSelected
+                                            ? t.activeFill
+                                            : t.surfaceRaised,
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(
+                                          color: isSelected
+                                              ? t.activeFill
+                                              : t.border,
+                                          width: 0.8,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        topic.badge!,
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w600,
+                                          color: isSelected
+                                              ? t.onActive
+                                              : t.inkMuted,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  topic.icon,
-                                  size: 16,
-                                  color: isSelected ? t.ink : t.inkMuted,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    topic.title,
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                      color: isSelected ? t.ink : t.inkMuted,
-                                    ),
-                                  ),
-                                ),
-                                if (topic.badge != null) ...[
-                                  const SizedBox(width: 4),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: isSelected ? t.activeFill : t.surfaceRaised,
-                                      borderRadius: BorderRadius.circular(4),
-                                      border: Border.all(
-                                        color: isSelected ? t.activeFill : t.border,
-                                        width: 0.8,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      topic.badge!,
-                                      style: TextStyle(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w600,
-                                        color: isSelected ? t.onActive : t.inkMuted,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
                           ),
-                        ),
-                      );
-                    }).toList(),
+                        );
+                      }).toList(),
+                    ),
                   ),
-                ),
           ),
         ],
       ),
@@ -425,11 +455,7 @@ class _UserManualDialogState extends State<UserManualDialog> {
           // Description
           SelectableText(
             section.description,
-            style: TextStyle(
-              fontSize: 13,
-              color: t.ink,
-              height: 1.45,
-            ),
+            style: TextStyle(fontSize: 13, color: t.ink, height: 1.45),
           ),
 
           // Steps list
@@ -491,7 +517,11 @@ class _UserManualDialogState extends State<UserManualDialog> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.lightbulb_outline_rounded, size: 16, color: t.emphasis),
+                  Icon(
+                    Icons.lightbulb_outline_rounded,
+                    size: 16,
+                    color: t.emphasis,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: SelectableText(
@@ -516,7 +546,10 @@ class _UserManualDialogState extends State<UserManualDialog> {
               spacing: 6,
               children: section.tags.map((tag) {
                 return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: t.surfaceRaised,
                     borderRadius: BorderRadius.circular(4),
@@ -605,7 +638,10 @@ class _UserManualDialogState extends State<UserManualDialog> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(6),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
               ),
               onPressed: () {
                 Navigator.of(context).pop();

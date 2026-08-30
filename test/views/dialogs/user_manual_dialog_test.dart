@@ -33,7 +33,9 @@ Widget _buildTestDialog({
 }
 
 void main() {
-  testWidgets('renders UserManualDialog with all default topics and header', (tester) async {
+  testWidgets('renders UserManualDialog with all default topics and header', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -54,7 +56,9 @@ void main() {
     expect(find.text('Welcome to SnipSnap'), findsOneWidget);
   });
 
-  testWidgets('switches content when selecting a different topic', (tester) async {
+  testWidgets('switches content when selecting a different topic', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -71,7 +75,9 @@ void main() {
     expect(find.text('Vector Arrows & Lines'), findsOneWidget);
   });
 
-  testWidgets('filters topics and sections in real-time when searching', (tester) async {
+  testWidgets('filters topics and sections in real-time when searching', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -85,7 +91,10 @@ void main() {
     await tester.pumpAndSettle();
 
     // Topic list should only have Annotation & Drawing Tools
-    expect(find.byKey(const ValueKey('topic_annotation_tools')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('topic_annotation_tools')),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('topic_screen_pinning')), findsNothing);
 
     // Clear search
@@ -96,7 +105,9 @@ void main() {
     expect(find.byKey(const ValueKey('topic_screen_pinning')), findsOneWidget);
   });
 
-  testWidgets('displays empty state when search finds no match', (tester) async {
+  testWidgets('displays empty state when search finds no match', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -112,7 +123,9 @@ void main() {
     expect(find.text('No matching topics'), findsOneWidget);
   });
 
-  testWidgets('initialTopicId opens directly to specified topic', (tester) async {
+  testWidgets('initialTopicId opens directly to specified topic', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -125,17 +138,21 @@ void main() {
     expect(find.text('Extracting Text with the OCR Tool'), findsOneWidget);
   });
 
-  testWidgets('onOpenShortcuts callback is invoked and dialog closes', (tester) async {
+  testWidgets('onOpenShortcuts callback is invoked and dialog closes', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
     bool shortcutsOpened = false;
-    await tester.pumpWidget(_buildTestDialog(
-      onOpenShortcuts: () {
-        shortcutsOpened = true;
-      },
-    ));
+    await tester.pumpWidget(
+      _buildTestDialog(
+        onOpenShortcuts: () {
+          shortcutsOpened = true;
+        },
+      ),
+    );
     await tester.tap(find.text('Open Manual'));
     await tester.pumpAndSettle();
 

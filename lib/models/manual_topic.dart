@@ -52,9 +52,13 @@ class ManualTopic {
     for (final section in sections) {
       if (section.title.toLowerCase().contains(q)) return true;
       if (section.description.toLowerCase().contains(q)) return true;
-      if (section.tip != null && section.tip!.toLowerCase().contains(q)) return true;
+      if (section.tip != null && section.tip!.toLowerCase().contains(q)) {
+        return true;
+      }
       if (section.steps.any((s) => s.toLowerCase().contains(q))) return true;
-      if (section.shortcuts.any((sc) => sc.toLowerCase().contains(q))) return true;
+      if (section.shortcuts.any((sc) => sc.toLowerCase().contains(q))) {
+        return true;
+      }
       if (section.tags.any((t) => t.toLowerCase().contains(q))) return true;
     }
 

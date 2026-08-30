@@ -22,8 +22,10 @@ Widget _harness({String? initialTopicId}) {
         body: Builder(
           builder: (context) => Center(
             child: ElevatedButton(
-              onPressed: () =>
-                  UserManualDialog.show(context, initialTopicId: initialTopicId),
+              onPressed: () => UserManualDialog.show(
+                context,
+                initialTopicId: initialTopicId,
+              ),
               child: const Text('Open Manual'),
             ),
           ),
@@ -79,26 +81,36 @@ void main() {
       await tester.pumpAndSettle();
 
       final shown = _visibleTopicId(tester);
-      expect(shown, isNot('annotation_tools'),
-          reason: 'the selected topic was filtered out of the results');
+      expect(
+        shown,
+        isNot('annotation_tools'),
+        reason: 'the selected topic was filtered out of the results',
+      );
 
       // The bug: the pane showed `shown` while no sidebar row was highlighted.
-      expect(_rowIsHighlighted(tester, shown), isTrue,
-          reason: 'the topic on screen must be the one marked selected');
+      expect(
+        _rowIsHighlighted(tester, shown),
+        isTrue,
+        reason: 'the topic on screen must be the one marked selected',
+      );
 
       for (final topic in UserManualData.topics) {
         if (topic.id == shown) continue;
         if (find.byKey(ValueKey('topic_${topic.id}')).evaluate().isEmpty) {
           continue; // filtered out of the sidebar entirely
         }
-        expect(_rowIsHighlighted(tester, topic.id), isFalse,
-            reason: 'only the visible topic may be highlighted');
+        expect(
+          _rowIsHighlighted(tester, topic.id),
+          isFalse,
+          reason: 'only the visible topic may be highlighted',
+        );
       }
     },
   );
 
-  testWidgets('clearing the search keeps the topic the reader landed on',
-      (tester) async {
+  testWidgets('clearing the search keeps the topic the reader landed on', (
+    tester,
+  ) async {
     await _openManual(tester, initialTopicId: 'annotation_tools');
 
     await tester.enterText(find.byType(TextField), 'ocr');
@@ -109,13 +121,17 @@ void main() {
     await tester.pumpAndSettle();
 
     // The bug: this snapped back to 'annotation_tools'.
-    expect(_visibleTopicId(tester), landedOn,
-        reason: 'clearing the search must not discard the reader\'s position');
+    expect(
+      _visibleTopicId(tester),
+      landedOn,
+      reason: 'clearing the search must not discard the reader\'s position',
+    );
     expect(_rowIsHighlighted(tester, landedOn), isTrue);
   });
 
-  testWidgets('a search matching nothing leaves the selection untouched',
-      (tester) async {
+  testWidgets('a search matching nothing leaves the selection untouched', (
+    tester,
+  ) async {
     await _openManual(tester, initialTopicId: 'annotation_tools');
 
     await tester.enterText(find.byType(TextField), 'zzzznomatch');
@@ -124,7 +140,10 @@ void main() {
 
     await tester.enterText(find.byType(TextField), '');
     await tester.pumpAndSettle();
-    expect(_visibleTopicId(tester), 'annotation_tools',
-        reason: 'an empty result set must not clobber the selection');
+    expect(
+      _visibleTopicId(tester),
+      'annotation_tools',
+      reason: 'an empty result set must not clobber the selection',
+    );
   });
 }

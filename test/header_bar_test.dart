@@ -324,4 +324,3 @@ void main() {
     expect(manualOpened, isTrue);
   });
 }
-

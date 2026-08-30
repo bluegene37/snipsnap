@@ -79,8 +79,11 @@ void main() {
       );
 
       final caption = tester.widget<Text>(find.text('Flattening…'));
-      expect(caption.style?.color, Colors.white,
-          reason: 'caption must stay white against the fixed scrim in $mode');
+      expect(
+        caption.style?.color,
+        Colors.white,
+        reason: 'caption must stay white against the fixed scrim in $mode',
+      );
     }
   });
 }

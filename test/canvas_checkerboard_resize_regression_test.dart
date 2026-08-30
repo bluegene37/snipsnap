@@ -156,8 +156,11 @@ void main() {
     final actual = tester.getRect(_checkerboard());
     final expected = _expectedRect(tester, repaintKey);
 
-    expect(actual.height, greaterThan(before.height),
-        reason: 'the fitted capture grew, so its backdrop must grow with it');
+    expect(
+      actual.height,
+      greaterThan(before.height),
+      reason: 'the fitted capture grew, so its backdrop must grow with it',
+    );
     // The bug: `actual` stayed at `before`, i.e. the pre-resize geometry.
     expect(actual.left, closeTo(expected.left, 0.5));
     expect(actual.top, closeTo(expected.top, 0.5));
@@ -165,31 +168,33 @@ void main() {
     expect(actual.height, closeTo(expected.height, 0.5));
   });
 
-  testWidgets('the checkerboard follows the capture when the viewport shrinks',
-      (tester) async {
-    await tester.binding.setSurfaceSize(const Size(900, 900));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+  testWidgets(
+    'the checkerboard follows the capture when the viewport shrinks',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    await _pumpCanvas(
-      tester,
-      imagePath: imagePath,
-      repaintKey: repaintKey,
-      height: 860,
-    );
+      await _pumpCanvas(
+        tester,
+        imagePath: imagePath,
+        repaintKey: repaintKey,
+        height: 860,
+      );
 
-    await _pumpCanvas(
-      tester,
-      imagePath: imagePath,
-      repaintKey: repaintKey,
-      height: 500,
-      settle: true,
-    );
+      await _pumpCanvas(
+        tester,
+        imagePath: imagePath,
+        repaintKey: repaintKey,
+        height: 500,
+        settle: true,
+      );
 
-    final actual = tester.getRect(_checkerboard());
-    final expected = _expectedRect(tester, repaintKey);
-    expect(actual.left, closeTo(expected.left, 0.5));
-    expect(actual.top, closeTo(expected.top, 0.5));
-    expect(actual.width, closeTo(expected.width, 0.5));
-    expect(actual.height, closeTo(expected.height, 0.5));
-  });
+      final actual = tester.getRect(_checkerboard());
+      final expected = _expectedRect(tester, repaintKey);
+      expect(actual.left, closeTo(expected.left, 0.5));
+      expect(actual.top, closeTo(expected.top, 0.5));
+      expect(actual.width, closeTo(expected.width, 0.5));
+      expect(actual.height, closeTo(expected.height, 0.5));
+    },
+  );
 }

@@ -88,22 +88,33 @@ void main() {
   }
 
   group('manual capture hotkeys match the real defaults', () {
-    test('Area Snip is the interactiveSnip default, not a macOS system chord', () {
-      expect(_parseChord('Cmd+Shift+1'),
-          expectedFor(AppShortcutAction.interactiveSnip));
-      // The bug: Cmd+Shift+4 is Apple's own area-screenshot chord.
-      expect(_parseChord('Cmd+Shift+4'),
-          isNot(expectedFor(AppShortcutAction.interactiveSnip)));
-    });
+    test(
+      'Area Snip is the interactiveSnip default, not a macOS system chord',
+      () {
+        expect(
+          _parseChord('Cmd+Shift+1'),
+          expectedFor(AppShortcutAction.interactiveSnip),
+        );
+        // The bug: Cmd+Shift+4 is Apple's own area-screenshot chord.
+        expect(
+          _parseChord('Cmd+Shift+4'),
+          isNot(expectedFor(AppShortcutAction.interactiveSnip)),
+        );
+      },
+    );
 
     test('Full Screen Snip is the fullScreenSnip default', () {
-      expect(_parseChord('Cmd+Shift+2'),
-          expectedFor(AppShortcutAction.fullScreenSnip));
+      expect(
+        _parseChord('Cmd+Shift+2'),
+        expectedFor(AppShortcutAction.fullScreenSnip),
+      );
     });
 
     test('3s Timer Snip is the timerSnip default', () {
-      expect(_parseChord('Cmd+Shift+6'),
-          expectedFor(AppShortcutAction.timerSnip));
+      expect(
+        _parseChord('Cmd+Shift+6'),
+        expectedFor(AppShortcutAction.timerSnip),
+      );
     });
   });
 
@@ -122,8 +133,11 @@ void main() {
       }
     }
 
-    expect(unbound, isEmpty,
-        reason: 'manual advertises chords with no binding in ShortcutService');
+    expect(
+      unbound,
+      isEmpty,
+      reason: 'manual advertises chords with no binding in ShortcutService',
+    );
   });
 
   test('every bare-letter key the manual advertises selects a tool', () {
@@ -136,8 +150,11 @@ void main() {
       }
     }
 
-    expect(unknown, isEmpty,
-        reason: 'manual advertises tool letters the canvas does not map');
+    expect(
+      unknown,
+      isEmpty,
+      reason: 'manual advertises tool letters the canvas does not map',
+    );
   });
 
   test('the manual does not promise unimplemented actions', () {
@@ -151,8 +168,11 @@ void main() {
       }
     }
 
-    expect(offenders, isEmpty,
-        reason: 'manual documents a shortcut the app never binds');
+    expect(
+      offenders,
+      isEmpty,
+      reason: 'manual documents a shortcut the app never binds',
+    );
   });
 
   test('the tool letters the manual leans on are each mapped exactly once', () {
@@ -168,9 +188,15 @@ void main() {
     expect(claimed, contains('N'), reason: 'Step Marker is N, not S');
     expect(claimed, contains('E'), reason: 'OCR is E, not C');
     expect(claimed, contains('G'), reason: 'Fill is G, not F');
-    expect(claimed, isNot(contains('F')),
-        reason: 'F is not mapped to any tool');
-    expect(claimed, isNot(contains('O')),
-        reason: 'O is not mapped to any tool; the Shape tool is R / U');
+    expect(
+      claimed,
+      isNot(contains('F')),
+      reason: 'F is not mapped to any tool',
+    );
+    expect(
+      claimed,
+      isNot(contains('O')),
+      reason: 'O is not mapped to any tool; the Shape tool is R / U',
+    );
   });
 }

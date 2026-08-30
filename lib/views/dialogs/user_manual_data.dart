@@ -12,7 +12,16 @@ class UserManualData {
       subtitle: 'Overview, core workflow, and canvas navigation',
       icon: Icons.rocket_launch_rounded,
       badge: 'Start Here',
-      keywords: ['overview', 'quickstart', 'zoom', 'pan', 'open', 'paste', 'clipboard', 'workflow'],
+      keywords: [
+        'overview',
+        'quickstart',
+        'zoom',
+        'pan',
+        'open',
+        'paste',
+        'clipboard',
+        'workflow',
+      ],
       sections: [
         ManualSection(
           title: 'Welcome to SnipSnap',
@@ -40,7 +49,8 @@ class UserManualData {
             'Pan Canvas: Hold Spacebar and drag with your mouse, or drag with the middle mouse button to move across the image.',
             'Reset Zoom: Click the zoom percentage indicator in the top header bar to quickly snap back to 100% (the fit-to-window baseline).',
           ],
-          tip: 'When working on multi-megapixel screenshots, zooming in helps you place pixel-perfect arrows and text callouts.',
+          tip:
+              'When working on multi-megapixel screenshots, zooming in helps you place pixel-perfect arrows and text callouts.',
         ),
         ManualSection(
           title: 'Importing Images & Clipboard',
@@ -59,7 +69,18 @@ class UserManualData {
       title: 'Screen Capture & DPI',
       subtitle: 'Area capture, fullscreen, timer, and high-DPI scaling',
       icon: Icons.camera_alt_rounded,
-      keywords: ['snip', 'capture', 'fullscreen', 'area', 'region', 'timer', 'retina', 'dpi', 'display', 'monitor'],
+      keywords: [
+        'snip',
+        'capture',
+        'fullscreen',
+        'area',
+        'region',
+        'timer',
+        'retina',
+        'dpi',
+        'display',
+        'monitor',
+      ],
       sections: [
         ManualSection(
           title: 'Interactive Area Snip',
@@ -83,7 +104,8 @@ class UserManualData {
           title: '3-Second Timer Snip',
           description:
               'Trigger a delayed 3-second countdown capture. This gives you time to open dropdown menus, hover tooltips, modal dialogs, or right-click context menus before the screenshot fires.',
-          tip: 'Use Timer Snip whenever capturing transient UI states that disappear when you click outside the application.',
+          tip:
+              'Use Timer Snip whenever capturing transient UI states that disappear when you click outside the application.',
           shortcuts: ['Cmd+Shift+6'],
         ),
         ManualSection(
@@ -100,7 +122,23 @@ class UserManualData {
       subtitle: 'Vector shapes, arrows, step markers, blur, and highlighters',
       icon: Icons.draw_rounded,
       badge: 'Core Tools',
-      keywords: ['arrow', 'shape', 'rectangle', 'oval', 'step', 'marker', 'number', 'badge', 'text', 'blur', 'pixelate', 'highlighter', 'pen', 'ruler', 'fill'],
+      keywords: [
+        'arrow',
+        'shape',
+        'rectangle',
+        'oval',
+        'step',
+        'marker',
+        'number',
+        'badge',
+        'text',
+        'blur',
+        'pixelate',
+        'highlighter',
+        'pen',
+        'ruler',
+        'fill',
+      ],
       sections: [
         ManualSection(
           title: 'Vector Arrows & Lines',
@@ -129,7 +167,8 @@ class UserManualData {
             'Numbers automatically increment (1, 2, 3, 4...).',
             'Re-order or adjust badge colors in the Properties inspector.',
           ],
-          tip: 'Step badges are indispensable for creating clear documentation and bug tickets in Jira, GitHub, or Linear.',
+          tip:
+              'Step badges are indispensable for creating clear documentation and bug tickets in Jira, GitHub, or Linear.',
           shortcuts: ['N'],
         ),
         ManualSection(
@@ -175,7 +214,16 @@ class UserManualData {
       subtitle: 'Extract, edit, and copy text directly from screenshots',
       icon: Icons.document_scanner_rounded,
       badge: 'AI / OCR',
-      keywords: ['ocr', 'text', 'extract', 'recognition', 'copy', 'scan', 'read', 'clipboard'],
+      keywords: [
+        'ocr',
+        'text',
+        'extract',
+        'recognition',
+        'copy',
+        'scan',
+        'read',
+        'clipboard',
+      ],
       sections: [
         ManualSection(
           title: 'Extracting Text with the OCR Tool',
@@ -193,7 +241,8 @@ class UserManualData {
           title: 'OCR Result Panel & Copying',
           description:
               'Once extracted, you can edit the text directly, remove line breaks, or click "Copy to Clipboard" to paste the text into your code editor or notes.',
-          tip: 'OCR runs entirely locally on your device for complete privacy and instant performance.',
+          tip:
+              'OCR runs entirely locally on your device for complete privacy and instant performance.',
         ),
       ],
     ),
@@ -202,7 +251,17 @@ class UserManualData {
       title: 'Canvas Framing & Backgrounds',
       subtitle: 'Padding, drop shadows, rounded corners, and gradients',
       icon: Icons.wallpaper_rounded,
-      keywords: ['frame', 'framing', 'padding', 'margin', 'shadow', 'radius', 'rounded', 'gradient', 'background'],
+      keywords: [
+        'frame',
+        'framing',
+        'padding',
+        'margin',
+        'shadow',
+        'radius',
+        'rounded',
+        'gradient',
+        'background',
+      ],
       sections: [
         ManualSection(
           title: 'Canvas Margins & Padding',
@@ -218,7 +277,8 @@ class UserManualData {
           title: 'Drop Shadows & Corner Radii',
           description:
               'Add modern depth to your screenshots with configurable drop shadow blur, elevation, and smooth corner rounding.',
-          tip: 'Rounded corners and soft drop shadows make screenshots look gorgeous when embedding in documentation or tweets.',
+          tip:
+              'Rounded corners and soft drop shadows make screenshots look gorgeous when embedding in documentation or tweets.',
         ),
         ManualSection(
           title: 'Background Fill Styles',
@@ -232,7 +292,15 @@ class UserManualData {
       title: 'Screen Pinning',
       subtitle: 'Always-on-top floating reference windows',
       icon: Icons.push_pin_rounded,
-      keywords: ['pin', 'pinning', 'floating', 'overlay', 'reference', 'window', 'topmost'],
+      keywords: [
+        'pin',
+        'pinning',
+        'floating',
+        'overlay',
+        'reference',
+        'window',
+        'topmost',
+      ],
       sections: [
         ManualSection(
           title: 'What is Screen Pinning?',
@@ -249,7 +317,8 @@ class UserManualData {
             'Resize using the corner handles.',
             'Double-click or press ESC to close the pinned window.',
           ],
-          tip: 'You can spawn multiple pinned windows simultaneously to compare before-and-after UI designs side-by-side.',
+          tip:
+              'You can spawn multiple pinned windows simultaneously to compare before-and-after UI designs side-by-side.',
         ),
       ],
     ),
@@ -259,7 +328,16 @@ class UserManualData {
       subtitle: 'Global capture hotkeys and canvas editing shortcuts',
       icon: Icons.keyboard_rounded,
       badge: 'Cheat Sheet',
-      keywords: ['shortcuts', 'hotkeys', 'keybindings', 'commands', 'undo', 'redo', 'copy', 'save'],
+      keywords: [
+        'shortcuts',
+        'hotkeys',
+        'keybindings',
+        'commands',
+        'undo',
+        'redo',
+        'copy',
+        'save',
+      ],
       sections: [
         ManualSection(
           title: 'Global Capture Hotkeys',
@@ -274,8 +352,7 @@ class UserManualData {
         ),
         ManualSection(
           title: 'Canvas Editing & History',
-          description:
-              'Fast keyboard actions for editing and export:',
+          description: 'Fast keyboard actions for editing and export:',
           steps: [
             'Undo Last Annotation: Cmd + Z / Ctrl + Z',
             'Redo Last Annotation: Cmd + Shift + Z / Ctrl + Shift + Z',
@@ -300,7 +377,16 @@ class UserManualData {
       title: 'Permissions & System Setup',
       subtitle: 'macOS permissions, Windows display scaling, and SQLite',
       icon: Icons.settings_suggest_rounded,
-      keywords: ['permissions', 'macos', 'accessibility', 'screen recording', 'windows', 'sqlite', 'database', 'troubleshooting'],
+      keywords: [
+        'permissions',
+        'macos',
+        'accessibility',
+        'screen recording',
+        'windows',
+        'sqlite',
+        'database',
+        'troubleshooting',
+      ],
       sections: [
         ManualSection(
           title: 'macOS Screen Recording Permissions',
@@ -312,7 +398,8 @@ class UserManualData {
             'Enable the toggle next to SnipSnap.',
             'Restart SnipSnap if prompted by the operating system.',
           ],
-          tip: 'This is a macOS security sandbox requirement for all screen capture utilities.',
+          tip:
+              'This is a macOS security sandbox requirement for all screen capture utilities.',
         ),
         ManualSection(
           title: 'macOS Accessibility Permissions',
