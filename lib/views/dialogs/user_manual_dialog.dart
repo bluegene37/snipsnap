@@ -178,6 +178,19 @@ class _UserManualDialogState extends State<UserManualDialog> {
               onChanged: (val) {
                 setState(() {
                   _searchQuery = val;
+                  // Keep the sidebar highlight and the content pane on the
+                  // same topic. The sidebar marks a row selected by
+                  // `_selectedTopicId`, but the pane renders `_activeTopic`,
+                  // which falls back to the first match — so filtering the
+                  // selection out of the results left a topic on screen with
+                  // no row highlighted, and clearing the search then threw
+                  // away whatever the reader had landed on. Promoting the
+                  // fallback to the real selection keeps the two in step.
+                  final matches = _filteredTopics;
+                  if (matches.isNotEmpty &&
+                      !matches.any((t) => t.id == _selectedTopicId)) {
+                    _selectedTopicId = matches.first.id;
+                  }
                 });
               },
               style: TextStyle(fontSize: 13, color: t.ink),
