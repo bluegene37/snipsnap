@@ -150,4 +150,7 @@ ToolHandler handlerFor(CanvasTool tool, ToolDelegate delegate) =>
       CanvasTool.fill => FillToolHandler(delegate),
       CanvasTool.colorPicker => ColorPickerToolHandler(delegate),
       CanvasTool.ocr => OcrToolHandler(delegate),
+      // Not a pickable tool: `imagePatch` tags a dropped cut-and-move region,
+      // and the Select tool owns every gesture that touches one.
+      CanvasTool.imagePatch => SelectToolHandler(delegate),
     };

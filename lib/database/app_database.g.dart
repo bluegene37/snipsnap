@@ -663,6 +663,17 @@ class $AnnotationsTable extends Annotations
     requiredDuringInsert: false,
     defaultValue: const Constant('viewport'),
   );
+  static const VerificationMeta _patchBytesMeta = const VerificationMeta(
+    'patchBytes',
+  );
+  @override
+  late final GeneratedColumn<Uint8List> patchBytes = GeneratedColumn<Uint8List>(
+    'patch_bytes',
+    aliasedName,
+    true,
+    type: DriftSqlType.blob,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -685,6 +696,7 @@ class $AnnotationsTable extends Annotations
     propsJson,
     zIndex,
     coordSpace,
+    patchBytes,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -835,6 +847,12 @@ class $AnnotationsTable extends Annotations
         coordSpace.isAcceptableOrUnknown(data['coord_space']!, _coordSpaceMeta),
       );
     }
+    if (data.containsKey('patch_bytes')) {
+      context.handle(
+        _patchBytesMeta,
+        patchBytes.isAcceptableOrUnknown(data['patch_bytes']!, _patchBytesMeta),
+      );
+    }
     return context;
   }
 
@@ -924,6 +942,10 @@ class $AnnotationsTable extends Annotations
         DriftSqlType.string,
         data['${effectivePrefix}coord_space'],
       )!,
+      patchBytes: attachedDatabase.typeMapping.read(
+        DriftSqlType.blob,
+        data['${effectivePrefix}patch_bytes'],
+      ),
     );
   }
 
@@ -963,6 +985,16 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
   /// Which coordinate system [startX]/[startY]/[endX]/[endY]/[pointsJson] and
   /// the scalar dimensions are expressed in. Pre-v4 rows are 'viewport'.
   final String coordSpace;
+
+  /// PNG bytes for a `CanvasTool.imagePatch` row — a region cut out of the
+  /// capture with the Select tool and dropped as a movable object. Null for
+  /// every other tool, which is all of them before v5.
+  ///
+  /// A column of its own rather than [propsJson]: that blob is for small
+  /// scalar properties, and base64-ing a full-resolution PNG into it would
+  /// inflate the payload by a third and drag the whole row into memory on
+  /// every annotation read.
+  final Uint8List? patchBytes;
   const DbAnnotation({
     required this.id,
     required this.captureId,
@@ -984,6 +1016,7 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     this.propsJson,
     required this.zIndex,
     required this.coordSpace,
+    this.patchBytes,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1026,6 +1059,9 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     }
     map['z_index'] = Variable<int>(zIndex);
     map['coord_space'] = Variable<String>(coordSpace);
+    if (!nullToAbsent || patchBytes != null) {
+      map['patch_bytes'] = Variable<Uint8List>(patchBytes);
+    }
     return map;
   }
 
@@ -1065,6 +1101,9 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
           : Value(propsJson),
       zIndex: Value(zIndex),
       coordSpace: Value(coordSpace),
+      patchBytes: patchBytes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(patchBytes),
     );
   }
 
@@ -1094,6 +1133,7 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
       propsJson: serializer.fromJson<String?>(json['propsJson']),
       zIndex: serializer.fromJson<int>(json['zIndex']),
       coordSpace: serializer.fromJson<String>(json['coordSpace']),
+      patchBytes: serializer.fromJson<Uint8List?>(json['patchBytes']),
     );
   }
   @override
@@ -1120,6 +1160,7 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
       'propsJson': serializer.toJson<String?>(propsJson),
       'zIndex': serializer.toJson<int>(zIndex),
       'coordSpace': serializer.toJson<String>(coordSpace),
+      'patchBytes': serializer.toJson<Uint8List?>(patchBytes),
     };
   }
 
@@ -1144,6 +1185,7 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     Value<String?> propsJson = const Value.absent(),
     int? zIndex,
     String? coordSpace,
+    Value<Uint8List?> patchBytes = const Value.absent(),
   }) => DbAnnotation(
     id: id ?? this.id,
     captureId: captureId ?? this.captureId,
@@ -1165,6 +1207,7 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     propsJson: propsJson.present ? propsJson.value : this.propsJson,
     zIndex: zIndex ?? this.zIndex,
     coordSpace: coordSpace ?? this.coordSpace,
+    patchBytes: patchBytes.present ? patchBytes.value : this.patchBytes,
   );
   DbAnnotation copyWithCompanion(AnnotationsCompanion data) {
     return DbAnnotation(
@@ -1198,6 +1241,9 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
       coordSpace: data.coordSpace.present
           ? data.coordSpace.value
           : this.coordSpace,
+      patchBytes: data.patchBytes.present
+          ? data.patchBytes.value
+          : this.patchBytes,
     );
   }
 
@@ -1223,13 +1269,14 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
           ..write('opacity: $opacity, ')
           ..write('propsJson: $propsJson, ')
           ..write('zIndex: $zIndex, ')
-          ..write('coordSpace: $coordSpace')
+          ..write('coordSpace: $coordSpace, ')
+          ..write('patchBytes: $patchBytes')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     captureId,
     tool,
@@ -1250,7 +1297,8 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
     propsJson,
     zIndex,
     coordSpace,
-  );
+    $driftBlobEquality.hash(patchBytes),
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1274,7 +1322,8 @@ class DbAnnotation extends DataClass implements Insertable<DbAnnotation> {
           other.opacity == this.opacity &&
           other.propsJson == this.propsJson &&
           other.zIndex == this.zIndex &&
-          other.coordSpace == this.coordSpace);
+          other.coordSpace == this.coordSpace &&
+          $driftBlobEquality.equals(other.patchBytes, this.patchBytes));
 }
 
 class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
@@ -1298,6 +1347,7 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
   final Value<String?> propsJson;
   final Value<int> zIndex;
   final Value<String> coordSpace;
+  final Value<Uint8List?> patchBytes;
   final Value<int> rowid;
   const AnnotationsCompanion({
     this.id = const Value.absent(),
@@ -1320,6 +1370,7 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     this.propsJson = const Value.absent(),
     this.zIndex = const Value.absent(),
     this.coordSpace = const Value.absent(),
+    this.patchBytes = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   AnnotationsCompanion.insert({
@@ -1343,6 +1394,7 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     this.propsJson = const Value.absent(),
     this.zIndex = const Value.absent(),
     this.coordSpace = const Value.absent(),
+    this.patchBytes = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        captureId = Value(captureId),
@@ -1372,6 +1424,7 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     Expression<String>? propsJson,
     Expression<int>? zIndex,
     Expression<String>? coordSpace,
+    Expression<Uint8List>? patchBytes,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1395,6 +1448,7 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
       if (propsJson != null) 'props_json': propsJson,
       if (zIndex != null) 'z_index': zIndex,
       if (coordSpace != null) 'coord_space': coordSpace,
+      if (patchBytes != null) 'patch_bytes': patchBytes,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1420,6 +1474,7 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     Value<String?>? propsJson,
     Value<int>? zIndex,
     Value<String>? coordSpace,
+    Value<Uint8List?>? patchBytes,
     Value<int>? rowid,
   }) {
     return AnnotationsCompanion(
@@ -1443,6 +1498,7 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
       propsJson: propsJson ?? this.propsJson,
       zIndex: zIndex ?? this.zIndex,
       coordSpace: coordSpace ?? this.coordSpace,
+      patchBytes: patchBytes ?? this.patchBytes,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1510,6 +1566,9 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
     if (coordSpace.present) {
       map['coord_space'] = Variable<String>(coordSpace.value);
     }
+    if (patchBytes.present) {
+      map['patch_bytes'] = Variable<Uint8List>(patchBytes.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1539,6 +1598,7 @@ class AnnotationsCompanion extends UpdateCompanion<DbAnnotation> {
           ..write('propsJson: $propsJson, ')
           ..write('zIndex: $zIndex, ')
           ..write('coordSpace: $coordSpace, ')
+          ..write('patchBytes: $patchBytes, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2480,6 +2540,7 @@ typedef $$AnnotationsTableCreateCompanionBuilder =
       Value<String?> propsJson,
       Value<int> zIndex,
       Value<String> coordSpace,
+      Value<Uint8List?> patchBytes,
       Value<int> rowid,
     });
 typedef $$AnnotationsTableUpdateCompanionBuilder =
@@ -2504,6 +2565,7 @@ typedef $$AnnotationsTableUpdateCompanionBuilder =
       Value<String?> propsJson,
       Value<int> zIndex,
       Value<String> coordSpace,
+      Value<Uint8List?> patchBytes,
       Value<int> rowid,
     });
 
@@ -2613,6 +2675,11 @@ class $$AnnotationsTableFilterComposer
 
   ColumnFilters<String> get coordSpace => $composableBuilder(
     column: $table.coordSpace,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<Uint8List> get patchBytes => $composableBuilder(
+    column: $table.patchBytes,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2725,6 +2792,11 @@ class $$AnnotationsTableOrderingComposer
     column: $table.coordSpace,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<Uint8List> get patchBytes => $composableBuilder(
+    column: $table.patchBytes,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$AnnotationsTableAnnotationComposer
@@ -2805,6 +2877,11 @@ class $$AnnotationsTableAnnotationComposer
     column: $table.coordSpace,
     builder: (column) => column,
   );
+
+  GeneratedColumn<Uint8List> get patchBytes => $composableBuilder(
+    column: $table.patchBytes,
+    builder: (column) => column,
+  );
 }
 
 class $$AnnotationsTableTableManager
@@ -2858,6 +2935,7 @@ class $$AnnotationsTableTableManager
                 Value<String?> propsJson = const Value.absent(),
                 Value<int> zIndex = const Value.absent(),
                 Value<String> coordSpace = const Value.absent(),
+                Value<Uint8List?> patchBytes = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AnnotationsCompanion(
                 id: id,
@@ -2880,6 +2958,7 @@ class $$AnnotationsTableTableManager
                 propsJson: propsJson,
                 zIndex: zIndex,
                 coordSpace: coordSpace,
+                patchBytes: patchBytes,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2904,6 +2983,7 @@ class $$AnnotationsTableTableManager
                 Value<String?> propsJson = const Value.absent(),
                 Value<int> zIndex = const Value.absent(),
                 Value<String> coordSpace = const Value.absent(),
+                Value<Uint8List?> patchBytes = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => AnnotationsCompanion.insert(
                 id: id,
@@ -2926,6 +3006,7 @@ class $$AnnotationsTableTableManager
                 propsJson: propsJson,
                 zIndex: zIndex,
                 coordSpace: coordSpace,
+                patchBytes: patchBytes,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

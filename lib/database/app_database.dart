@@ -51,6 +51,16 @@ class Annotations extends Table {
   /// the scalar dimensions are expressed in. Pre-v4 rows are 'viewport'.
   TextColumn get coordSpace => text().withDefault(const Constant('viewport'))();
 
+  /// PNG bytes for a `CanvasTool.imagePatch` row — a region cut out of the
+  /// capture with the Select tool and dropped as a movable object. Null for
+  /// every other tool, which is all of them before v5.
+  ///
+  /// A column of its own rather than [propsJson]: that blob is for small
+  /// scalar properties, and base64-ing a full-resolution PNG into it would
+  /// inflate the payload by a third and drag the whole row into memory on
+  /// every annotation read.
+  BlobColumn get patchBytes => blob().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -84,7 +94,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration {
@@ -103,6 +113,9 @@ class AppDatabase extends _$AppDatabase {
         }
         if (from < 4) {
           await m.addColumn(annotations, annotations.coordSpace);
+        }
+        if (from < 5) {
+          await m.addColumn(annotations, annotations.patchBytes);
         }
       },
     );

@@ -240,6 +240,7 @@ class DatabaseService {
           ? Offset(a.endX!, a.endY!)
           : null,
       opacity: a.opacity ?? 1.0,
+      patchBytes: a.patchBytes,
     );
 
     // v3+ rows carry every extra property in one blob.
@@ -313,6 +314,7 @@ class DatabaseService {
       opacity: Value(a.opacity),
       zIndex: Value(zIndex),
       coordSpace: Value(CoordSpace.imagePixels.name),
+      patchBytes: Value(a.patchBytes),
     );
   }
 }

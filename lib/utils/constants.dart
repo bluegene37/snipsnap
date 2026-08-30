@@ -34,6 +34,16 @@ enum CanvasTool {
 
   /// Extracts text from the capture using the platform OCR engine.
   ocr,
+
+  /// A region cut out of the capture with the Select tool and dropped as a
+  /// movable object, rather than pasted straight back into the bitmap.
+  ///
+  /// Not a tool the user can pick from the sidebar — it is the *result* of the
+  /// Select tool's cut-and-move, and it lives in this enum because that is how
+  /// [Annotation] identifies what it is. It carries the cut pixels in
+  /// `Annotation.patchBytes` and stays selectable, movable and deletable until
+  /// Flatten bakes it into the capture.
+  imagePatch,
 }
 
 /// Outlines available to [CanvasTool.shape].

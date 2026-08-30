@@ -68,6 +68,16 @@ class Annotation {
   /// screenshots (standard in Snagit, CleanShot and Shottr).
   final bool hasShadow;
 
+  /// PNG bytes of a region cut out of the capture, for [CanvasTool.imagePatch]
+  /// and nothing else. Drawn into [rect], so moving or resizing the annotation
+  /// moves or scales the pixels.
+  ///
+  /// Bytes rather than a `ui.Image` on purpose (AGENTS.md §2.1): annotation
+  /// lists go into the undo stack and into Drift, and a native image handle
+  /// survives neither. The canvas decodes these once and caches the result for
+  /// painting.
+  final Uint8List? patchBytes;
+
   Annotation({
     required this.id,
     required this.tool,
@@ -93,6 +103,7 @@ class Annotation {
     double blurStrength = 14.0,
     this.isDoubleArrow = false,
     this.hasShadow = false,
+    this.patchBytes,
   }) : opacity = opacity.clamp(0.0, 1.0),
        blurStrength = blurStrength.clamp(1.0, maxBlurStrength),
        assert(strokeWidth > 0, 'strokeWidth must be > 0'),
@@ -123,6 +134,7 @@ class Annotation {
     double? blurStrength,
     bool? isDoubleArrow,
     bool? hasShadow,
+    Object? patchBytes = _unset,
   }) {
     return Annotation(
       id: id ?? this.id,
@@ -159,6 +171,9 @@ class Annotation {
       blurStrength: blurStrength ?? this.blurStrength,
       isDoubleArrow: isDoubleArrow ?? this.isDoubleArrow,
       hasShadow: hasShadow ?? this.hasShadow,
+      patchBytes: identical(patchBytes, _unset)
+          ? this.patchBytes
+          : patchBytes as Uint8List?,
     );
   }
 
@@ -339,7 +354,12 @@ class Annotation {
         other.blurType == blurType &&
         other.blurStrength == blurStrength &&
         other.isDoubleArrow == isDoubleArrow &&
-        other.hasShadow == hasShadow;
+        other.hasShadow == hasShadow &&
+        // Identity, not content: these are whole PNGs and equality is called
+        // on every rebuild to decide whether a repaint is needed. Patch bytes
+        // are never mutated in place — a new cut makes a new list — so the
+        // reference is a sound stand-in for the contents.
+        identical(other.patchBytes, patchBytes);
   }
 
   @override
@@ -369,6 +389,9 @@ class Annotation {
       blurStrength,
       isDoubleArrow,
       hasShadow,
+      // identityHashCode to match `==`, which compares patch bytes by
+      // reference rather than hashing a whole PNG on every rebuild.
+      patchBytes == null ? null : identityHashCode(patchBytes),
     ),
   );
 }

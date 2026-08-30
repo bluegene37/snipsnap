@@ -72,7 +72,7 @@ void main() {
   });
 
   test('CanvasTool enum and stroke width presets verification', () {
-    expect(CanvasTool.values.length, 14);
+    expect(CanvasTool.values.length, 15);
     expect(CanvasTool.values, contains(CanvasTool.pen));
     expect(CanvasTool.values, contains(CanvasTool.line));
     expect(CanvasTool.values, contains(CanvasTool.blur));
@@ -81,6 +81,9 @@ void main() {
     // Rectangle and oval were merged into the multi-shape tool.
     expect(CanvasTool.values, contains(CanvasTool.shape));
     expect(CanvasTool.values, contains(CanvasTool.ocr));
+    // Not a pickable tool: it tags a region cut out with the Select tool and
+    // dropped as a movable object.
+    expect(CanvasTool.values, contains(CanvasTool.imagePatch));
     expect(CanvasTool.values.map((t) => t.name), isNot(contains('rectangle')));
     expect(CanvasTool.values.map((t) => t.name), isNot(contains('oval')));
 
