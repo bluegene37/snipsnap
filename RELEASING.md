@@ -126,14 +126,14 @@ Use the following direct GitHub Releases URL patterns for website download butto
 https://github.com/<OWNER>/<REPO>/releases/latest/download/<installer-name>.exe
 ```
 *Example:*
-`https://github.com/genexis-dev/snipsnap/releases/latest/download/snipsnap-1.0.0-windows-installer.exe`
+`https://github.com/bluegene37/snipsnap/releases/latest/download/snipsnap-1.0.0-windows-installer.exe`
 
 ### macOS DMG
 ```text
 https://github.com/<OWNER>/<REPO>/releases/latest/download/<app-name>-<version>.dmg
 ```
 *Example:*
-`https://github.com/genexis-dev/snipsnap/releases/latest/download/snipsnap-1.0.0.dmg`
+`https://github.com/bluegene37/snipsnap/releases/latest/download/snipsnap-1.0.0.dmg`
 
 ## Local Builds
 

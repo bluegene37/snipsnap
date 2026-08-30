@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
-APP_NAME="SnipSnap"
+APP_NAME="snipsnap"
 VERSION="$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\)+\{0,1\}.*/\1/p' pubspec.yaml | head -1)"
 if [ -z "$VERSION" ]; then
   echo "Error: could not read version from pubspec.yaml" >&2

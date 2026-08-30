@@ -186,7 +186,7 @@ void main() {
         );
         expect(json['tag_name'], 'v9.9.9');
         expect(seenHeaders.value('accept'), 'application/vnd.github+json');
-        expect(seenHeaders.value('user-agent'), contains('SnipSnap'));
+        expect(seenHeaders.value('user-agent'), contains('snipsnap'));
       },
     );
 
