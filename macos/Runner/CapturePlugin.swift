@@ -146,14 +146,28 @@ class CapturePlugin: NSObject {
       // keys need.
       self.activeWindows.first?.makeKey()
 
-      // Global and local key event monitors: ANY key press immediately cancels
+      // Escape cancels; every other key is passed through so the overlay can
+      // act on it. These used to cancel on *any* key press, which was fine
+      // when a capture ended the instant the mouse came up — but the selection
+      // is now adjustable and waits for a confirm, so Return has to survive
+      // the trip to `CaptureOverlayView.keyDown`, and a stray keystroke must
+      // not throw away a selection the user is still positioning.
+      let escapeKeyCode: UInt16 = 53
       self.localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-        self?.finishWithResult(nil)
-        return nil
+        if event.keyCode == escapeKeyCode {
+          self?.finishWithResult(nil)
+          return nil
+        }
+        return event
       }
 
+      // The global monitor only sees keys aimed at *other* apps, where there is
+      // no selection to protect — but it still only cancels on Escape, so a
+      // user typing elsewhere does not silently kill the overlay.
       self.globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-        self?.finishWithResult(nil)
+        if event.keyCode == escapeKeyCode {
+          self?.finishWithResult(nil)
+        }
       }
     }
   }
@@ -288,15 +302,59 @@ private class CaptureOverlayWindow: NSPanel {
 
 // MARK: - Capture Overlay View
 
+/// Which part of a settled selection a press landed on.
+private enum SelectionGrip {
+  case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left
+  case body
+}
+
+/// What the overlay is currently doing.
+private enum OverlayMode {
+  /// Nothing selected yet — drag to draw one.
+  case idle
+  /// Rubber-banding a new selection.
+  case drawing
+  /// A selection exists and is waiting to be confirmed. Nothing has been
+  /// captured yet, and this is the state the overlay sits in indefinitely.
+  case adjusting
+  /// Sliding the whole selection.
+  case moving
+  /// Dragging one grip.
+  case resizing(SelectionGrip)
+}
+
+/// Full-screen capture overlay.
+///
+/// The capture used to fire on mouse-up, which meant the region you got was
+/// whatever you happened to release on: no chance to nudge an edge, and no way
+/// back except taking the shot again. Releasing now *settles* the selection
+/// instead — it stays on screen with grips on every edge and corner, a Capture
+/// button beside it, and nothing is grabbed until that button (or Return) is
+/// pressed.
 private class CaptureOverlayView: NSView {
   private let screenImage: CGImage?
   private let scaleFactor: CGFloat
   private let onCapture: (CGImage?) -> Void
   private let onCancel: () -> Void
 
-  private var startPoint: NSPoint?
-  private var currentPoint: NSPoint?
-  private var isDragging: Bool = false
+  private var mode: OverlayMode = .idle
+
+  /// The live selection, in view coordinates. Present from the first drag
+  /// onward; `mode` says whether it is being drawn, adjusted or moved.
+  private var selection: NSRect?
+
+  /// Pointer position and selection geometry when the current drag began, so
+  /// moves and resizes are computed as deltas rather than accumulating error.
+  private var dragOrigin: NSPoint = .zero
+  private var selectionAtDragStart: NSRect = .zero
+
+  /// Where the Capture button was last drawn, for hit testing. Recomputed on
+  /// every draw because it tracks the selection around the screen.
+  private var captureButtonRect: NSRect = .zero
+  private var captureButtonHot = false
+
+  private let gripSize: CGFloat = 10
+  private let minSelectionSide: CGFloat = 8
 
   /// Whether this overlay has already handed back a result.
   ///
@@ -344,64 +402,245 @@ private class CaptureOverlayView: NSView {
     return true
   }
 
-  override func resetCursorRects() {
-    addCursorRect(bounds, cursor: .crosshair)
+  // MARK: - Tracking
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    for area in trackingAreas {
+      removeTrackingArea(area)
+    }
+    addTrackingArea(
+      NSTrackingArea(
+        rect: bounds,
+        options: [.activeAlways, .mouseMoved, .inVisibleRect],
+        owner: self,
+        userInfo: nil
+      )
+    )
   }
 
-  // MARK: - Mouse Events
+  override func mouseMoved(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    let hot = !captureButtonRect.isEmpty && captureButtonRect.contains(point)
+    if hot != captureButtonHot {
+      captureButtonHot = hot
+      needsDisplay = true
+    }
+  }
+
+  override func resetCursorRects() {
+    addCursorRect(bounds, cursor: .crosshair)
+
+    guard case .adjusting = mode, let sel = selection else { return }
+    addCursorRect(sel, cursor: .openHand)
+    for (grip, rect) in gripRects(for: sel) {
+      addCursorRect(rect, cursor: cursor(for: grip))
+    }
+    if !captureButtonRect.isEmpty {
+      addCursorRect(captureButtonRect, cursor: .pointingHand)
+    }
+  }
+
+  private func cursor(for grip: SelectionGrip) -> NSCursor {
+    switch grip {
+    case .left, .right: return .resizeLeftRight
+    case .top, .bottom: return .resizeUpDown
+    default: return .crosshair
+    }
+  }
+
+  private func refreshChrome() {
+    needsDisplay = true
+    window?.invalidateCursorRects(for: self)
+  }
+
+  // MARK: - Geometry
+
+  private func gripRects(for sel: NSRect) -> [(SelectionGrip, NSRect)] {
+    let h = gripSize
+    func box(_ cx: CGFloat, _ cy: CGFloat) -> NSRect {
+      NSRect(x: cx - h / 2, y: cy - h / 2, width: h, height: h)
+    }
+    return [
+      (.bottomLeft, box(sel.minX, sel.minY)),
+      (.bottom, box(sel.midX, sel.minY)),
+      (.bottomRight, box(sel.maxX, sel.minY)),
+      (.right, box(sel.maxX, sel.midY)),
+      (.topRight, box(sel.maxX, sel.maxY)),
+      (.top, box(sel.midX, sel.maxY)),
+      (.topLeft, box(sel.minX, sel.maxY)),
+      (.left, box(sel.minX, sel.midY)),
+    ]
+  }
+
+  /// Grips first, then the body — a corner grip overlaps the body and the user
+  /// aiming at it means to resize.
+  private func grip(at point: NSPoint, in sel: NSRect) -> SelectionGrip? {
+    for (grip, rect) in gripRects(for: sel) where rect.insetBy(dx: -3, dy: -3).contains(point) {
+      return grip
+    }
+    return sel.contains(point) ? .body : nil
+  }
+
+  private func resized(_ rect: NSRect, grip: SelectionGrip, by delta: NSSize) -> NSRect {
+    var minX = rect.minX, maxX = rect.maxX
+    var minY = rect.minY, maxY = rect.maxY
+
+    switch grip {
+    case .left, .topLeft, .bottomLeft: minX += delta.width
+    case .right, .topRight, .bottomRight: maxX += delta.width
+    default: break
+    }
+    switch grip {
+    case .bottom, .bottomLeft, .bottomRight: minY += delta.height
+    case .top, .topLeft, .topRight: maxY += delta.height
+    default: break
+    }
+
+    // Normalised so dragging an edge past its opposite flips rather than
+    // collapsing to nothing.
+    let r = NSRect(
+      x: min(minX, maxX),
+      y: min(minY, maxY),
+      width: abs(maxX - minX),
+      height: abs(maxY - minY)
+    )
+    return clamped(r)
+  }
+
+  private func clamped(_ rect: NSRect) -> NSRect {
+    var r = rect.intersection(bounds)
+    if r.isNull { r = .zero }
+    return r
+  }
+
+  private func moved(_ rect: NSRect, by delta: NSSize) -> NSRect {
+    var r = rect.offsetBy(dx: delta.width, dy: delta.height)
+    if r.minX < bounds.minX { r.origin.x = bounds.minX }
+    if r.minY < bounds.minY { r.origin.y = bounds.minY }
+    if r.maxX > bounds.maxX { r.origin.x = bounds.maxX - r.width }
+    if r.maxY > bounds.maxY { r.origin.y = bounds.maxY - r.height }
+    return r
+  }
+
+  private func isUsable(_ rect: NSRect) -> Bool {
+    rect.width >= minSelectionSide && rect.height >= minSelectionSide
+  }
+
+  // MARK: - Mouse
 
   override func mouseDown(with event: NSEvent) {
-    startPoint = convert(event.locationInWindow, from: nil)
-    currentPoint = startPoint
-    isDragging = true
-    needsDisplay = true
+    let point = convert(event.locationInWindow, from: nil)
+    dragOrigin = point
+
+    if case .adjusting = mode, let sel = selection {
+      if !captureButtonRect.isEmpty && captureButtonRect.contains(point) {
+        captureCurrentSelection()
+        return
+      }
+      if let grip = grip(at: point, in: sel) {
+        selectionAtDragStart = sel
+        mode = (grip == .body) ? .moving : .resizing(grip)
+        refreshChrome()
+        return
+      }
+      // Fell through: the press was outside the selection, which starts a
+      // fresh one rather than capturing.
+    }
+
+    selection = NSRect(origin: point, size: .zero)
+    mode = .drawing
+    refreshChrome()
   }
 
   override func mouseDragged(with event: NSEvent) {
-    guard isDragging else { return }
-    currentPoint = convert(event.locationInWindow, from: nil)
+    let point = convert(event.locationInWindow, from: nil)
+    let delta = NSSize(width: point.x - dragOrigin.x, height: point.y - dragOrigin.y)
+
+    switch mode {
+    case .drawing:
+      selection = clamped(normalizedRect(from: dragOrigin, to: point))
+    case .moving:
+      selection = moved(selectionAtDragStart, by: delta)
+    case .resizing(let grip):
+      selection = resized(selectionAtDragStart, grip: grip, by: delta)
+    case .idle, .adjusting:
+      return
+    }
     needsDisplay = true
   }
 
-  /// Hands back a captured image, once.
-  private func settle(with image: CGImage?) {
-    guard !hasSettled else { return }
-    hasSettled = true
-    isDragging = false
-    onCapture(image)
-  }
-
-  /// Cancels the capture, once.
-  private func settleCancelled() {
-    guard !hasSettled else { return }
-    hasSettled = true
-    isDragging = false
-    onCancel()
-  }
-
   override func mouseUp(with event: NSEvent) {
-    guard isDragging, let start = startPoint, let end = currentPoint else {
-      // An unpaired mouse-up still has to settle the capture. The Flutter side
-      // is awaiting this call and nothing else resolves it, so returning
-      // silently left the app behind its "Waiting for screen capture..." scrim
-      // with no way out but a restart.
+    switch mode {
+    case .drawing:
+      guard let sel = selection else {
+        settleCancelled()
+        return
+      }
+      // A click with no meaningful drag still means "the whole screen", the
+      // shortcut this overlay has always had. It is the one path that captures
+      // without a confirm, and only from `idle` — once a selection exists, a
+      // click outside it starts a new one instead (see `mouseDown`), so a
+      // stray click can no longer grab the whole desktop by accident.
+      if !isUsable(sel) {
+        selection = nil
+        mode = .idle
+        settle(with: screenImage)
+        return
+      }
+      mode = .adjusting
+      refreshChrome()
+
+    case .moving, .resizing:
+      if let sel = selection, isUsable(sel) {
+        mode = .adjusting
+      } else {
+        selection = nil
+        mode = .idle
+      }
+      refreshChrome()
+
+    case .idle, .adjusting:
+      // An unpaired mouse-up with nothing in flight. Before the selection was
+      // adjustable this had to cancel, because the Flutter side was awaiting a
+      // result and nothing else resolved it — but now the overlay legitimately
+      // sits idle waiting for input, so cancelling here would kill it on the
+      // first stray click.
+      break
+    }
+  }
+
+  override func rightMouseDown(with event: NSEvent) {
+    settleCancelled()
+  }
+
+  override func keyDown(with event: NSEvent) {
+    let escape: UInt16 = 53
+    let returnKey: UInt16 = 36
+    let keypadEnter: UInt16 = 76
+    let space: UInt16 = 49
+
+    switch event.keyCode {
+    case escape:
       settleCancelled()
-      return
+    case returnKey, keypadEnter, space:
+      captureCurrentSelection()
+    default:
+      break
     }
+  }
 
-    let rect = normalizedRect(from: start, to: end)
+  // MARK: - Settling
 
-    // Single click (drag distance < 5px): Capture whole screen!
-    if rect.width < 5.0 && rect.height < 5.0 {
-      settle(with: screenImage)
-      return
-    }
+  private func captureCurrentSelection() {
+    guard let sel = selection, isUsable(sel) else { return }
+    settle(with: croppedImage(for: sel) ?? screenImage)
+  }
 
-    // Dragged area: Crop to selected rectangle
-    guard let screenImage = screenImage else {
-      settle(with: nil)
-      return
-    }
+  /// Crops the pre-captured screen bitmap to [rect], which is in view
+  /// coordinates: bottom-left origin, points not pixels.
+  private func croppedImage(for rect: NSRect) -> CGImage? {
+    guard let screenImage = screenImage else { return nil }
 
     let imgWidth = CGFloat(screenImage.width)
     let imgHeight = CGFloat(screenImage.height)
@@ -420,22 +659,24 @@ private class CaptureOverlayView: NSView {
       width: min(imgWidth - cropX, cropWidth),
       height: min(imgHeight - cropY, cropHeight)
     )
-
-    if cropRect.width > 0 && cropRect.height > 0,
-       let cropped = screenImage.cropping(to: cropRect) {
-      settle(with: cropped)
-    } else {
-      settle(with: screenImage)
-    }
+    guard cropRect.width > 0 && cropRect.height > 0 else { return nil }
+    return screenImage.cropping(to: cropRect)
   }
 
-  override func rightMouseDown(with event: NSEvent) {
-    settleCancelled()
+  /// Hands back a captured image, once.
+  private func settle(with image: CGImage?) {
+    guard !hasSettled else { return }
+    hasSettled = true
+    mode = .idle
+    onCapture(image)
   }
 
-  override func keyDown(with event: NSEvent) {
-    // Any key press escapes and cancels screenshot
-    settleCancelled()
+  /// Cancels the capture, once.
+  private func settleCancelled() {
+    guard !hasSettled else { return }
+    hasSettled = true
+    mode = .idle
+    onCancel()
   }
 
   // MARK: - Drawing
@@ -443,71 +684,191 @@ private class CaptureOverlayView: NSView {
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
 
-    // 1. Draw dimmed backdrop
     NSColor(white: 0.0, alpha: 0.35).setFill()
     dirtyRect.fill()
 
-    // 2. If dragging, cut out clear selection rect + draw stroke & badge
-    if let start = startPoint, let end = currentPoint, isDragging {
-      let selRect = normalizedRect(from: start, to: end)
-
-      // Knock out selection area to reveal the bright desktop underneath
-      NSGraphicsContext.current?.compositingOperation = .clear
-      NSColor.clear.setFill()
-      selRect.fill()
-      NSGraphicsContext.current?.compositingOperation = .sourceOver
-
-      // White outline
-      let strokePath = NSBezierPath(rect: selRect)
-      strokePath.lineWidth = 1.5
-      NSColor.white.setStroke()
-      strokePath.stroke()
-
-      // Inner accent outline (vibrant blue)
-      if selRect.width > 3 && selRect.height > 3 {
-        let innerPath = NSBezierPath(rect: selRect.insetBy(dx: 1, dy: 1))
-        innerPath.lineWidth = 1.0
-        NSColor(red: 0.15, green: 0.55, blue: 1.0, alpha: 0.9).setStroke()
-        innerPath.stroke()
-      }
-
-      // Dimension badge (e.g. "800 × 600")
-      if selRect.width > 40 && selRect.height > 25 {
-        let pixelW = Int(selRect.width * scaleFactor)
-        let pixelH = Int(selRect.height * scaleFactor)
-        let text = "\(pixelW) × \(pixelH) px"
-
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
-        let attrs: [NSAttributedString.Key: Any] = [
-          .font: font,
-          .foregroundColor: NSColor.white
-        ]
-        let attrString = NSAttributedString(string: text, attributes: attrs)
-        let textSize = attrString.size()
-
-        let badgePaddingH: CGFloat = 7
-        let badgePaddingV: CGFloat = 3
-        let badgeW = textSize.width + badgePaddingH * 2
-        let badgeH = textSize.height + badgePaddingV * 2
-
-        // Position badge below selection, or inside if near bottom edge
-        var badgeY = selRect.minY - badgeH - 6
-        if badgeY < 4 {
-          badgeY = selRect.minY + 6
-        }
-        var badgeX = selRect.minX
-        if badgeX + badgeW > bounds.width - 4 {
-          badgeX = bounds.width - badgeW - 4
-        }
-
-        let badgeRect = NSRect(x: badgeX, y: badgeY, width: badgeW, height: badgeH)
-        let badgePath = NSBezierPath(roundedRect: badgeRect, xRadius: 4, yRadius: 4)
-        NSColor(white: 0.1, alpha: 0.85).setFill()
-        badgePath.fill()
-
-        attrString.draw(at: NSPoint(x: badgeX + badgePaddingH, y: badgeY + badgePaddingV))
-      }
+    let showChrome: Bool
+    switch mode {
+    case .idle: showChrome = false
+    default: showChrome = true
     }
+    guard showChrome, let selRect = selection, selRect.width > 0, selRect.height > 0 else {
+      captureButtonRect = .zero
+      return
+    }
+
+    // Knock out selection area to reveal the bright desktop underneath
+    NSGraphicsContext.current?.compositingOperation = .clear
+    NSColor.clear.setFill()
+    selRect.fill()
+    NSGraphicsContext.current?.compositingOperation = .sourceOver
+
+    let strokePath = NSBezierPath(rect: selRect)
+    strokePath.lineWidth = 1.5
+    NSColor.white.setStroke()
+    strokePath.stroke()
+
+    let accent = NSColor(red: 0.15, green: 0.55, blue: 1.0, alpha: 1.0)
+    if selRect.width > 3 && selRect.height > 3 {
+      let innerPath = NSBezierPath(rect: selRect.insetBy(dx: 1, dy: 1))
+      innerPath.lineWidth = 1.0
+      accent.withAlphaComponent(0.9).setStroke()
+      innerPath.stroke()
+    }
+
+    drawDimensionBadge(for: selRect)
+
+    // Grips and the Capture button only once the selection has settled —
+    // during the initial drag they would just chase the cursor.
+    var settled = false
+    if case .adjusting = mode { settled = true }
+    if case .moving = mode { settled = true }
+    if case .resizing = mode { settled = true }
+
+    if settled {
+      drawGrips(for: selRect, accent: accent)
+      drawCaptureButton(for: selRect, accent: accent)
+    } else {
+      captureButtonRect = .zero
+    }
+  }
+
+  private func drawDimensionBadge(for selRect: NSRect) {
+    guard selRect.width > 40 && selRect.height > 25 else { return }
+
+    let pixelW = Int(selRect.width * scaleFactor)
+    let pixelH = Int(selRect.height * scaleFactor)
+    let text = "\(pixelW) × \(pixelH) px"
+
+    let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+    let attrs: [NSAttributedString.Key: Any] = [
+      .font: font,
+      .foregroundColor: NSColor.white
+    ]
+    let attrString = NSAttributedString(string: text, attributes: attrs)
+    let textSize = attrString.size()
+
+    let padH: CGFloat = 7
+    let padV: CGFloat = 3
+    let badgeW = textSize.width + padH * 2
+    let badgeH = textSize.height + padV * 2
+
+    var badgeY = selRect.maxY + 6
+    if badgeY + badgeH > bounds.height - 4 {
+      badgeY = selRect.maxY - badgeH - 6
+    }
+    var badgeX = selRect.minX
+    if badgeX + badgeW > bounds.width - 4 {
+      badgeX = bounds.width - badgeW - 4
+    }
+
+    let badgeRect = NSRect(x: badgeX, y: badgeY, width: badgeW, height: badgeH)
+    NSColor(white: 0.1, alpha: 0.85).setFill()
+    NSBezierPath(roundedRect: badgeRect, xRadius: 4, yRadius: 4).fill()
+    attrString.draw(at: NSPoint(x: badgeX + padH, y: badgeY + padV))
+  }
+
+  private func drawGrips(for selRect: NSRect, accent: NSColor) {
+    for (_, rect) in gripRects(for: selRect) {
+      let path = NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
+      NSColor.white.setFill()
+      path.fill()
+      accent.setStroke()
+      path.lineWidth = 1.5
+      path.stroke()
+    }
+  }
+
+  /// The Capture button: a pill just outside the selection, flipped to
+  /// whichever side has room so it never sits off screen or over the region
+  /// being captured.
+  private func drawCaptureButton(for selRect: NSRect, accent: NSColor) {
+    let label = "Capture"
+    let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    let attrs: [NSAttributedString.Key: Any] = [
+      .font: font,
+      .foregroundColor: NSColor.white
+    ]
+    let attrString = NSAttributedString(string: label, attributes: attrs)
+    let textSize = attrString.size()
+
+    let iconW: CGFloat = 15
+    let gap: CGFloat = 6
+    let padH: CGFloat = 11
+    let padV: CGFloat = 6
+    let buttonW = padH * 2 + iconW + gap + textSize.width
+    let buttonH = max(textSize.height + padV * 2, 24)
+    let margin: CGFloat = 8
+
+    // Below the selection by default, above it when that would run off the
+    // bottom, and pulled inside when the selection reaches both edges.
+    var y = selRect.minY - buttonH - margin
+    if y < 4 {
+      y = selRect.maxY + margin
+    }
+    if y + buttonH > bounds.height - 4 {
+      y = max(4, selRect.minY + margin)
+    }
+    var x = selRect.maxX - buttonW
+    if x < 4 { x = 4 }
+    if x + buttonW > bounds.width - 4 { x = bounds.width - buttonW - 4 }
+
+    let rect = NSRect(x: x, y: y, width: buttonW, height: buttonH)
+    captureButtonRect = rect
+
+    let path = NSBezierPath(roundedRect: rect, xRadius: buttonH / 2, yRadius: buttonH / 2)
+    (captureButtonHot ? accent.blended(withFraction: 0.18, of: .white) ?? accent : accent).setFill()
+    path.fill()
+    NSColor(white: 1.0, alpha: 0.35).setStroke()
+    path.lineWidth = 1
+    path.stroke()
+
+    drawCameraGlyph(
+      in: NSRect(x: rect.minX + padH, y: rect.midY - 5.5, width: iconW, height: 11)
+    )
+    attrString.draw(
+      at: NSPoint(x: rect.minX + padH + iconW + gap, y: rect.midY - textSize.height / 2)
+    )
+  }
+
+  /// A small camera outline, drawn rather than pulled from SF Symbols so the
+  /// button renders identically regardless of symbol availability or weight.
+  private func drawCameraGlyph(in rect: NSRect) {
+    NSColor.white.setStroke()
+
+    let body = NSBezierPath(
+      roundedRect: NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height - 2),
+      xRadius: 2,
+      yRadius: 2
+    )
+    body.lineWidth = 1.4
+    body.stroke()
+
+    let bumpW = rect.width * 0.34
+    let bump = NSBezierPath(
+      roundedRect: NSRect(
+        x: rect.midX - bumpW / 2,
+        y: rect.maxY - 3,
+        width: bumpW,
+        height: 3
+      ),
+      xRadius: 1,
+      yRadius: 1
+    )
+    bump.lineWidth = 1.4
+    bump.stroke()
+
+    let lensD = rect.height * 0.46
+    let lens = NSBezierPath(
+      ovalIn: NSRect(
+        x: rect.midX - lensD / 2,
+        y: rect.midY - lensD / 2 - 1,
+        width: lensD,
+        height: lensD
+      )
+    )
+    lens.lineWidth = 1.4
+    lens.stroke()
   }
 
   private func normalizedRect(from p1: NSPoint, to p2: NSPoint) -> NSRect {
