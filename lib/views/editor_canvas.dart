@@ -2253,10 +2253,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final hit = hitTestAnnotation(pos);
 
     if (widget.activeTool == CanvasTool.select) {
-      if (_floatingSelectionRect != null) {
-        if (!_floatingSelectionRect!.contains(pos)) {
-          _commitFloatingSelection();
-        }
+      if (_floatingSelectionRect != null &&
+          !_floatingSelectionRect!.contains(pos)) {
+        // Drop it where it landed, but leave the outline pickable so a
+        // mis-placed move can be nudged instead of undone. A second click
+        // outside finds nothing extracted and clears the outline, so the
+        // gesture still dismisses the selection — it just takes two.
+        _commitFloatingSelection(keepSelection: _hasExtractedSelection);
       }
       if (hit != null) {
         setState(() => _selectedAnnotationId = hit.id);
@@ -2534,9 +2537,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// capture, and using them would stamp one capture's pixels into another
   /// capture's file. Every other caller wants the live values and passes
   /// neither.
+  /// [keepSelection] leaves the outline behind at the spot the piece landed,
+  /// with `_hasExtractedSelection` reset, so the next drag inside it re-cuts
+  /// that region through the same path a fresh marquee uses. Dropping a cut
+  /// used to end it outright: the pixels were baked in and the only way to
+  /// nudge a mis-placed move was to undo the whole thing.
   Future<void> _commitFloatingSelection({
     String? toPath,
     Rect? throughImageRect,
+    bool keepSelection = false,
   }) async {
     if (!_hasExtractedSelection ||
         _cutSelectionImage == null ||
@@ -2609,8 +2618,14 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         setState(() {
           _floatingSelectionUiImage = null;
           _cutSelectionImage = null;
-          _floatingSelectionRect = null;
-          _floatingSelectionOriginRect = null;
+          if (keepSelection && wroteBitmap) {
+            // The piece is in the bitmap now, so the origin for any re-cut is
+            // where it landed, not where it was first taken from.
+            _floatingSelectionOriginRect = currentRect;
+          } else {
+            _floatingSelectionRect = null;
+            _floatingSelectionOriginRect = null;
+          }
           _hasExtractedSelection = false;
         });
         await _loadBaseImage();
