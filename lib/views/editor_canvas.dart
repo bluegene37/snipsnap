@@ -3080,34 +3080,60 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                         alignment: Alignment.center,
                         clipBehavior: Clip.none,
                         children: [
-                          // Checkerboard directly under the image (revealed under transparent PNG pixels)
-                          if (imageRect.width > 0 && imageRect.height > 0)
-                            Positioned(
-                              left: imageRect.left,
-                              top: imageRect.top,
-                              width: imageRect.width,
-                              height: imageRect.height,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(
-                                        alpha: t.isDark ? 0.35 : 0.08,
+                          // Checkerboard directly under the image (revealed
+                          // under transparent PNG pixels).
+                          //
+                          // Sized from live constraints rather than
+                          // `imageRect`, for the same reason the annotation
+                          // layer below uses a LayoutBuilder: `_imageRect`
+                          // measures the RepaintBoundary's render box, which
+                          // still reports the *previous* layout. On the frame
+                          // a resize lands, this layer kept the old geometry
+                          // while `RawImage` re-fitted to the new one, so the
+                          // checkerboard slid out from under the screenshot
+                          // and showed as a transparent band beside it.
+                          Positioned.fill(
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final rect = RenderService.imageRectInCanvas(
+                                  imageSize: _imageSize,
+                                  canvasSize: constraints.biggest,
+                                );
+                                if (rect.isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
+                                // `imageRectInCanvas` always centres the fitted
+                                // rect, so Center reproduces its offset without
+                                // repeating the arithmetic.
+                                return Center(
+                                  child: SizedBox(
+                                    width: rect.width,
+                                    height: rect.height,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(
+                                              alpha: t.isDark ? 0.35 : 0.08,
+                                            ),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 3),
+                                          ),
+                                        ],
                                       ),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 3),
-                                    ),
-                                  ],
-                                ),
-                                child: ClipRect(
-                                  child: CustomPaint(
-                                    painter: _SteadyCheckerboardPainter(
-                                      theme: t,
+                                      child: ClipRect(
+                                        child: CustomPaint(
+                                          painter: _SteadyCheckerboardPainter(
+                                            theme: t,
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ),
+                                );
+                              },
                             ),
+                          ),
 
                           // The already-decoded bitmap, not `Image.file`: a
                           // keyed Image.file remounts on every revision bump
