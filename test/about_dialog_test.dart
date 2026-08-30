@@ -29,7 +29,7 @@ void _runStateTests(SnipThemeMode mode) {
     // bundle — drain that expected error rather than assert on it.
     tester.takeException();
 
-    expect(find.text('snipsnap'), findsOneWidget);
+    expect(find.text('SnipSnap'), findsOneWidget);
     expect(find.text('Version 1.0.0 (Build 1)'), findsOneWidget);
   });
 
@@ -44,7 +44,7 @@ void _runStateTests(SnipThemeMode mode) {
       reason: '$label: dialog background',
     );
 
-    final title = tester.widget<Text>(find.text('snipsnap'));
+    final title = tester.widget<Text>(find.text('SnipSnap'));
     expect(title.style?.color, t.ink, reason: '$label: app name colour');
 
     final version = tester.widget<Text>(find.text('Version 1.0.0 (Build 1)'));
@@ -106,13 +106,13 @@ void _runStateTests(SnipThemeMode mode) {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
     tester.takeException();
-    expect(find.text('snipsnap'), findsOneWidget);
+    expect(find.text('SnipSnap'), findsOneWidget);
 
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
     tester.takeException();
 
-    expect(find.text('snipsnap'), findsNothing);
+    expect(find.text('SnipSnap'), findsNothing);
   });
 }
 

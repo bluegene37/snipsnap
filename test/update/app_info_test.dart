@@ -25,6 +25,6 @@ void main() {
   });
 
   test('AppInfo carries the display name', () {
-    expect(AppInfo.appName, 'snipsnap');
+    expect(AppInfo.appName, 'SnipSnap');
   });
 }

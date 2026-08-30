@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icon/app_icon.png" alt="snipsnap logo" width="128" height="128" />
+  <img src="assets/icon/app_icon.png" alt="SnipSnap Logo" width="128" height="128" />
 </p>
 
-<h1 align="center">snipsnap</h1>
+<h1 align="center">SnipSnap</h1>
 
 <p align="center">
   <b>Fast, high-DPI desktop screen capture, rich vector annotations, on-device OCR, and local capture library.</b><br>
@@ -41,7 +41,7 @@ Pre-built binaries and installers are available on the [GitHub Releases](https:/
 
 | Platform | Format | Direct Download | Build Command |
 |---|---|---|---|
-| **macOS** (11+) | `.dmg` | [Download DMG](https://github.com/bluegene37/snipsnap/releases/latest/download/snipsnap-1.0.0.dmg) | `bash scripts/build_macos_dmg.sh` |
+| **macOS** (11+) | `.dmg` | [Download DMG](https://github.com/bluegene37/snipsnap/releases/latest/download/SnipSnap-1.0.0.dmg) | `bash scripts/build_macos_dmg.sh` |
 | **Windows** (10/11) | `.exe` (Setup) | [Download Setup](https://github.com/bluegene37/snipsnap/releases/latest/download/snipsnap-1.0.0-windows-installer.exe) | `dart run inno_bundle:build --release --no-app` |
 | **Linux** (x86_64) | `.deb` / `.tar.gz` | [Release Assets](https://github.com/bluegene37/snipsnap/releases/latest) | `bash scripts/build_linux_packages.sh` |
 
@@ -114,11 +114,11 @@ Refer to [RELEASING.md](RELEASING.md) for full version bumping procedures, Inno 
 
 ## 🛡️ Security & Privacy
 
-snipsnap is designed with strict offline-first principles. Screen captures, vector annotations, and OCR operations are executed 100% locally on your machine with zero external network transmission. See [SECURITY.md](SECURITY.md) for details.
+SnipSnap is designed with strict offline-first principles. Screen captures, vector annotations, and OCR operations are executed 100% locally on your machine with zero external network transmission. See [SECURITY.md](SECURITY.md) for details.
 
 ---
 
 ## 📄 License
 
-snipsnap is licensed under the [MIT License](LICENSE).  
+SnipSnap is licensed under the [MIT License](LICENSE).  
 Copyright © 2026 genexis.dev. All rights reserved.

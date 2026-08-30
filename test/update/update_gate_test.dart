@@ -59,7 +59,7 @@ void main() {
 
     expect(find.text('app body'), findsOneWidget);
     expect(find.text('Update Available'), findsOneWidget);
-    expect(find.textContaining('snipsnap 1.1.0 is available'), findsOneWidget);
+    expect(find.textContaining('SnipSnap 1.1.0 is available'), findsOneWidget);
     expect(find.textContaining('You are on 1.0.0'), findsOneWidget);
   });
 

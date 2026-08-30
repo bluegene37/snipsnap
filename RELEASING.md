@@ -86,7 +86,7 @@ Rules:
 | Artifact | Built by | Output File |
 |---|---|---|
 | Windows Installer (`.exe`) | `dart run inno_bundle:build --release --no-app` | `build/windows/x64/installer/Release/snipsnap-1.0.0-windows-installer.exe` |
-| macOS Disk Image (`.dmg`) | `scripts/build_macos_dmg.sh` | `build/macos/snipsnap-1.0.0.dmg` |
+| macOS Disk Image (`.dmg`) | `scripts/build_macos_dmg.sh` | `build/macos/SnipSnap-1.0.0.dmg` |
 
 ## In-App Update Checker Contract
 
@@ -133,7 +133,7 @@ https://github.com/<OWNER>/<REPO>/releases/latest/download/<installer-name>.exe
 https://github.com/<OWNER>/<REPO>/releases/latest/download/<app-name>-<version>.dmg
 ```
 *Example:*
-`https://github.com/bluegene37/snipsnap/releases/latest/download/snipsnap-1.0.0.dmg`
+`https://github.com/bluegene37/snipsnap/releases/latest/download/SnipSnap-1.0.0.dmg`
 
 ## Local Builds
 

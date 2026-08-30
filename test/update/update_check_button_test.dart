@@ -46,7 +46,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('up to date'), findsOneWidget);
-    expect(find.textContaining('snipsnap 1.0.0'), findsOneWidget);
+    expect(find.textContaining('SnipSnap 1.0.0'), findsOneWidget);
   });
 
   testWidgets('reports failure via snackbar', (tester) async {

@@ -53,7 +53,7 @@ dev_dependencies:
 # Inno Setup Windows installer configuration (dart run inno_bundle:build).
 inno_bundle:
   id: 6b7e88bf-76f5-46aa-b2b9-e152504b86bb
-  name: snipsnap
+  name: SnipSnap
   publisher: genexis.dev
   installer_icon: windows/runner/resources/app_icon.ico
   admin: auto
@@ -77,7 +77,7 @@ flutter_launcher_icons:
 # after `flutter build windows --release`. msix_version must be bumped in lock
 # step with `version:` above.
 msix_config:
-  display_name: snipsnap
+  display_name: SnipSnap
   publisher_display_name: genexis.dev
   identity_name: dev.genexis.snipsnap
   msix_version: 1.0.0.0

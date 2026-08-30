@@ -8,7 +8,7 @@
 class AppInfo {
   AppInfo._();
 
-  static const String appName = 'snipsnap';
+  static const String appName = 'SnipSnap';
   static const String appVersion = '1.0.0';
   static const String appBuild = '1';
 }

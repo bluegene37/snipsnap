@@ -148,7 +148,7 @@ void main() {
       );
 
       expect(find.byType(AboutSnipSnapDialog), findsOneWidget);
-      expect(find.text('snipsnap'), findsOneWidget);
+      expect(find.text('SnipSnap'), findsOneWidget);
       // Proof it resolved the scope rather than merely mounting: this colour
       // can only have come from SnipTheme.of inside the route.
       expect(
