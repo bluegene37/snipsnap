@@ -129,7 +129,7 @@ Write-Host "Using SignTool: $signtool" -ForegroundColor Gray
 # Determine files to sign
 $filesToSign = @()
 
-if ($TargetPath and $TargetPath.Count -gt 0) {
+if ($TargetPath -and $TargetPath.Count -gt 0) {
     foreach ($path in $TargetPath) {
         $resolved = Get-ChildItem -Path $path -ErrorAction SilentlyContinue
         if ($resolved) {
