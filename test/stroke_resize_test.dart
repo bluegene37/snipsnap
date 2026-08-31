@@ -51,6 +51,13 @@ Future<_Harness> _pump(WidgetTester tester, Annotation seed) async {
                   width: 700,
                   height: 600,
                   child: EditorCanvas(
+                    // Keyed per capture: tests that pump a second harness would
+                    // otherwise update the existing canvas element, which keeps
+                    // the outgoing bitmap on screen until the new decode lands
+                    // — so settleBaseImage returns on the stale image (both are
+                    // 1200x900) while the new file is still being read, and
+                    // Windows then cannot delete it at teardown (errno 32).
+                    key: ValueKey(imagePath),
                     imagePath: imagePath,
                     annotations: harness.latest,
                     activeTool: CanvasTool.select,
