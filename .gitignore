@@ -50,5 +50,18 @@ app.*.map.json
 .gemini/
 
 
+# Certificates, keystores & signing keys
+*.pfx
+*.p12
+*.cer
+*.crt
+*.der
+*.pem
+*.key
+*.jks
+*.keystore
+*.mobileprovision
+*.provisionprofile
+
 # Packaged installers
 /dist/
