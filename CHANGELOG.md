@@ -5,6 +5,32 @@ All notable changes to **snipsnap** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-09-01
+
+> Versions 1.0.2 and 1.0.3 were tagged but never published — the release
+> pipeline failed on both. Their changes ship here.
+
+### Added
+- **macOS In-App Update**: The updater downloads the new DMG, swaps the
+  application bundle silently, and relaunches.
+
+### Fixed
+- **Windows Release Signing**: `scripts/sign_windows.ps1` used a bare `and`
+  instead of PowerShell's `-and` operator, which aborted the whole script at
+  parse time and broke every signed Windows release build.
+- **Development-Certificate Releases**: Post-sign verification no longer fails
+  the build when the signing certificate does not chain to a trusted root — the
+  expected case for a self-signed certificate. Malformed or mismatched
+  signatures still fail.
+
+### Changed
+- Release and CI workflows retry transient native-asset download failures.
+  `package:sqlite3` fetches prebuilt binaries from GitHub release assets and
+  hashes the response body without checking the HTTP status, so a rate-limited
+  or truncated download surfaced as a bogus SHA-256 mismatch and failed the
+  build.
+- Certificates, keystores, and signing keys are now ignored by git.
+
 ## [1.0.2] - 2026-08-31
 
 ### Added

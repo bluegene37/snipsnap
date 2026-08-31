@@ -198,9 +198,25 @@ foreach ($file in $filesToSign) {
     Write-Host "Verifying signature..." -ForegroundColor Gray
     & $signtool verify /pa /v $file
     if ($LASTEXITCODE -ne 0) {
-        throw "Signature verification failed for $file (exit code: $LASTEXITCODE)"
+        # signtool's default Authenticode policy requires a chain to a root in
+        # the machine's trust store, which a self-signed development
+        # certificate will never have on a clean CI runner. That is expected
+        # for dev builds and must not fail the release, but a malformed or
+        # mismatched signature still must. Get-AuthenticodeSignature reports
+        # the two cases distinctly.
+        $signature = Get-AuthenticodeSignature -FilePath $file
+
+        if ($signature.Status -eq 'UnknownError' -or $signature.Status -eq 'NotTrusted') {
+            Write-Warning "Signature on $file is well-formed but its certificate does not chain to a trusted root."
+            Write-Warning "  Status: $($signature.Status) - $($signature.StatusMessage)"
+            Write-Warning "  Expected for self-signed certificates. End users will still see the SmartScreen warning."
+            Write-Host "Signed (untrusted chain): $file" -ForegroundColor Yellow
+        } else {
+            throw "Signature verification failed for $file (signtool exit code: $LASTEXITCODE, status: $($signature.Status) - $($signature.StatusMessage))"
+        }
+    } else {
+        Write-Host "Successfully signed and verified: $file" -ForegroundColor Green
     }
-    Write-Host "Successfully signed and verified: $file" -ForegroundColor Green
 }
 
 Write-Host "`nAll target files successfully signed." -ForegroundColor Green
