@@ -33,8 +33,52 @@ jobs:
       - name: Build Windows release
         run: flutter build windows --release
 
+      # Code signing for application binary (if WINDOWS_CERT_BASE64 is configured)
+      - name: Sign application binary
+        shell: pwsh
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 || secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD || secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_BASE64)) {
+            Write-Host "WINDOWS_CERT_BASE64 secret is not configured. Skipping application binary signing." -ForegroundColor Yellow
+            exit 0
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP "windows_cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+          try {
+            $runnerExe = "build/windows/x64/runner/Release/snipsnap.exe"
+            if (Test-Path $runnerExe) {
+              .\scripts\sign_windows.ps1 -CertPath $certPath -CertPassword "$env:WINDOWS_CERT_PASSWORD" -TargetPath $runnerExe
+            }
+          } finally {
+            if (Test-Path $certPath) { Remove-Item -Force $certPath }
+          }
+
       - name: Package Inno Setup installer
         run: dart run inno_bundle:build --release --no-app
+
+      # Code signing for installer executable (if WINDOWS_CERT_BASE64 is configured)
+      - name: Sign installer executable
+        shell: pwsh
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 || secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD || secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_BASE64)) {
+            Write-Host "WINDOWS_CERT_BASE64 secret is not configured. Skipping installer signing." -ForegroundColor Yellow
+            exit 0
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP "windows_cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+          try {
+            $installerExes = Get-ChildItem -Path "build/windows/x64/installer/Release/*.exe", "build/windows/x64/installer/*.exe" -ErrorAction SilentlyContinue
+            foreach ($exe in $installerExes) {
+              .\scripts\sign_windows.ps1 -CertPath $certPath -CertPassword "$env:WINDOWS_CERT_PASSWORD" -TargetPath $exe.FullName
+            }
+          } finally {
+            if (Test-Path $certPath) { Remove-Item -Force $certPath }
+          }
 
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4

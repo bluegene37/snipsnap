@@ -160,10 +160,50 @@ dart run flutter_launcher_icons
 
 ## Signing Status
 
-| Platform | Status | Consequence |
+| Platform | Status | Configuration |
 |---|---|---|
-| Windows | **Unsigned** | SmartScreen shows "Windows protected your PC"; users click *More info* → *Run anyway*. An EV certificate removes this warning. |
+| Windows | **Authenticode SHA-256 + RFC 3161 Timestamping** (or Unsigned if no cert configured) | Configured in CI via `WINDOWS_CERT_BASE64` and `WINDOWS_CERT_PASSWORD` secrets. Locally supported via `scripts/sign_windows.ps1` and `windows/installer/build_installer.ps1`. |
 | macOS | **Ad-hoc signed** (no Developer ID) | Gatekeeper blocks the app on first launch unless right-clicked → Open, or approved under System Settings → Privacy & Security. Set `DEVELOPMENT_TEAM` in `macos/Runner/Configs/AppInfo.xcconfig` to sign, notarize, and staple. |
+
+## Windows Code Signing
+
+SnipSnap supports automated Authenticode SHA-256 signing with RFC 3161 timestamps for both the application binary (`snipsnap.exe`) and the Inno Setup installer executable.
+
+### 1. GitHub Actions CI/CD Secrets
+
+To enable automated code signing on release builds, configure the following repository secrets:
+
+- **`WINDOWS_CERT_BASE64`** (or `WINDOWS_CERTIFICATE_BASE64`): Base64-encoded `.pfx` certificate file.
+  To generate the base64 string:
+  ```powershell
+  [Convert]::ToBase64String([IO.File]::ReadAllBytes("path\to\your_cert.pfx")) | Set-Clipboard
+  ```
+- **`WINDOWS_CERT_PASSWORD`** (or `WINDOWS_CERTIFICATE_PASSWORD`): Password for the `.pfx` certificate.
+
+When configured, `.github/workflows/release.yml` signs `build/windows/x64/runner/Release/snipsnap.exe` and `build/windows/x64/installer/Release/*.exe` before publishing release artifacts. If secrets are not present, signing is skipped without failing the build.
+
+### 2. Local Signing with `sign_windows.ps1`
+
+Run `scripts/sign_windows.ps1` to sign release artifacts locally:
+
+```powershell
+# Sign with a PFX file
+powershell -ExecutionPolicy Bypass -File scripts\sign_windows.ps1 -CertPath "C:\certs\snipsnap.pfx" -CertPassword "secret"
+
+# Sign with a certificate from the Windows Certificate Store (CurrentUser\My)
+powershell -ExecutionPolicy Bypass -File scripts\sign_windows.ps1 -CertThumbprint "THUMBPRINT_HERE"
+
+# Create a self-signed certificate for local development/testing
+powershell -ExecutionPolicy Bypass -File scripts\sign_windows.ps1 -CreateSelfSigned -CertPassword "Password123!"
+```
+
+### 3. Integrated Installer Build Script
+
+You can also pass signing flags directly to `windows/installer/build_installer.ps1`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File windows\installer\build_installer.ps1 -CertPath "C:\certs\snipsnap.pfx" -CertPassword "secret"
+```
 
 ## Pre-Release Checklist
 
@@ -172,4 +212,4 @@ dart run flutter_launcher_icons
 - [ ] `flutter test` green
 - [ ] Version bumped in all places (`pubspec.yaml`, `lib/app_info.dart`)
 - [ ] Git tag `v<version>` pushed to remote repository
-- [ ] GitHub Actions release pipeline completed and artifacts verified
+- [ ] GitHub Actions release pipeline completed and artifacts verified (including code signatures)

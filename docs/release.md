@@ -119,28 +119,39 @@ a tag also publishes a GitHub Release with all platform artifacts attached.
 On a manual run the installer appears as a downloadable artifact on the run
 summary.
 
-### What your friends will see
+### SmartScreen & Signing Behavior
 
-The installer is **unsigned**, so Windows SmartScreen shows a blue
-"Windows protected your PC" screen on first run. They must click **More info**,
-then **Run anyway**. There is no way around this without a code-signing
-certificate — and an OV certificate still shows the warning until the download
-accumulates reputation, so only an EV certificate removes it outright.
+- **Unsigned builds**: Windows SmartScreen shows a blue "Windows protected your PC" screen on first run. Users click **More info** → **Run anyway**.
+- **Signed with Standard (OV) certificate**: SmartScreen warning disappears once download reputation is established.
+- **Signed with Extended Validation (EV) certificate / Trusted Signing**: SmartScreen warning is suppressed immediately.
 
-Once past that, the install itself is quiet: it is a **per-user** install to
-`%LOCALAPPDATA%\Programs\snipsnap`, so there is no UAC/admin prompt. It adds a
-Start-menu entry, optionally a desktop icon, and a normal
-Add-or-Remove-Programs uninstall entry.
+### Signing Windows Binaries
 
-### Signing it, if you ever get a certificate
+SnipSnap includes a PowerShell signing script [`scripts/sign_windows.ps1`](../scripts/sign_windows.ps1) that automatically locates `signtool.exe`, signs targets with Authenticode SHA-256 and RFC 3161 timestamping, and verifies the signature:
 
+```powershell
+# Sign default release artifacts (runner executable and installer) with a PFX file
+powershell -ExecutionPolicy Bypass -File scripts\sign_windows.ps1 -CertPath "C:\certs\snipsnap.pfx" -CertPassword "secret"
+
+# Sign with a certificate installed in the Windows Certificate Store
+powershell -ExecutionPolicy Bypass -File scripts\sign_windows.ps1 -CertThumbprint "YOUR_CERT_THUMBPRINT"
+
+# Generate a self-signed certificate for local testing
+powershell -ExecutionPolicy Bypass -File scripts\sign_windows.ps1 -CreateSelfSigned -CertPassword "Password123!"
 ```
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f cert.pfx /p PASS dist\snipsnap-1.0.0-windows-x64-setup.exe
+
+You can also pass `-CertPath` and `-CertPassword` directly to `windows/installer/build_installer.ps1` to build and sign both `snipsnap.exe` and `snipsnap-<version>-windows-x64-setup.exe` in one step:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File windows\installer\build_installer.ps1 -CertPath "C:\certs\snipsnap.pfx" -CertPassword "secret"
 ```
 
-Sign `build\windows\x64\runner\Release\snipsnap.exe` before running the
-packaging script as well, so the installed binary is signed and not just the
-installer.
+### GitHub Actions Automated Signing
+
+In CI, `.github/workflows/release.yml` automatically signs the runner binary and the Inno Setup installer executable whenever the following repository secrets are set:
+
+- `WINDOWS_CERT_BASE64` (or `WINDOWS_CERTIFICATE_BASE64`): Base64-encoded `.pfx` certificate.
+- `WINDOWS_CERT_PASSWORD` (or `WINDOWS_CERTIFICATE_PASSWORD`): Certificate password.
 
 ### Installer internals
 

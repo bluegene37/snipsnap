@@ -14,10 +14,31 @@
 .PARAMETER SkipFlutterBuild
     Package whatever is already in build\windows\x64\runner\Release instead of
     rebuilding. Useful when iterating on the installer itself.
+
+.PARAMETER CertPath
+    Path to the .pfx certificate file for code signing.
+
+.PARAMETER CertPassword
+    Password for the .pfx certificate file (if password protected).
+
+.PARAMETER CertThumbprint
+    SHA1 thumbprint of a certificate installed in the Windows Certificate Store.
+
+.PARAMETER TimestampServer
+    RFC 3161 timestamp authority URL. Default is http://timestamp.digicert.com.
+
+.PARAMETER Sign
+    Explicitly request code signing. Automatically enabled if CertPath, CertThumbprint,
+    or signing environment variables are present.
 #>
 [CmdletBinding()]
 param(
-    [switch]$SkipFlutterBuild
+    [switch]$SkipFlutterBuild,
+    [string]$CertPath,
+    [string]$CertPassword,
+    [string]$CertThumbprint,
+    [string]$TimestampServer = "http://timestamp.digicert.com",
+    [switch]$Sign
 )
 
 $ErrorActionPreference = 'Stop'
@@ -105,7 +126,26 @@ if (-not $crtCopied) {
                    'Visual C++ Redistributable installed.')
 }
 
-# --- 4. Inno Setup -----------------------------------------------------------
+# --- 4. Optional Code Signing for Executable ---------------------------------
+$signScript = Join-Path $RepoRoot 'scripts\sign_windows.ps1'
+$shouldSign = $Sign -or $CertPath -or $CertPassword -or $CertThumbprint -or $env:WINDOWS_CERT_BASE64 -or $env:WINDOWS_CERTIFICATE_BASE64
+$isSigned = $false
+
+if ($shouldSign -and (Test-Path $signScript)) {
+    Write-Step 'Signing SnipSnap runner binary'
+    $signParams = @{
+        TargetPath = (Join-Path $ReleaseDir 'snipsnap.exe')
+        TimestampServer = $TimestampServer
+    }
+    if ($CertPath) { $signParams['CertPath'] = $CertPath }
+    if ($CertPassword) { $signParams['CertPassword'] = $CertPassword }
+    if ($CertThumbprint) { $signParams['CertThumbprint'] = $CertThumbprint }
+
+    & $signScript @signParams
+    $isSigned = $true
+}
+
+# --- 5. Inno Setup -----------------------------------------------------------
 Write-Step 'Locating Inno Setup'
 $iscc = @(
     (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
@@ -148,9 +188,27 @@ if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
 $installer = Join-Path $OutputDir "snipsnap-$Version-windows-x64-setup.exe"
 $sizeMb = [math]::Round((Get-Item $installer).Length / 1MB, 1)
 
+# --- 6. Optional Code Signing for Installer ----------------------------------
+if ($isSigned -and (Test-Path $signScript)) {
+    Write-Step 'Signing setup installer executable'
+    $signParams = @{
+        TargetPath = $installer
+        TimestampServer = $TimestampServer
+    }
+    if ($CertPath) { $signParams['CertPath'] = $CertPath }
+    if ($CertPassword) { $signParams['CertPassword'] = $CertPassword }
+    if ($CertThumbprint) { $signParams['CertThumbprint'] = $CertThumbprint }
+
+    & $signScript @signParams
+}
+
 Write-Host "`nInstaller ready:" -ForegroundColor Green
 Write-Host "  $installer  ($sizeMb MB)"
 Write-Host ''
-Write-Host 'This is unsigned, so the first person to run it will see a blue' -ForegroundColor Yellow
-Write-Host '"Windows protected your PC" screen. They need to click More info,' -ForegroundColor Yellow
-Write-Host 'then Run anyway. See docs/release.md.' -ForegroundColor Yellow
+if ($isSigned) {
+    Write-Host 'Installer and application binary have been signed and verified.' -ForegroundColor Green
+} else {
+    Write-Host 'This is unsigned, so the first person to run it will see a blue' -ForegroundColor Yellow
+    Write-Host '"Windows protected your PC" screen. They need to click More info,' -ForegroundColor Yellow
+    Write-Host 'then Run anyway. To sign, pass -CertPath and -CertPassword, or see docs/release.md.' -ForegroundColor Yellow
+}
