@@ -25,13 +25,16 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        shell: bash
+        run: bash scripts/ci_retry.sh flutter pub get
 
       - name: Run test suite
-        run: flutter test
+        shell: bash
+        run: bash scripts/ci_retry.sh flutter test
 
       - name: Build Windows release
-        run: flutter build windows --release
+        shell: bash
+        run: bash scripts/ci_retry.sh flutter build windows --release
 
       # Code signing for application binary (if WINDOWS_CERT_BASE64 is configured)
       - name: Sign application binary
@@ -100,13 +103,13 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        run: bash scripts/ci_retry.sh flutter pub get
 
       - name: Run test suite
-        run: flutter test
+        run: bash scripts/ci_retry.sh flutter test
 
       - name: Build and package macOS DMG
-        run: bash scripts/build_macos_dmg.sh
+        run: bash scripts/ci_retry.sh bash scripts/build_macos_dmg.sh
 
       - name: Upload macOS DMG artifact
         uses: actions/upload-artifact@v4

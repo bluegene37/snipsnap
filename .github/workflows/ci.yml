@@ -27,7 +27,8 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        shell: bash
+        run: bash scripts/ci_retry.sh flutter pub get
 
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed .
@@ -36,12 +37,15 @@ jobs:
         run: flutter analyze --fatal-infos
 
       - name: Run test suite
-        run: flutter test
+        shell: bash
+        run: bash scripts/ci_retry.sh flutter test
 
       - name: Validate Windows release build
         if: runner.os == 'Windows'
-        run: flutter build windows --release
+        shell: bash
+        run: bash scripts/ci_retry.sh flutter build windows --release
 
       - name: Validate macOS release build
         if: runner.os == 'macOS'
-        run: flutter build macos --release
+        shell: bash
+        run: bash scripts/ci_retry.sh flutter build macos --release
