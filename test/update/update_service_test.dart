@@ -275,6 +275,134 @@ void main() {
     });
   });
 
+  group('macos install script', () {
+    final script = UpdateService.buildMacosInstallScript();
+
+    test('is fixed text — no caller path ever appears in the source', () {
+      // Paths reach the script as positional args, so a dollar, backtick, or
+      // quote in a file name can never break or retarget it. The script must
+      // therefore reference them exclusively through its own variables.
+      expect(script, contains(r'DMG="$1"'));
+      expect(script, contains(r'APP="$2"'));
+      expect(script, contains(r'WORK="$3"'));
+      expect(script, contains(r'APP_PID="$4"'));
+    });
+
+    test('bounds the wait for the app to exit', () {
+      // A recycled pid must not wedge the script forever.
+      final waitIdx = script.indexOf(r'kill -0 "$APP_PID"');
+      expect(waitIdx, greaterThanOrEqualTo(0));
+      expect(waitIdx, lessThan(script.indexOf('hdiutil attach')));
+      expect(script, contains('-ge 150'));
+    });
+
+    test('swaps by rename-aside, never by deleting the install first', () {
+      // Order: stage the new bundle, move the old one aside, move the staged
+      // one in, and only then delete the old — with a rollback if the swap
+      // half-happened. No `rm -rf` of the live bundle anywhere.
+      final stageIdx = script.indexOf(r'ditto "$SRC" "$STAGED"');
+      final asideIdx = script.indexOf(r'mv "$APP" "$OLD"');
+      final swapIdx = script.indexOf(r'mv "$STAGED" "$APP"');
+      final reapIdx = script.indexOf(r'rm -rf "$OLD"');
+      expect(stageIdx, greaterThanOrEqualTo(0));
+      expect(asideIdx, greaterThan(stageIdx));
+      expect(swapIdx, greaterThan(asideIdx));
+      expect(reapIdx, greaterThan(swapIdx));
+      expect(script, contains(r'mv "$OLD" "$APP"'), reason: 'rollback line');
+      expect(script, isNot(contains(r'rm -rf "$APP"')));
+    });
+
+    test('stages next to the target so the swap moves are same-volume', () {
+      expect(script, contains(r'STAGED="$PARENT/'));
+      expect(script, contains(r'OLD="$PARENT/'));
+    });
+
+    test('picks the DMG bundle by the installed name, not sort order', () {
+      expect(script, contains(r'SRC="$MOUNT/$(/usr/bin/basename "$APP")"'));
+    });
+
+    test('relaunches and cleans up on every path, mount failure included', () {
+      // `open` must sit outside the attach branch, after it, and the work-dir
+      // cleanup must be gated on the image being unmounted.
+      final detachIdx = script.indexOf('hdiutil detach');
+      final openIdx = script.indexOf(r'open "$APP"');
+      final guardIdx = script.indexOf(r'grep -qF "$MOUNT"');
+      final cleanupIdx = script.indexOf(r'rm -rf "$WORK"');
+      expect(openIdx, greaterThan(detachIdx));
+      expect(guardIdx, greaterThan(openIdx));
+      expect(cleanupIdx, greaterThan(guardIdx));
+    });
+
+    test('parses as valid shell', () async {
+      final dir = Directory.systemTemp.createTempSync('upd_sh_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final f = File('${dir.path}/install_update.sh')
+        ..writeAsStringSync(script);
+      final result = await Process.run('/bin/sh', ['-n', f.path]);
+      expect(result.exitCode, 0, reason: 'sh -n rejected: ${result.stderr}');
+    }, testOn: 'mac-os');
+  });
+
+  group('ensureSwappableBundle', () {
+    test('rejects an app running straight off the mounted DMG', () {
+      expect(
+        () => UpdateService.ensureSwappableBundle('/Volumes/SnipSnap/S.app'),
+        throwsStateError,
+      );
+    });
+
+    test('rejects a Gatekeeper-translocated copy', () {
+      expect(
+        () => UpdateService.ensureSwappableBundle(
+          '/private/var/folders/ab/x/T/AppTranslocation/uuid/d/S.app',
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('rejects a bundle whose parent directory is not writable', () {
+      final dir = Directory.systemTemp.createTempSync('upd_ro_');
+      addTearDown(() {
+        Process.runSync('chmod', ['755', dir.path]);
+        dir.deleteSync(recursive: true);
+      });
+      final bundle = Directory('${dir.path}/S.app')..createSync();
+      Process.runSync('chmod', ['555', dir.path]);
+      expect(
+        () => UpdateService.ensureSwappableBundle(bundle.path),
+        throwsStateError,
+      );
+    }, testOn: 'mac-os');
+
+    test('accepts a bundle in a writable directory', () {
+      final dir = Directory.systemTemp.createTempSync('upd_rw_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final bundle = Directory('${dir.path}/S.app')..createSync();
+      expect(
+        () => UpdateService.ensureSwappableBundle(bundle.path),
+        returnsNormally,
+      );
+    });
+  });
+
+  group('macosAppBundlePath', () {
+    test('resolves the bundle root from the executable inside it', () {
+      expect(
+        UpdateService.macosAppBundlePath(
+          '/Applications/Snip Snap.app/Contents/MacOS/snipsnap',
+        ),
+        '/Applications/Snip Snap.app',
+      );
+    });
+
+    test('throws when the executable is not inside a bundle', () {
+      expect(
+        () => UpdateService.macosAppBundlePath('/usr/local/bin/snipsnap'),
+        throwsStateError,
+      );
+    });
+  });
+
   group('openUrlCommand', () {
     test('uses the platform launcher for the release page', () {
       expect(UpdateService.openUrlCommand(UpdatePlatform.macos, 'https://x'), [

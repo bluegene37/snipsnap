@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../app_info.dart';
 import '../../services/update/update_controller.dart';
-import '../../services/update/update_info.dart';
 import '../../utils/snip_theme.dart';
 
 /// Modal shown when a newer release is available. Offers install/download,
@@ -24,9 +23,7 @@ class UpdateDialog extends StatelessWidget {
           // Update dismissed while the dialog was open (e.g. install handoff).
           return const SizedBox.shrink();
         }
-        final silentInstall =
-            controller.platform == UpdatePlatform.windows &&
-            update.asset != null;
+        final silentInstall = controller.canInstallDirectly;
 
         return Dialog(
           backgroundColor: t.surface,
@@ -89,6 +86,16 @@ class UpdateDialog extends StatelessWidget {
                     'Update failed: ${controller.installError}. '
                     'Use the release page to download it manually.',
                     style: TextStyle(color: t.danger, fontSize: 12.5),
+                  ),
+                  // The advertised fallback must be reachable from here, not
+                  // just described.
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: t.emphasis,
+                      padding: EdgeInsets.zero,
+                    ),
+                    onPressed: () => controller.openReleasePage(),
+                    child: const Text('Open release page'),
                   ),
                 ],
                 const SizedBox(height: 20),

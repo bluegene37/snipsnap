@@ -176,9 +176,10 @@ class UpdateService {
   }) async {
     final targetDir =
         dir ?? await Directory.systemTemp.createTemp('snipsnap_update_');
-    final file = File(
-      '${targetDir.path}${Platform.pathSeparator}${asset.name}',
-    );
+    // The asset name comes from the release JSON — external input. Flatten
+    // any separators so a hostile name cannot climb out of the temp dir.
+    final safeName = asset.name.replaceAll(RegExp(r'[/\\]'), '_');
+    final file = File('${targetDir.path}${Platform.pathSeparator}$safeName');
 
     final client = HttpClient();
     try {
@@ -255,6 +256,173 @@ class UpdateService {
       '/c',
       script.path,
     ], mode: ProcessStartMode.detached);
+    (exitApp ?? () => exit(0))();
+  }
+
+  /// Resolves the `.app` bundle root from an executable path inside it
+  /// (`.../SnipSnap.app/Contents/MacOS/snipsnap`). Throws [StateError] when
+  /// the executable is not inside a bundle, so a stray dev binary can never
+  /// aim the swap script at `/`.
+  static String macosAppBundlePath(String executablePath) {
+    var dir = File(executablePath).parent;
+    while (dir.path != dir.parent.path) {
+      if (dir.path.endsWith('.app')) return dir.path;
+      dir = dir.parent;
+    }
+    throw StateError('$executablePath is not inside a .app bundle');
+  }
+
+  /// Shell script that waits for the app to exit, mounts the downloaded DMG,
+  /// and swaps the new bundle in — the macOS sibling of
+  /// [buildWindowsInstallScript]. Executed detached so it survives this
+  /// process exiting (the bundle cannot be replaced under a running app).
+  ///
+  /// The script text is fixed: every path reaches it as a positional
+  /// argument (see [downloadAndInstallMacos]), never by interpolation, so a
+  /// `$`, backtick, or quote in a file name cannot break or retarget it.
+  ///
+  /// Safety properties, in order:
+  ///
+  /// * The wait for the app's pid is bounded (~30s) so a recycled pid cannot
+  ///   wedge the script forever.
+  /// * The swap is rename-aside, never delete-first: the new bundle is
+  ///   staged *next to the target* (same volume, so the moves are atomic
+  ///   renames), the old bundle is moved aside, the staged one moved in, and
+  ///   only then is the old one deleted. Any failure rolls the old bundle
+  ///   back; no path guts the install.
+  /// * The staged copy comes from the DMG bundle matching the installed
+  ///   app's name, falling back to the image's only `.app` — never
+  ///   "whichever sorts first".
+  /// * `open` runs on every exit path, mount failure included — the app the
+  ///   user had always comes back.
+  /// * The work dir (DMG + this script) is deleted only once the image is
+  ///   verified unmounted, so a wedged detach leaks instead of recursing
+  ///   into a mounted volume.
+  ///
+  /// Tool paths are absolute: the script runs with whatever environment
+  /// `Process.start` inherited, not a login shell.
+  static String buildMacosInstallScript() {
+    return const [
+      r'#!/bin/sh',
+      r'# SnipSnap update helper. Args: 1=dmg 2=app bundle 3=work dir 4=app pid.',
+      r'DMG="$1"; APP="$2"; WORK="$3"; APP_PID="$4"',
+      r'MOUNT="$WORK/mount"',
+      r'TRIES=0',
+      r'while /bin/kill -0 "$APP_PID" 2>/dev/null; do',
+      r'  /bin/sleep 0.2',
+      r'  TRIES=$((TRIES + 1))',
+      r'  if [ "$TRIES" -ge 150 ]; then break; fi',
+      r'done',
+      r'STATUS=1',
+      r'if /usr/bin/hdiutil attach "$DMG" -nobrowse -noautoopen -mountpoint "$MOUNT"; then',
+      r'  PARENT="$(/usr/bin/dirname "$APP")"',
+      r'  SRC="$MOUNT/$(/usr/bin/basename "$APP")"',
+      r'  if [ ! -d "$SRC" ]; then',
+      r'    N=0',
+      r'    for CAND in "$MOUNT"/*.app; do',
+      r'      if [ -d "$CAND" ]; then SRC="$CAND"; N=$((N + 1)); fi',
+      r'    done',
+      r'    if [ "$N" -ne 1 ]; then SRC=""; fi',
+      r'  fi',
+      r'  STAGED="$PARENT/.snipsnap-update-staged.app"',
+      r'  OLD="$PARENT/.snipsnap-update-old.app"',
+      r'  /bin/rm -rf "$STAGED" "$OLD"',
+      r'  if [ -n "$SRC" ] && /usr/bin/ditto "$SRC" "$STAGED"; then',
+      r'    if /bin/mv "$APP" "$OLD" && /bin/mv "$STAGED" "$APP"; then',
+      r'      /bin/rm -rf "$OLD"',
+      r'      STATUS=0',
+      r'    else',
+      r'      if [ ! -d "$APP" ] && [ -d "$OLD" ]; then /bin/mv "$OLD" "$APP"; fi',
+      r'      /bin/rm -rf "$STAGED"',
+      r'    fi',
+      r'  fi',
+      r'  /usr/bin/hdiutil detach "$MOUNT" -force',
+      r'fi',
+      r'/usr/bin/open "$APP"',
+      r'if ! /sbin/mount | /usr/bin/grep -qF "$MOUNT"; then',
+      r'  /bin/rm -rf "$WORK"',
+      r'fi',
+      r'exit "$STATUS"',
+    ].join('\n');
+  }
+
+  /// Rejects bundle locations the swap script could not replace, while the
+  /// app is still alive to surface the reason: running straight off the
+  /// mounted DMG, a Gatekeeper-translocated copy, or a directory the user
+  /// cannot write into. Called before the download so the failure is instant.
+  static void ensureSwappableBundle(String bundlePath) {
+    if (bundlePath.startsWith('/Volumes/')) {
+      throw StateError(
+        'SnipSnap is running from its disk image. '
+        'Move it to Applications first, then update.',
+      );
+    }
+    if (bundlePath.contains('/AppTranslocation/')) {
+      throw StateError(
+        'macOS is running SnipSnap from a temporary location. '
+        'Move it to Applications first, then update.',
+      );
+    }
+    final parent = File(bundlePath).parent;
+    final probe = File('${parent.path}/.snipsnap-update-probe');
+    try {
+      probe.writeAsStringSync('');
+      probe.deleteSync();
+    } on FileSystemException {
+      throw StateError(
+        'SnipSnap cannot replace itself in ${parent.path}. '
+        'Download the update from the release page instead.',
+      );
+    }
+  }
+
+  /// macOS only: downloads the DMG, spawns the detached swap script, and
+  /// exits the app so the bundle can be replaced. The script relaunches from
+  /// the same bundle path, which survives the in-place swap. Release-only:
+  /// a debug run would swap out its own build directory bundle.
+  Future<void> downloadAndInstallMacos(
+    UpdateInfo info, {
+    void Function(int received, int total)? onProgress,
+    void Function()? exitApp,
+  }) async {
+    final asset = info.asset;
+    if (asset == null) {
+      throw StateError('No macOS disk image asset on this release');
+    }
+    if (!kReleaseMode) {
+      throw StateError(
+        'In-app install is release-only — it would swap out this dev build',
+      );
+    }
+    // Both checks run before the download: a bundle the script could never
+    // replace fails here, fast, instead of after pulling the whole DMG.
+    final bundlePath = macosAppBundlePath(Platform.resolvedExecutable);
+    ensureSwappableBundle(bundlePath);
+    final workDir = await Directory.systemTemp.createTemp('snipsnap_update_');
+    try {
+      final dmg = await downloadAsset(
+        asset,
+        dir: workDir,
+        onProgress: onProgress,
+      );
+      final script = File(
+        '${workDir.path}${Platform.pathSeparator}install_update.sh',
+      );
+      await script.writeAsString(buildMacosInstallScript());
+      await Process.start('/bin/sh', [
+        script.path,
+        dmg.path,
+        bundlePath,
+        workDir.path,
+        '\$pid',
+      ], mode: ProcessStartMode.detached);
+    } catch (e) {
+      // A failed attempt must not strand a full-size DMG per retry.
+      try {
+        workDir.deleteSync(recursive: true);
+      } catch (_) {}
+      rethrow;
+    }
     (exitApp ?? () => exit(0))();
   }
 

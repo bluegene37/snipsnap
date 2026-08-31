@@ -77,26 +77,46 @@ class UpdateController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Windows with an installer asset: download and hand off to the silent
-  /// install script (the app exits). Elsewhere: open the release page in
-  /// the browser.
+  /// Whether [applyUpdate] installs directly — download plus silent swap and
+  /// relaunch — rather than opening the release page in the browser. True on
+  /// Windows and macOS when the release carries an asset for the platform;
+  /// Linux always falls back to the browser (no single install format to
+  /// script against).
+  bool get canInstallDirectly {
+    if (_availableUpdate?.asset == null) return false;
+    return platform == UpdatePlatform.windows ||
+        platform == UpdatePlatform.macos;
+  }
+
+  /// [canInstallDirectly]: download and hand off to the platform's detached
+  /// install script (the app exits and relaunches updated). Otherwise: open
+  /// the release page in the browser.
   Future<void> applyUpdate() async {
     final update = _availableUpdate;
     if (update == null) return;
     _installError = null;
 
-    if (platform == UpdatePlatform.windows && update.asset != null) {
+    if (canInstallDirectly) {
       _isDownloading = true;
       _downloadProgress = 0;
       notifyListeners();
+      void onProgress(int received, int total) {
+        _downloadProgress = total > 0 ? received / total : 0;
+        notifyListeners();
+      }
+
       try {
-        await _service.downloadAndInstallWindows(
-          update,
-          onProgress: (received, total) {
-            _downloadProgress = total > 0 ? received / total : 0;
-            notifyListeners();
-          },
-        );
+        if (platform == UpdatePlatform.windows) {
+          await _service.downloadAndInstallWindows(
+            update,
+            onProgress: onProgress,
+          );
+        } else {
+          await _service.downloadAndInstallMacos(
+            update,
+            onProgress: onProgress,
+          );
+        }
       } catch (e) {
         _installError = e;
       } finally {
@@ -104,7 +124,22 @@ class UpdateController extends ChangeNotifier {
         notifyListeners();
       }
     } else {
+      await openReleasePage();
+    }
+  }
+
+  /// Opens the release page in the browser — the fallback path, and the
+  /// escape hatch the dialog offers after a failed direct install. Failures
+  /// land in [installError] like everything else instead of escaping as an
+  /// unhandled async error from a button press.
+  Future<void> openReleasePage() async {
+    final update = _availableUpdate;
+    if (update == null) return;
+    try {
       await _service.openReleasePage(update);
+    } catch (e) {
+      _installError = e;
+      notifyListeners();
     }
   }
 }

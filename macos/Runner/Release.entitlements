@@ -2,15 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>com.apple.security.app-sandbox</key>
-	<true/>
-	<key>com.apple.security.network.client</key>
-	<true/>
-	<key>com.apple.security.files.user-selected.read-write</key>
-	<true/>
-	<key>com.apple.security.files.user-selected.read-only</key>
-	<true/>
-	<key>com.apple.security.files.downloads.read-write</key>
-	<true/>
+	<!--
+	  Deliberately NOT sandboxed. The in-app updater mounts the release DMG
+	  and replaces the bundle in place; both are denied from inside the App
+	  Sandbox. SnipSnap is distributed via GitHub Releases, not the App
+	  Store, so the sandbox is optional. If this ever changes, the updater
+	  must be reworked (Sparkle-style XPC) and lib/services/sandbox_migration.dart
+	  revisited — it exists because data paths moved when the sandbox was
+	  dropped after v1.0.2.
+	-->
 </dict>
 </plist>

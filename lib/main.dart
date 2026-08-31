@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
+import 'services/sandbox_migration.dart';
 import 'views/main_screen.dart';
 
 /// [MainScreen] is handed to [runApp] directly, and **must stay that way**:
@@ -41,6 +42,9 @@ import 'views/main_screen.dart';
 /// this file constructs no `MaterialApp`.
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Before anything touches the database or SharedPreferences: pulls user
+  // data out of the old App Sandbox container on the first unsandboxed run.
+  await SandboxMigration.runIfNeeded();
   try {
     await hotKeyManager.unregisterAll();
   } catch (e) {
