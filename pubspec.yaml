@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # Single source of truth for the app version. When bumping, also update
 # msix_config.msix_version below (four segments: <version>.0).
-version: 1.0.0+1
+version: 1.0.2+2
 
 environment:
   sdk: ^3.12.2
@@ -80,7 +80,7 @@ msix_config:
   display_name: SnipSnap
   publisher_display_name: genexis.dev
   identity_name: dev.genexis.snipsnap
-  msix_version: 1.0.0.0
+  msix_version: 1.0.2.0
   logo_path: windows/runner/resources/app_icon.ico
 
 # For information on the generic Dart part of this file, see the

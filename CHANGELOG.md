@@ -5,6 +5,41 @@ All notable changes to **snipsnap** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-08-31
+
+### Added
+- **Signed Windows Builds**: The release pipeline now code-signs the Windows
+  application binary and installer when a signing certificate is configured
+  (`scripts/sign_windows.ps1`), including timestamping and post-sign
+  verification. Unsigned builds are still produced when no certificate is
+  present.
+
+### Changed
+- Hardened the editor-canvas test suite against slow CI machines: tests now
+  wait for the capture bitmap to actually decode instead of sleeping for a
+  fixed interval.
+
+## [1.0.1] - 2026-08-30
+
+### Added
+- **In-App Update Checker**: Checks GitHub Releases for a newer version and
+  offers the download from inside the app.
+- **In-App User Manual**: Searchable manual dialog with keyboard shortcut
+  reference.
+- **Adjustable Capture Region**: The macOS capture overlay region can be
+  resized before confirming, with Capture and Cancel controls.
+- **Cut-and-Move**: A cut region becomes a movable object on the canvas.
+- **Progress Overlay**: Long image operations show a progress indicator.
+
+### Fixed
+- In-app manual shortcuts now match the real key bindings.
+- The manual's sidebar highlight stays on the topic being shown.
+- The canvas checkerboard tracks viewport resizes.
+
+### Changed
+- Display name standardized as **SnipSnap** across the app, packaging, and
+  documentation.
+
 ## [1.0.0] - 2026-08-26
 
 ### Added

@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:snipsnap/app_info.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/dialogs/about_dialog.dart';
+
+/// Derived, not hardcoded: the dialog renders AppInfo, so the expectation must
+/// track a version bump automatically instead of failing on every release.
+const _versionLine =
+    'Version ${AppInfo.appVersion} (Build ${AppInfo.appBuild})';
 
 // AboutSnipSnapDialog embeds an Image.asset (not Image.file) for the app
 // logo — asset loading is safe under flutter_test (unlike Image.file, which
@@ -30,7 +36,7 @@ void _runStateTests(SnipThemeMode mode) {
     tester.takeException();
 
     expect(find.text('SnipSnap'), findsOneWidget);
-    expect(find.text('Version 1.0.0 (Build 1)'), findsOneWidget);
+    expect(find.text(_versionLine), findsOneWidget);
   });
 
   testWidgets('[$label] chrome routes through SnipTheme', (tester) async {
@@ -47,7 +53,7 @@ void _runStateTests(SnipThemeMode mode) {
     final title = tester.widget<Text>(find.text('SnipSnap'));
     expect(title.style?.color, t.ink, reason: '$label: app name colour');
 
-    final version = tester.widget<Text>(find.text('Version 1.0.0 (Build 1)'));
+    final version = tester.widget<Text>(find.text(_versionLine));
     expect(version.style?.color, t.inkMuted, reason: '$label: version colour');
   });
 
