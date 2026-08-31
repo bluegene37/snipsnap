@@ -8,6 +8,8 @@ import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/editor_canvas.dart';
 
+import 'support/base_image_settle.dart';
+
 /// Builds the canvas for [imagePath]. Kept as a builder so a test can re-pump
 /// the same widget position with a different capture, which is what a gallery
 /// selection does.
@@ -44,13 +46,14 @@ Widget _canvas({
 
 /// Pumps inside `runAsync` so the bitmap decode — `compute` plus `dart:io`,
 /// neither of which advances in the fake-async zone — actually completes.
-Future<void> _pumpLoaded(WidgetTester tester, Widget tree) async {
+Future<void> _pumpLoaded(
+  WidgetTester tester,
+  Widget tree, {
+  required Size capture,
+}) async {
   await tester.runAsync(() async {
     await tester.pumpWidget(tree);
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    await tester.pump();
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    await tester.pump();
+    await settleBaseImage(tester, expected: capture);
   });
   await tester.pumpAndSettle();
 }
@@ -89,6 +92,11 @@ int _redPixelCount(String path) {
   return count;
 }
 
+/// The two captures are deliberately different sizes: it is what lets a test
+/// wait for the bitmap it actually switched to rather than the one still up.
+const _sizeA = Size(400, 300);
+const _sizeB = Size(200, 400);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -100,13 +108,19 @@ void main() {
     dir = Directory.systemTemp.createTempSync('snipsnap_switch');
     pathA = '${dir.path}/a.png';
     pathB = '${dir.path}/b.png';
-    final a = img.Image(width: 400, height: 300);
+    final a = img.Image(
+      width: _sizeA.width.toInt(),
+      height: _sizeA.height.toInt(),
+    );
     img.fill(a, color: img.ColorRgb8(220, 30, 30));
     File(pathA).writeAsBytesSync(img.encodePng(a));
     // Portrait, and a different aspect ratio from A on purpose: a crop box
     // carried over from A then lands outside B's image rect, which is what the
     // second test detects.
-    final b = img.Image(width: 200, height: 400);
+    final b = img.Image(
+      width: _sizeB.width.toInt(),
+      height: _sizeB.height.toInt(),
+    );
     img.fill(b, color: img.ColorRgb8(30, 60, 220));
     File(pathB).writeAsBytesSync(img.encodePng(b));
   });
@@ -132,6 +146,7 @@ void main() {
         repaintKey: repaintKey,
         tool: CanvasTool.select,
       ),
+      capture: _sizeA,
     );
 
     final box = repaintKey.currentContext!.findRenderObject() as RenderBox;
@@ -145,7 +160,7 @@ void main() {
     final redInAAfterCut = _redPixelCount(pathA);
     expect(
       redInAAfterCut,
-      lessThan(400 * 300),
+      lessThan(_sizeA.width * _sizeA.height),
       reason:
           'the cut must actually have removed pixels from capture A, '
           'otherwise the rest of this test proves nothing',
@@ -160,12 +175,14 @@ void main() {
         repaintKey: repaintKey,
         tool: CanvasTool.select,
       ),
+      capture: _sizeB,
     );
     // ...then change tools, which is what used to flush the still-live cut —
     // into whichever capture happened to be on screen by then.
     await _pumpLoaded(
       tester,
       _canvas(imagePath: pathB, repaintKey: repaintKey, tool: CanvasTool.pen),
+      capture: _sizeB,
     );
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 500)),
@@ -198,6 +215,7 @@ void main() {
     await _pumpLoaded(
       tester,
       _canvas(imagePath: pathA, repaintKey: repaintKey, tool: CanvasTool.crop),
+      capture: _sizeA,
     );
 
     final box = repaintKey.currentContext!.findRenderObject() as RenderBox;
@@ -213,6 +231,7 @@ void main() {
     await _pumpLoaded(
       tester,
       _canvas(imagePath: pathB, repaintKey: repaintKey, tool: CanvasTool.crop),
+      capture: _sizeB,
     );
 
     // B is portrait where A is landscape, so the rectangle drawn over A falls

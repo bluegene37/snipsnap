@@ -8,6 +8,8 @@ import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/editor_canvas.dart';
 
+import 'support/base_image_settle.dart';
+
 /// Drives the crop rectangle, which is powered by the same `_hitTestCropRect`
 /// the floating selection uses — and is the only one of the two whose geometry
 /// leaves the canvas through a public callback, so it can be asserted on
@@ -61,8 +63,7 @@ Future<({RenderBox box, List<Rect> applied})> _pumpCrop(
         ),
       ),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 700));
-    await tester.pump();
+    await settleBaseImage(tester);
   });
   await tester.pumpAndSettle();
   return (

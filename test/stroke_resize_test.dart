@@ -11,6 +11,8 @@ import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/components/annotation_renderer.dart';
 import 'package:snipsnap/views/editor_canvas.dart';
 
+import 'support/base_image_settle.dart';
+
 /// Everything the canvas emits is in image pixels, and so is everything it is
 /// given, so ratios between a before and an after are projection-independent —
 /// which is what these tests assert on.
@@ -72,8 +74,7 @@ Future<_Harness> _pump(WidgetTester tester, Annotation seed) async {
         },
       ),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    await tester.pump();
+    await settleBaseImage(tester);
   });
   await tester.pumpAndSettle();
   return harness;

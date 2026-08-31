@@ -9,6 +9,8 @@ import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/editor_canvas.dart';
 
+import 'support/base_image_settle.dart';
+
 /// The live transform the canvas is rendering through.
 Matrix4 _transform(WidgetTester tester) {
   final viewer = tester.widget<InteractiveViewer>(
@@ -57,8 +59,7 @@ Future<void> _pumpCanvas(
         ),
       ),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    await tester.pump();
+    await settleBaseImage(tester);
   });
   await tester.pumpAndSettle();
 }
@@ -278,8 +279,7 @@ void main() {
           ),
         ),
       );
-      await Future<void>.delayed(const Duration(milliseconds: 600));
-      await tester.pump();
+      await settleBaseImage(tester);
     });
     await tester.pumpAndSettle();
 

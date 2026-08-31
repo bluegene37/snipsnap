@@ -19,6 +19,8 @@ import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/editor_canvas.dart';
 
+import 'support/base_image_settle.dart';
+
 const Size _imageSize = Size(1600, 900);
 
 /// The checkerboard's painter is private, so match it by name rather than
@@ -81,8 +83,7 @@ Future<void> _pumpCanvas(
   // nothing; runAsync lets the decode actually land.
   await tester.runAsync(() async {
     await tester.pumpWidget(tree());
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    await tester.pump();
+    await settleBaseImage(tester);
   });
   await tester.pumpAndSettle();
 }

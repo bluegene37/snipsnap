@@ -9,6 +9,8 @@ import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/editor_canvas.dart';
 
+import 'support/base_image_settle.dart';
+
 /// Pumps an [EditorCanvas] on the crop tool over a real 1600x900 PNG and
 /// returns the repaint-boundary box the crop rect is measured against.
 ///
@@ -52,10 +54,7 @@ Future<({RenderBox box, Rect imageRect})> _pumpCropCanvas(
   // and `dart:io` continuations never run and `_baseImage` stays null forever.
   await tester.runAsync(() async {
     await tester.pumpWidget(tree);
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    await tester.pump();
-    await Future<void>.delayed(const Duration(milliseconds: 200));
-    await tester.pump();
+    await settleBaseImage(tester);
   });
   await tester.pumpAndSettle();
 

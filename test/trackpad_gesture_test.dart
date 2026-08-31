@@ -9,6 +9,8 @@ import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/editor_canvas.dart';
 
+import 'support/base_image_settle.dart';
+
 Matrix4 _transform(WidgetTester tester) => tester
     .widget<InteractiveViewer>(find.byType(InteractiveViewer))
     .transformationController!
@@ -49,8 +51,7 @@ Future<List<Annotation>> _pumpCanvas(
         ),
       ),
     );
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    await tester.pump();
+    await settleBaseImage(tester);
   });
   await tester.pumpAndSettle();
   return added;
