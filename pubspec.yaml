@@ -30,11 +30,17 @@ dependencies:
   image: ^4.9.1
   hotkey_manager: ^0.2.3
   drift: ^2.34.3
+  # Direct use in SandboxMigration.repairCapturePaths, which rewrites
+  # capture paths inside the copied database before drift ever opens it.
+  sqlite3: ^3.5.2
   sqlite3_flutter_libs: ^0.6.0+eol
   shared_preferences: ^2.5.5
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  # Used only by tool/qa_driver_main.dart (the /qa live-drive harness).
+  flutter_driver:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
