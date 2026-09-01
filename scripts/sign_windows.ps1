@@ -211,6 +211,12 @@ foreach ($file in $filesToSign) {
             Write-Warning "  Status: $($signature.Status) - $($signature.StatusMessage)"
             Write-Warning "  Expected for self-signed certificates. End users will still see the SmartScreen warning."
             Write-Host "Signed (untrusted chain): $file" -ForegroundColor Yellow
+
+            # signtool left a non-zero code in $LASTEXITCODE. GitHub Actions'
+            # pwsh wrapper exits the step with whatever $LASTEXITCODE holds
+            # when the script ends, so a tolerated failure here would still
+            # fail the build even though this script succeeded. Clear it.
+            $global:LASTEXITCODE = 0
         } else {
             throw "Signature verification failed for $file (signtool exit code: $LASTEXITCODE, status: $($signature.Status) - $($signature.StatusMessage))"
         }
@@ -220,3 +226,7 @@ foreach ($file in $filesToSign) {
 }
 
 Write-Host "`nAll target files successfully signed." -ForegroundColor Green
+
+# Defensive: never let a stale native-command exit code decide this script's
+# status. Real failures throw and are surfaced by the caller's error handling.
+$global:LASTEXITCODE = 0
