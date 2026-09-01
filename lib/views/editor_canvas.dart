@@ -667,7 +667,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           Size(image.width.toDouble(), image.height.toDouble()),
         );
       }
-    } catch (_) {}
+    } catch (e) {
+      // A failed load keeps the previous bitmap on screen; without at least a
+      // log line that failure is completely invisible.
+      debugPrint('SnipSnap base image load failed for $path: $e');
+    }
   }
 
   void _checkFileExists() {
