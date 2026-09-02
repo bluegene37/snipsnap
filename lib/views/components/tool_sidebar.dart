@@ -187,8 +187,12 @@ class ToolSidebar extends StatelessWidget {
         children: [
           const SizedBox(height: 12),
           Expanded(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
+            // Thirteen tools at 83px each outrun every laptop-height window,
+            // so the rail has always scrolled — silently. With nothing to
+            // say so, Blur, Ruler, Fill, Crop and Extract sat below the fold
+            // looking like the list simply ended there. The thumb is the
+            // affordance; it only appears when there is something to reach.
+            child: _RailScrollbar(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Column(
@@ -355,6 +359,43 @@ class ToolSidebar extends StatelessWidget {
           ],
           const SizedBox(height: 4),
         ],
+      ),
+    );
+  }
+}
+
+/// The tool rail's scroll surface: a [SingleChildScrollView] with an
+/// always-visible thumb, so a rail taller than the window announces the
+/// tools it is hiding. Owns the controller both halves need.
+class _RailScrollbar extends StatefulWidget {
+  final Widget child;
+
+  const _RailScrollbar({required this.child});
+
+  @override
+  State<_RailScrollbar> createState() => _RailScrollbarState();
+}
+
+class _RailScrollbarState extends State<_RailScrollbar> {
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scrollbar(
+      controller: _controller,
+      thumbVisibility: true,
+      thickness: 3,
+      radius: const Radius.circular(2),
+      child: SingleChildScrollView(
+        controller: _controller,
+        physics: const BouncingScrollPhysics(),
+        child: widget.child,
       ),
     );
   }
