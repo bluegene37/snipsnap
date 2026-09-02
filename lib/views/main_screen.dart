@@ -288,6 +288,12 @@ class _MainScreenState extends State<MainScreen> {
   /// Debounces persistence during high-frequency drag updates.
   Timer? _persistDebounce;
 
+  /// The most recent annotation write. `saveCaptureToDb` is two awaits (the
+  /// capture row, then its annotation rows), so anything that must observe a
+  /// consistent database — deleting the capture, quitting the app — awaits
+  /// this first instead of racing the second half; see [_flushPersist].
+  Future<void>? _lastPersist;
+
   /// Collapses a burst of property-slider edits into one undo step.
   String? _propertyUndoAnnotationId;
   DateTime _propertyUndoAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -497,7 +503,12 @@ class _MainScreenState extends State<MainScreen> {
   /// Releases the OS-wide hotkeys on quit. They die with the process today, so
   /// this is insurance rather than a fix — it stops being insurance the moment
   /// the app grows a background or menu-bar mode.
-  late final AppLifecycleListener _lifecycleListener;
+  ///
+  /// Registered after the first frame rather than in `initState`, so that it
+  /// sits *behind* the canvas's own exit listener in the observer list: the
+  /// framework runs exit observers in registration order, and this one has to
+  /// flush the write that the canvas's commit of an in-flight cut produces.
+  AppLifecycleListener? _lifecycleListener;
 
   /// Update-checker state, shared by the [UpdateGate] around the root
   /// Scaffold (startup check + dialog) and the header's check button.
@@ -506,12 +517,16 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    _lifecycleListener = AppLifecycleListener(
-      onExitRequested: () async {
-        await ShortcutService.unregisterGlobalHotKeys();
-        return AppExitResponse.exit;
-      },
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _lifecycleListener = AppLifecycleListener(
+        onExitRequested: () async {
+          await _flushPersist();
+          await ShortcutService.unregisterGlobalHotKeys();
+          return AppExitResponse.exit;
+        },
+      );
+    });
     _loadShortcuts();
     _loadHistory();
     _loadThemePreference();
@@ -566,7 +581,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void dispose() {
     _updateController.dispose();
-    _lifecycleListener.dispose();
+    _lifecycleListener?.dispose();
     // Flush any annotation edit still waiting on the debounce timer.
     _persistDebounce?.cancel();
     _busyTimer?.cancel();
@@ -672,20 +687,42 @@ class _MainScreenState extends State<MainScreen> {
 
     _persistDebounce?.cancel();
     if (!debounce) {
-      StorageService.saveCaptureItem(updatedItem);
+      _lastPersist = StorageService.saveCaptureItem(updatedItem);
       return;
     }
-    _persistDebounce = Timer(const Duration(milliseconds: 400), () {
-      final pending = _activeCapture;
-      // Must re-check the flag here, at fire time, not rely on the guard
-      // above at schedule time: the active capture can change during the
-      // 400ms window (e.g. the user switches to a legacy capture that still
-      // needs conversion), and this callback always persists whatever
-      // _activeCapture is when it actually fires.
-      if (pending != null && !pending.annotationsNeedConversion) {
-        StorageService.saveCaptureItem(pending);
-      }
-    });
+    _persistDebounce = Timer(
+      const Duration(milliseconds: 400),
+      _persistActiveCaptureNow,
+    );
+  }
+
+  /// The debounced write, split out so [_flushPersist] can fire it early.
+  void _persistActiveCaptureNow() {
+    final pending = _activeCapture;
+    // Must re-check the flag here, at fire time, not rely on the guard in
+    // `_syncCurrentCaptureAnnotations` at schedule time: the active capture
+    // can change during the 400ms window (e.g. the user switches to a legacy
+    // capture that still needs conversion), and this always persists whatever
+    // _activeCapture is when it actually fires.
+    if (pending != null && !pending.annotationsNeedConversion) {
+      _lastPersist = StorageService.saveCaptureItem(pending);
+    }
+  }
+
+  /// Brings the database up to date with the working annotations: fires a
+  /// pending debounced write now and waits for the last write to land.
+  ///
+  /// Two callers need this. Deleting a capture used to let the write started
+  /// by its own pre-delete sync interleave with the delete transaction — the
+  /// capture row went, then the write's second half put the annotation rows
+  /// back, orphaned, patch blobs and all. And a quit used to exit between a
+  /// cut's commit and the write of the piece it produced.
+  Future<void> _flushPersist() async {
+    if (_persistDebounce?.isActive ?? false) {
+      _persistDebounce!.cancel();
+      _persistActiveCaptureNow();
+    }
+    await _lastPersist;
   }
 
   Future<void> _loadHistory() async {
@@ -2532,6 +2569,11 @@ class _MainScreenState extends State<MainScreen> {
                           // capture's rows lived on forever — and if the file delete
                           // above failed (it is deliberately swallowed) the whole
                           // capture reappeared, annotations and all, on next launch.
+                          //
+                          // Let the sync above finish first: its write is two
+                          // steps, and the delete landing between them left the
+                          // annotation rows behind without their capture.
+                          await _flushPersist();
                           await StorageService.deleteCaptureItem(item.id);
                           unawaited(StorageService.saveHistory(_captures));
                         },

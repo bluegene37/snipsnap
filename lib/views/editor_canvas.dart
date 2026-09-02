@@ -277,6 +277,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// flag to skip re-decoding a bitmap that was already reloaded here.
   bool _suppressNextRevisionReload = false;
 
+  /// Commits an in-flight cut before the process goes away — see
+  /// [_commitFloatingSelectionBeforeExit].
+  late final AppLifecycleListener _exitListener;
+
   // Selection / transform state
   String? _selectedAnnotationId;
   bool _isDraggingAnnotation = false;
@@ -376,10 +380,27 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       });
     }
     _ensureCropRectInitialized();
+    _exitListener = AppLifecycleListener(
+      onExitRequested: _commitFloatingSelectionBeforeExit,
+    );
+  }
+
+  /// A floating cut lives only in memory while its hole is already in the
+  /// capture file, so quitting in that state loses the pixels for good. A tool
+  /// change and a capture switch both commit it; app exit is the third way
+  /// out of that state and has to as well. Runs for Cmd+Q, the Quit menu item
+  /// and the window's close button alike, because all three go through the
+  /// platform's exit request.
+  Future<ui.AppExitResponse> _commitFloatingSelectionBeforeExit() async {
+    if (_hasExtractedSelection) {
+      await _commitFloatingSelection();
+    }
+    return ui.AppExitResponse.exit;
   }
 
   @override
   void dispose() {
+    _exitListener.dispose();
     for (final image in _patchImages.values) {
       image.dispose();
     }
@@ -3304,6 +3325,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                       PointerDeviceKind.invertedStylus,
                                       PointerDeviceKind.unknown,
                                     },
+                                    // Report the press position, not the
+                                    // position at which the recognizer won
+                                    // (the default `start`): every tool
+                                    // anchors its origin on `onPanStart`, so
+                                    // with `start` a marquee, shape or stroke
+                                    // began wherever the first move landed —
+                                    // one pointer event past the click, and
+                                    // more the faster the hand moved.
+                                    dragStartBehavior: DragStartBehavior.down,
                                     onPanStart: _onPanStart,
                                     onPanUpdate: _onPanUpdate,
                                     onPanEnd: _onPanEnd,
