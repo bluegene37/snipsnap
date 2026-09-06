@@ -66,3 +66,24 @@ app.*.map.json
 # Packaged installers
 /dist/
 .gstack/
+
+# AI tool files, plans, specs, and generated docs (kept local, never tracked)
+.agents/
+.cursor/
+.windsurf/
+.antigravity/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+plan.md
+docs/
+rewrite_header.py
+update_header.py
+
+# Project documentation (not needed to build or run the app)
+CHANGELOG.md
+CONTRIBUTING.md
+RELEASING.md
+SECURITY.md
+.github/pull_request_template.md
+.github/ISSUE_TEMPLATE/
