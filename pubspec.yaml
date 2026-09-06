@@ -54,7 +54,7 @@ dev_dependencies:
   dmg: ^0.1.10
   flutter_launcher_icons: ^0.14.4
   msix: ^3.16.7
-  inno_bundle: ^0.11.2
+  inno_bundle: ^0.12.0
 
 # Inno Setup Windows installer configuration (dart run inno_bundle:build).
 inno_bundle:
