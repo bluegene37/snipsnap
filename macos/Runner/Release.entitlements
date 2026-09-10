@@ -11,5 +11,7 @@
 	  revisited — it exists because data paths moved when the sandbox was
 	  dropped after v1.0.2.
 	-->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
 </dict>
 </plist>

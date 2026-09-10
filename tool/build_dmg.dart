@@ -90,7 +90,22 @@ Options:
     dmgFile.deleteSync();
   }
 
-  // 4. Locate create-dmg or fallback to hdiutil
+  // 4. Prepare clean staging directory containing SnipSnap.app
+  final stagingDir = Directory('build/dmg_staging');
+  if (stagingDir.existsSync()) {
+    stagingDir.deleteSync(recursive: true);
+  }
+  stagingDir.createSync(recursive: true);
+
+  final stagedAppPath = 'build/dmg_staging/SnipSnap.app';
+  stdout.writeln('Staging application bundle to $stagedAppPath...');
+  final cpResult = await Process.run('cp', ['-R', appPath, stagedAppPath]);
+  if (cpResult.exitCode != 0) {
+    stderr.writeln('Failed to stage app: ${cpResult.stderr}');
+    exit(cpResult.exitCode);
+  }
+
+  // 5. Locate create-dmg or fallback to hdiutil
   String? createDmgPath;
   for (final candidate in [
     '/opt/homebrew/bin/create-dmg',
@@ -108,69 +123,75 @@ Options:
       ? 'macos/Runner/AppIcon.icns'
       : null;
 
-  if (createDmgPath != null && createDmgPath.isNotEmpty) {
-    stdout.writeln('Using create-dmg ($createDmgPath)...');
-    final createDmgArgs = <String>[
-      '--volname',
-      'SnipSnap Installer',
-      if (iconPath != null) ...['--volicon', iconPath],
-      '--window-pos',
-      '200',
-      '120',
-      '--window-size',
-      '600',
-      '380',
-      '--icon-size',
-      '110',
-      '--text-size',
-      '13',
-      '--icon',
-      'SnipSnap.app',
-      '160',
-      '175',
-      '--app-drop-link',
-      '440',
-      '175',
-      '--hide-extension',
-      'SnipSnap.app',
-      '--no-internet-enable',
-    ];
+  try {
+    if (createDmgPath != null && createDmgPath.isNotEmpty) {
+      stdout.writeln('Using create-dmg ($createDmgPath)...');
+      final createDmgArgs = <String>[
+        '--volname',
+        'SnipSnap Installer',
+        if (iconPath != null) ...['--volicon', iconPath],
+        '--window-pos',
+        '200',
+        '120',
+        '--window-size',
+        '600',
+        '380',
+        '--icon-size',
+        '110',
+        '--text-size',
+        '13',
+        '--icon',
+        'SnipSnap.app',
+        '160',
+        '175',
+        '--app-drop-link',
+        '440',
+        '175',
+        '--hide-extension',
+        'SnipSnap.app',
+        '--no-internet-enable',
+      ];
 
-    if (signIdentity != null) {
-      createDmgArgs.addAll(['--codesign', signIdentity]);
-    }
-    if (notarizeProfile != null) {
-      createDmgArgs.addAll(['--notarize', notarizeProfile]);
-    }
+      if (signIdentity != null) {
+        createDmgArgs.addAll(['--codesign', signIdentity]);
+      }
+      if (notarizeProfile != null) {
+        createDmgArgs.addAll(['--notarize', notarizeProfile]);
+      }
 
-    createDmgArgs.addAll([dmgPath, appPath]);
+      createDmgArgs.addAll([dmgPath, 'build/dmg_staging']);
 
-    final proc = await Process.start(
-      createDmgPath,
-      createDmgArgs,
-      mode: ProcessStartMode.inheritStdio,
-    );
-    final code = await proc.exitCode;
-    if (code != 0 && code != 2) {
-      // create-dmg sometimes exits with 2 for non-fatal AppleScript quirks
-      stderr.writeln('Warning: create-dmg finished with code $code');
+      final proc = await Process.start(
+        createDmgPath,
+        createDmgArgs,
+        mode: ProcessStartMode.inheritStdio,
+      );
+      final code = await proc.exitCode;
+      if (code != 0 && code != 2) {
+        // create-dmg sometimes exits with 2 for non-fatal AppleScript quirks
+        stderr.writeln('Warning: create-dmg finished with code $code');
+      }
+    } else {
+      stdout.writeln('create-dmg not found. Falling back to native macOS hdiutil...');
+      final proc = await Process.run('hdiutil', [
+        'create',
+        '-volname',
+        'SnipSnap',
+        '-srcfolder',
+        'build/dmg_staging',
+        '-ov',
+        '-format',
+        'UDZO',
+        dmgPath,
+      ]);
+      if (proc.exitCode != 0) {
+        stderr.writeln('hdiutil failed: ${proc.stderr}');
+        exit(proc.exitCode);
+      }
     }
-  } else {
-    stdout.writeln('create-dmg not found. Falling back to native macOS hdiutil...');
-    final proc = await Process.run('hdiutil', [
-      'create',
-      '-volname',
-      'SnipSnap',
-      '-srcfolder',
-      appPath,
-      '-ov',
-      '-format',
-      'UDZO',
-      dmgPath,
-    ]);
-    if (proc.exitCode != 0) {
-      stderr.writeln('hdiutil failed: ${proc.stderr}');
-      exit(proc.exitCode);
+  } finally {
+    if (stagingDir.existsSync()) {
+      stagingDir.deleteSync(recursive: true);
     }
   }
 
