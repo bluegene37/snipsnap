@@ -56,6 +56,9 @@ dev_dependencies:
   msix: ^3.16.7
   inno_bundle: ^0.12.0
 
+# macOS DMG installer (dart run tool/build_dmg.dart).
+# Uses create-dmg to produce a polished drag-to-Applications disk image in dist/.
+
 # Inno Setup Windows installer configuration (dart run inno_bundle:build).
 inno_bundle:
   id: 6b7e88bf-76f5-46aa-b2b9-e152504b86bb
