@@ -27,6 +27,10 @@ if [ ! -d "$APP_PATH" ]; then
   exit 1
 fi
 
+# Stable signature so the Screen Recording grant survives updates. No-op
+# unless MACOS_SIGN_IDENTITY is set; see the script header for why.
+bash scripts/sign_macos_app.sh "$APP_PATH"
+
 mkdir -p "$OUTPUT_DIR"
 rm -f "$DMG_PATH"
 

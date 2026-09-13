@@ -17,6 +17,22 @@ class CaptureService {
     return snapDir;
   }
 
+  /// Whether this launch has already shown the macOS Screen Recording prompt.
+  ///
+  /// Static on purpose: the grant is per app, not per service instance, and
+  /// macOS only applies it after a relaunch anyway, so asking a second time in
+  /// the same launch can never succeed — it just puts the dialog back on
+  /// screen. Before this flag, every capture re-requested, which for an
+  /// ad-hoc signed build after a rebuild (TCC keys the grant to the binary's
+  /// cdhash) meant a prompt on every screenshot while System Settings showed
+  /// the toggle already on.
+  static bool _screenCapturePromptShownThisLaunch = false;
+
+  @visibleForTesting
+  static void resetScreenCapturePromptForTesting() {
+    _screenCapturePromptShownThisLaunch = false;
+  }
+
   /// Whether the OS will actually let this app see the screen.
   ///
   /// macOS grants Screen Recording per app, and a missing grant does not fail
@@ -24,18 +40,44 @@ class CaptureService {
   /// wallpaper. Asking first is the only way to tell the difference between
   /// "the user captured an empty desktop" and "the system refused us".
   ///
+  /// When the grant is missing, the system prompt is requested at most once
+  /// per launch; later calls return false silently so the caller can explain
+  /// instead of the OS nagging.
+  ///
   /// True on platforms with no such gate, and true when the plugin is absent,
   /// so the `screencapture` fallback path is never blocked by this check.
   Future<bool> hasScreenCapturePermission() async {
     if (!Platform.isMacOS) return true;
     try {
-      return await _channel.invokeMethod<bool>('screenCaptureAuthorized') ??
-          true;
+      final granted =
+          await _channel.invokeMethod<bool>('screenCaptureAuthorized') ?? true;
+      if (granted) return true;
+      if (!_screenCapturePromptShownThisLaunch) {
+        _screenCapturePromptShownThisLaunch = true;
+        await _channel.invokeMethod<bool>('requestScreenCaptureAccess');
+      }
+      return false;
     } on MissingPluginException catch (_) {
       return true;
     } catch (e) {
       debugPrint('SnipSnap permission check error: $e');
       return true;
+    }
+  }
+
+  /// Opens System Settings on the Screen Recording pane (macOS only).
+  ///
+  /// Deep link rather than the generic Privacy pane so the user lands on the
+  /// one toggle that matters; a no-op elsewhere.
+  Future<void> openScreenRecordingSettings() async {
+    if (!Platform.isMacOS) return;
+    try {
+      await Process.run('open', [
+        'x-apple.systempreferences:com.apple.preference.security'
+            '?Privacy_ScreenCapture',
+      ]);
+    } catch (e) {
+      debugPrint('SnipSnap could not open Screen Recording settings: $e');
     }
   }
 

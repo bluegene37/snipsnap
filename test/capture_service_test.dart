@@ -116,6 +116,93 @@ void main() {
     skip: skipOffMacOS,
   );
 
+  group('hasScreenCapturePermission', () {
+    // Regression for the "asks for Screen Recording on every screenshot"
+    // report: with the grant missing, the old code requested the system
+    // prompt inside the preflight call, so every capture put the dialog back
+    // on screen. It must now preflight every time but request only once per
+    // launch.
+    bool authorized = false;
+
+    setUp(() {
+      authorized = false;
+      CaptureService.resetScreenCapturePromptForTesting();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('snipsnap/capture'), (
+            MethodCall call,
+          ) async {
+            methodCalls.add(call);
+            switch (call.method) {
+              case 'screenCaptureAuthorized':
+                return authorized;
+              case 'requestScreenCaptureAccess':
+                // The real call returns false until the app is relaunched.
+                return false;
+            }
+            return null;
+          });
+    });
+
+    test('granted: returns true and never requests', () async {
+      authorized = true;
+
+      expect(await captureService.hasScreenCapturePermission(), isTrue);
+      expect(await captureService.hasScreenCapturePermission(), isTrue);
+
+      expect(methodCalls.map((c) => c.method), [
+        'screenCaptureAuthorized',
+        'screenCaptureAuthorized',
+      ]);
+    }, skip: skipOffMacOS);
+
+    test(
+      'missing: requests the prompt once per launch, not per capture',
+      () async {
+        for (var i = 0; i < 3; i++) {
+          expect(await captureService.hasScreenCapturePermission(), isFalse);
+        }
+
+        final requests = methodCalls
+            .where((c) => c.method == 'requestScreenCaptureAccess')
+            .length;
+        final preflights = methodCalls
+            .where((c) => c.method == 'screenCaptureAuthorized')
+            .length;
+        expect(requests, 1, reason: 'the system prompt must not repeat');
+        expect(preflights, 3, reason: 'each capture still re-checks the grant');
+      },
+      skip: skipOffMacOS,
+    );
+
+    test('missing: a second service instance does not re-prompt', () async {
+      await captureService.hasScreenCapturePermission();
+      await CaptureService().hasScreenCapturePermission();
+
+      expect(
+        methodCalls.where((c) => c.method == 'requestScreenCaptureAccess'),
+        hasLength(1),
+      );
+    }, skip: skipOffMacOS);
+
+    test(
+      'preflight only: a granted check never calls the request method',
+      () async {
+        authorized = true;
+        await captureService.hasScreenCapturePermission();
+        authorized = false;
+        await captureService.hasScreenCapturePermission();
+        authorized = true;
+        await captureService.hasScreenCapturePermission();
+
+        expect(
+          methodCalls.where((c) => c.method == 'requestScreenCaptureAccess'),
+          hasLength(1),
+        );
+      },
+      skip: skipOffMacOS,
+    );
+  });
+
   test('importImage copies external image into storage directory', () async {
     final sourceFile = File('${tempDir.path}/external.png');
     await sourceFile.writeAsBytes([10, 20, 30, 40]);

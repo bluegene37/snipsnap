@@ -396,10 +396,11 @@ class UserManualData {
             'Open macOS System Settings.',
             'Navigate to Privacy & Security > Screen Recording.',
             'Enable the toggle next to SnipSnap.',
-            'Restart SnipSnap if prompted by the operating system.',
+            'If the toggle already shows on but SnipSnap keeps asking, turn it off and on again.',
+            'Quit and reopen SnipSnap. macOS only applies the grant after a relaunch.',
           ],
           tip:
-              'This is a macOS security sandbox requirement for all screen capture utilities.',
+              'macOS ties the grant to the exact app build. After updating SnipSnap the old grant may no longer match, which is why re-toggling fixes it.',
         ),
         ManualSection(
           title: 'macOS Accessibility Permissions',

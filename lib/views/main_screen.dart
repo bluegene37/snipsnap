@@ -1385,15 +1385,28 @@ class _MainScreenState extends State<MainScreen> {
 
   /// Gate every capture trigger on the OS grant.
   ///
-  /// Returns false and explains once when the grant is missing. macOS only
-  /// applies a newly granted Screen Recording permission after a relaunch, so
-  /// the message says that rather than inviting the user to retry immediately.
+  /// Returns false and explains when the grant is missing. macOS only applies
+  /// a newly granted Screen Recording permission after a relaunch, so the
+  /// message says that rather than inviting the user to retry immediately.
+  ///
+  /// The "already on? turn it off and on" wording is deliberate: TCC binds the
+  /// grant to the binary's code signature, so after a rebuild or update of an
+  /// ad-hoc signed build the toggle in System Settings still shows on for the
+  /// old binary while this one is refused. Re-toggling rebinds it.
   Future<bool> _ensureCapturePermission() async {
     if (await _captureService.hasScreenCapturePermission()) return true;
     if (!mounted) return false;
     _showToast(
-      'SnipSnap needs Screen Recording access. Grant it in System '
-      'Settings > Privacy & Security, then relaunch the app.',
+      'SnipSnap needs Screen Recording access. In System Settings > Privacy & '
+      'Security > Screen Recording, turn SnipSnap on (if it already shows on, '
+      'turn it off and on again), then relaunch SnipSnap.',
+      duration: const Duration(seconds: 8),
+      action: SnackBarAction(
+        label: 'Open Settings',
+        textColor: _theme.emphasis,
+        onPressed: () =>
+            unawaited(_captureService.openScreenRecordingSettings()),
+      ),
     );
     return false;
   }
@@ -1991,7 +2004,11 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  void _showToast(String message) {
+  void _showToast(
+    String message, {
+    Duration duration = const Duration(seconds: 2),
+    SnackBarAction? action,
+  }) {
     final t = _theme;
     final toastBg = t.surfaceRaised;
     final textColor = t.ink;
@@ -2011,7 +2028,8 @@ class _MainScreenState extends State<MainScreen> {
           borderRadius: BorderRadius.circular(8),
           side: BorderSide(color: borderColor),
         ),
-        duration: const Duration(seconds: 2),
+        duration: duration,
+        action: action,
       ),
     );
   }

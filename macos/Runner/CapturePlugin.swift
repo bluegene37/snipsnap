@@ -47,21 +47,28 @@ class CapturePlugin: NSObject {
       captureFullScreen(targetPath: targetPath, result: result)
 
     case "screenCaptureAuthorized":
-      // Preflight first: it never prompts, so a granted app pays nothing.
-      // Only request when it comes back false, which puts the system dialog at
-      // the moment the user actually asked to capture.
+      // Preflight only. It never prompts, so a granted app pays nothing and a
+      // refused one gets a plain `false` the Dart side can act on.
       //
       // Without this, a missing grant is invisible: CGWindowListCreateImage
       // quietly returns desktop wallpaper with no windows in it, and
       // `screencapture` exits 0 having written a file — so every guard on the
       // Dart side passes and the user just gets a blank-looking capture.
-      if CGPreflightScreenCaptureAccess() {
-        result(true)
-      } else {
-        // Returns false on first call; the grant only takes effect after a
-        // relaunch, which is why the Dart side words its message that way.
-        result(CGRequestScreenCaptureAccess())
-      }
+      //
+      // The request used to live here too, fired whenever preflight said no.
+      // That put the system dialog on screen for every single capture, which
+      // is exactly what an ad-hoc signed build hits after a rebuild: TCC keys
+      // the Screen Recording grant to the binary's cdhash, so the toggle in
+      // System Settings still reads "on" for the previous build while this
+      // one is refused. Requesting is now its own method so Dart can decide
+      // to ask once per launch instead of once per capture.
+      result(CGPreflightScreenCaptureAccess())
+
+    case "requestScreenCaptureAccess":
+      // Shows the system prompt (or, when an entry already exists, nothing).
+      // Returns false on first call; the grant only takes effect after a
+      // relaunch, which is why the Dart side words its message that way.
+      result(CGRequestScreenCaptureAccess())
 
     default:
       result(FlutterMethodNotImplemented)
