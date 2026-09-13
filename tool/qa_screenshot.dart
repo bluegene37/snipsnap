@@ -8,7 +8,9 @@ import 'package:flutter_driver/flutter_driver.dart';
 
 Future<void> main(List<String> args) async {
   if (args.length < 2) {
-    stderr.writeln('usage: dart run tool/qa_screenshot.dart <ws-uri> <out.png>');
+    stderr.writeln(
+      'usage: dart run tool/qa_screenshot.dart <ws-uri> <out.png>',
+    );
     exit(64);
   }
   final driver = await FlutterDriver.connect(

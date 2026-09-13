@@ -44,10 +44,7 @@ void main() {
     await _pumpRail(tester, height: 609);
 
     final scrollbar = tester.widget<Scrollbar>(
-      find.ancestor(
-        of: find.text('Select'),
-        matching: find.byType(Scrollbar),
-      ),
+      find.ancestor(of: find.text('Select'), matching: find.byType(Scrollbar)),
     );
     expect(
       scrollbar.thumbVisibility,

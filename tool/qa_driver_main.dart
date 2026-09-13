@@ -26,7 +26,11 @@ import 'package:snipsnap/main.dart' as app;
 
 // (logical key, physical key, macOS virtual key code) per supported name.
 const _keys = <String, (LogicalKeyboardKey, PhysicalKeyboardKey, int)>{
-  'backspace': (LogicalKeyboardKey.backspace, PhysicalKeyboardKey.backspace, 0x33),
+  'backspace': (
+    LogicalKeyboardKey.backspace,
+    PhysicalKeyboardKey.backspace,
+    0x33,
+  ),
   'delete': (LogicalKeyboardKey.delete, PhysicalKeyboardKey.delete, 0x75),
   'escape': (LogicalKeyboardKey.escape, PhysicalKeyboardKey.escape, 0x35),
   'enter': (LogicalKeyboardKey.enter, PhysicalKeyboardKey.enter, 0x24),

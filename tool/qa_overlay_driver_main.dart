@@ -30,14 +30,14 @@ class _OverlayHarnessState extends State<_OverlayHarness> {
       home: Scaffold(
         body: Stack(
           children: [
-            Positioned.fill(
-              child: Container(color: const Color(0xFFD9CFC0)),
-            ),
+            Positioned.fill(child: Container(color: const Color(0xFFD9CFC0))),
             Positioned(
               left: 24,
               top: 24,
-              child: Text('harness-event: $_lastEvent',
-                  style: const TextStyle(fontSize: 16)),
+              child: Text(
+                'harness-event: $_lastEvent',
+                style: const TextStyle(fontSize: 16),
+              ),
             ),
             Positioned.fill(
               child: CaptureOverlay(

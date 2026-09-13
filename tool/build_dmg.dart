@@ -47,7 +47,10 @@ Options:
   }
 
   final pubspecContent = pubspecFile.readAsStringSync();
-  final versionMatch = RegExp(r'^version:\s*([^\s+]+)', multiLine: true).firstMatch(pubspecContent);
+  final versionMatch = RegExp(
+    r'^version:\s*([^\s+]+)',
+    multiLine: true,
+  ).firstMatch(pubspecContent);
   final version = versionMatch?.group(1) ?? '1.0.0';
 
   stdout.writeln('Packaging SnipSnap v$version for macOS...');
@@ -73,7 +76,9 @@ Options:
   }
 
   if (!appDir.existsSync()) {
-    stderr.writeln('Error: $appPath not found. Please run flutter build macos --release first.');
+    stderr.writeln(
+      'Error: $appPath not found. Please run flutter build macos --release first.',
+    );
     exit(1);
   }
 
@@ -172,7 +177,9 @@ Options:
         stderr.writeln('Warning: create-dmg finished with code $code');
       }
     } else {
-      stdout.writeln('create-dmg not found. Falling back to native macOS hdiutil...');
+      stdout.writeln(
+        'create-dmg not found. Falling back to native macOS hdiutil...',
+      );
       final proc = await Process.run('hdiutil', [
         'create',
         '-volname',
