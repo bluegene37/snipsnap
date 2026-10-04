@@ -1,3 +1,5 @@
+// Gene - Oct, 04, 2026: Added dart:async for unawaited support in fast image decoding.
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -644,6 +646,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     }
   }
 
+  // Gene - Oct, 04, 2026: Decoupled native ui.Image decode from pure-Dart img.decodeImage.
+  // Decodes native ui.Image immediately via Flutter engine (~20-30ms) so the screenshot
+  // renders on screen without delay. img.Image is pre-warmed asynchronously in the background
+  // so color picker, flood fill, and cut tools remain instant without blocking visual render.
   Future<void> _loadBaseImage() async {
     final path = widget.imagePath;
     final token = ++_baseImageToken;
@@ -661,11 +667,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     try {
       final bytes = await File(path).readAsBytes();
-      // Decoded off the UI isolate: a pure-Dart PNG decode of a Retina-sized
-      // capture takes long enough to visibly freeze the interface, and this
-      // runs on every capture switch and every bitmap rewrite.
-      final decodedImg = await compute(img.decodeImage, bytes);
-      final image = await RenderService.decodeImageFile(path);
+      final image = await RenderService.decodeImageBytes(bytes);
       // A newer load (or disposal) won the race — drop this frame's native memory.
       if (!mounted || token != _baseImageToken) {
         image?.dispose();
@@ -674,7 +676,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       setState(() {
         _baseImage?.dispose();
         _baseImage = image;
-        _cachedSourceImage = decodedImg;
+        _cachedSourceImage = null;
       });
       // The crop tool's default box needs the decoded size; if the user picked
       // crop before this landed, `_ensureCropRectInitialized` bailed out and
@@ -688,12 +690,73 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           Size(image.width.toDouble(), image.height.toDouble()),
         );
       }
+      unawaited(
+        compute(img.decodeImage, bytes).then((decodedImg) {
+          if (mounted && token == _baseImageToken) {
+            _cachedSourceImage = decodedImg;
+          }
+        }).catchError((Object e) {
+          debugPrint('Background img.decodeImage note: $e');
+        }),
+      );
     } catch (e) {
       // A failed load keeps the previous bitmap on screen; without at least a
       // log line that failure is completely invisible.
       debugPrint('SnipSnap base image load failed for $path: $e');
     }
   }
+
+  // Gene - Oct, 04, 2026: Preserved previous blocking implementation below for reference.
+  // Future<void> _loadBaseImage() async {
+  //   final path = widget.imagePath;
+  //   final token = ++_baseImageToken;
+  //
+  //   if (path == null) {
+  //     _baseImage?.dispose();
+  //     if (mounted) {
+  //       setState(() {
+  //         _baseImage = null;
+  //         _cachedSourceImage = null;
+  //       });
+  //     }
+  //     return;
+  //   }
+  //
+  //   try {
+  //     final bytes = await File(path).readAsBytes();
+  //     // Decoded off the UI isolate: a pure-Dart PNG decode of a Retina-sized
+  //     // capture takes long enough to visibly freeze the interface, and this
+  //     // runs on every capture switch and every bitmap rewrite.
+  //     final decodedImg = await compute(img.decodeImage, bytes);
+  //     final image = await RenderService.decodeImageFile(path);
+  //     // A newer load (or disposal) won the race — drop this frame's native memory.
+  //     if (!mounted || token != _baseImageToken) {
+  //       image?.dispose();
+  //       return;
+  //     }
+  //     setState(() {
+  //       _baseImage?.dispose();
+  //       _baseImage = image;
+  //       _cachedSourceImage = decodedImg;
+  //     });
+  //     // The crop tool's default box needs the decoded size; if the user picked
+  //     // crop before this landed, `_ensureCropRectInitialized` bailed out and
+  //     // this is the only other moment it can succeed.
+  //     _ensureCropRectInitialized();
+  //     if (image != null) {
+  //       // After the setState, never during it: the listener drives the
+  //       // parent's own setState.
+  //       widget.onImageSizeResolved?.call(
+  //         path,
+  //         Size(image.width.toDouble(), image.height.toDouble()),
+  //       );
+  //     }
+  //   } catch (e) {
+  //     // A failed load keeps the previous bitmap on screen; without at least a
+  //     // log line that failure is completely invisible.
+  //     debugPrint('SnipSnap base image load failed for $path: $e');
+  //   }
+  // }
 
   void _checkFileExists() {
     final exists =

@@ -313,6 +313,7 @@ class GallerySidebar extends StatelessWidget {
                       final isSelected = activeItem?.id == item.id;
                       final fileExists = File(item.filePath).existsSync();
 
+                      /*
                       // The selected capture is a non-exclusive highlight
                       // (selectedFill, ink foreground) — not the exclusive
                       // ink/onActive knockout plate, which stays reserved
@@ -332,6 +333,23 @@ class GallerySidebar extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: cardBg,
                           borderRadius: BorderRadius.circular(6),
+                        ),
+                      */
+                      // Gene - Oct, 04, 2026: Enhanced card selection highlight with high-contrast borderStrong frame and subtle resting hairline border.
+                      final cardBg = isSelected
+                          ? t.selectedFill
+                          : t.surfaceRaised;
+                      final cardBorder = isSelected
+                          ? Border.all(color: t.borderStrong, width: 2.0)
+                          : Border.all(color: t.border, width: t.hairline);
+
+                      return Container(
+                        width: 150,
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          color: cardBg,
+                          borderRadius: BorderRadius.circular(6),
+                          border: cardBorder,
                         ),
                         // The Material is what makes `hoverColor` below
                         // actually render. Ink paints into its nearest
@@ -404,7 +422,7 @@ class GallerySidebar extends StatelessWidget {
                                                   : Center(
                                                       child: Icon(
                                                         Icons
-                                                            .image_not_supported_rounded,
+                                                          .image_not_supported_rounded,
                                                         color: t.inkMuted,
                                                         size: 20,
                                                       ),
@@ -412,6 +430,31 @@ class GallerySidebar extends StatelessWidget {
                                             ),
                                           ),
                                         ),
+                                        // Gene - Oct, 04, 2026: Added distinct checkmark indicator badge for the selected capture thumbnail.
+                                        if (isSelected)
+                                          Positioned(
+                                            top: 4,
+                                            left: 4,
+                                            child: Container(
+                                              padding: const EdgeInsets.all(2),
+                                              decoration: BoxDecoration(
+                                                color: t.ink,
+                                                shape: BoxShape.circle,
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black.withValues(alpha: 0.25),
+                                                    blurRadius: 3,
+                                                    offset: const Offset(0, 1),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: Icon(
+                                                Icons.check_rounded,
+                                                size: 11,
+                                                color: t.onActive,
+                                              ),
+                                            ),
+                                          ),
                                         // Snagit-style Extension Badge in bottom right
                                         Positioned(
                                           bottom: 3,

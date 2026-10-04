@@ -119,6 +119,77 @@ void _runStateTests(SnipThemeMode mode) {
     },
   );
 
+  // Gene - Oct, 04, 2026: Verifies that the selected capture card carries a high-contrast borderStrong frame and resting card has hairline border.
+  testWidgets(
+    '[$label] the selected capture card has a prominent borderStrong frame and resting card has hairline border',
+    (tester) async {
+      final items = [_item('a'), _item('b')];
+      await _pump(tester, mode: mode, items: items, activeItem: items[0]);
+
+      /*
+      final containers = tester
+          .widgetList<Container>(find.byType(Container))
+          .where((c) => c.decoration is BoxDecoration)
+          .map((c) => c.decoration as BoxDecoration)
+          .where((d) => d.color == t.selectedFill || d.color == t.surfaceRaised)
+          .toList();
+
+      final selectedBox = containers.firstWhere((d) => d.color == t.selectedFill);
+      final unselectedBox = containers.firstWhere((d) => d.color == t.surfaceRaised);
+      */
+      // Gene - Oct, 04, 2026: Accurately locate the card containers via title text ancestors to avoid matching sub-header panels.
+      final cardA = tester
+          .widgetList<Container>(
+            find.ancestor(
+              of: find.text('Capture a'),
+              matching: find.byType(Container),
+            ),
+          )
+          .firstWhere(
+            (c) =>
+                c.decoration is BoxDecoration &&
+                (c.decoration as BoxDecoration).color == t.selectedFill,
+          );
+      final cardB = tester
+          .widgetList<Container>(
+            find.ancestor(
+              of: find.text('Capture b'),
+              matching: find.byType(Container),
+            ),
+          )
+          .firstWhere(
+            (c) =>
+                c.decoration is BoxDecoration &&
+                (c.decoration as BoxDecoration).color == t.surfaceRaised,
+          );
+
+      final selectedBox = cardA.decoration as BoxDecoration;
+      final unselectedBox = cardB.decoration as BoxDecoration;
+
+      expect(selectedBox.border, isNotNull);
+      expect(selectedBox.border?.top.color, t.borderStrong);
+      expect(selectedBox.border?.top.width, 2.0);
+
+      expect(unselectedBox.border, isNotNull);
+      expect(unselectedBox.border?.top.color, t.border);
+      expect(unselectedBox.border?.top.width, t.hairline);
+    },
+  );
+
+  // Gene - Oct, 04, 2026: Verifies that the selected capture displays an active checkmark badge on the thumbnail.
+  testWidgets(
+    '[$label] the selected capture displays an active checkmark badge on the thumbnail',
+    (tester) async {
+      final items = [_item('a'), _item('b')];
+      await _pump(tester, mode: mode, items: items, activeItem: items[0]);
+
+      expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+
+      final checkIcon = tester.widget<Icon>(find.byIcon(Icons.check_rounded));
+      expect(checkIcon.color, t.onActive);
+    },
+  );
+
   testWidgets(
     '[$label] delete routes through the danger tone, never an inline red',
     (tester) async {

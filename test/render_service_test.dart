@@ -1,4 +1,6 @@
 import 'dart:io';
+// Gene - Oct, 04, 2026: Imported dart:typed_data for Uint8List in decodeImageBytes tests.
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -338,4 +340,23 @@ void main() {
     );
     expect(bytes, isNull);
   });
+
+  // Gene - Oct, 04, 2026: Added unit tests for RenderService.decodeImageBytes to verify valid PNG decoding and error handling on invalid bytes.
+  test('decodeImageBytes decodes valid PNG bytes into ui.Image', () async {
+    final path = await _writeWhitePng(tempDir, 100, 100);
+    final bytes = await File(path).readAsBytes();
+
+    final image = await RenderService.decodeImageBytes(bytes);
+    expect(image, isNotNull);
+    expect(image!.width, 100);
+    expect(image.height, 100);
+    image.dispose();
+  });
+
+  test('decodeImageBytes returns null for invalid image bytes', () async {
+    final invalidBytes = Uint8List.fromList([0, 1, 2, 3, 4]);
+    final image = await RenderService.decodeImageBytes(invalidBytes);
+    expect(image, isNull);
+  });
 }
+

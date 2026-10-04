@@ -245,4 +245,93 @@ void main() {
           'switch and is now hanging off the edge of B',
     );
   });
+
+  // Gene - Oct, 04, 2026: Verifies that switching captures renders the baseImage
+  // rapidly via native engine decode without awaiting background CPU image decoding.
+  testWidgets(
+    'capture switch decodes baseImage rapidly without waiting for background CPU image',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(700, 600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final repaintKey = GlobalKey();
+      await _pumpLoaded(
+        tester,
+        _canvas(
+          imagePath: pathA,
+          repaintKey: repaintKey,
+          tool: CanvasTool.select,
+        ),
+        capture: _sizeA,
+      );
+
+      var sizeResolved = false;
+      Size? resolvedSize;
+
+      await tester.runAsync(() async {
+        await tester.pumpWidget(
+          SnipThemeScope(
+            theme: SnipTheme.forMode(SnipThemeMode.dark),
+            child: MaterialApp(
+              home: Scaffold(
+                body: SizedBox(
+                  width: 500,
+                  height: 460,
+                  child: EditorCanvas(
+                    imagePath: pathB,
+                    annotations: const [],
+                    activeTool: CanvasTool.select,
+                    activeColor: const Color(0xFF000000),
+                    strokeWidth: 4,
+                    fontSize: 16,
+                    isFilled: false,
+                    stepCounter: 1,
+                    onAnnotationAdded: (_) {},
+                    onStepCounterIncremented: (_) {},
+                    repaintBoundaryKey: repaintKey,
+                    onImageSizeResolved: (path, size) {
+                      if (path == pathB) {
+                        sizeResolved = true;
+                        resolvedSize = size;
+                      }
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        final stopwatch = Stopwatch()..start();
+        while (stopwatch.elapsedMilliseconds < 1000) {
+          await tester.pump();
+          final rawImages = tester.widgetList<RawImage>(find.byType(RawImage));
+          final hasSwitched = rawImages.any(
+            (w) =>
+                w.image != null &&
+                w.image!.width == _sizeB.width.toInt() &&
+                w.image!.height == _sizeB.height.toInt(),
+          );
+          if (hasSwitched) {
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+      });
+
+      final rawImages = tester.widgetList<RawImage>(find.byType(RawImage));
+      expect(
+        rawImages.any(
+          (w) =>
+              w.image != null &&
+              w.image!.width == _sizeB.width.toInt() &&
+              w.image!.height == _sizeB.height.toInt(),
+        ),
+        isTrue,
+        reason: 'RawImage should have received decoded baseImage for pathB',
+      );
+      expect(sizeResolved, isTrue);
+      expect(resolvedSize, _sizeB);
+    },
+  );
 }
