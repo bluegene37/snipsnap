@@ -392,15 +392,28 @@ class UserManualData {
           title: 'macOS Screen Recording Permissions',
           description:
               'macOS requires explicit user consent for applications to capture screen pixels. If captures appear blank or transparent:',
+          // Gene - Oct, 06, 2026: Updated troubleshooting steps for macOS Screen Recording. Toggling off/on
+          // does not clear a stale cdhash/csreq from TCC.db on macOS Sonoma/Sequoia; users must remove
+          // the entry with the [-] button or reset via tccutil before re-granting and relaunching.
+          // Old implementation:
+          // steps: [
+          //   'Open macOS System Settings.',
+          //   'Navigate to Privacy & Security > Screen Recording.',
+          //   'Enable the toggle next to SnipSnap.',
+          //   'If the toggle already shows on but SnipSnap keeps asking, turn it off and on again.',
+          //   'Quit and reopen SnipSnap. macOS only applies the grant after a relaunch.',
+          // ],
+          // tip:
+          //     'macOS ties the grant to the exact app build. After updating SnipSnap the old grant may no longer match, which is why re-toggling fixes it.',
           steps: [
             'Open macOS System Settings.',
             'Navigate to Privacy & Security > Screen Recording.',
-            'Enable the toggle next to SnipSnap.',
-            'If the toggle already shows on but SnipSnap keeps asking, turn it off and on again.',
-            'Quit and reopen SnipSnap. macOS only applies the grant after a relaunch.',
+            'If SnipSnap is already listed and toggled on, select SnipSnap and click the "-" (minus) button to remove the stale entry (or run: tccutil reset ScreenCapture dev.genexis.snipsnap in Terminal).',
+            'Enable the toggle next to SnipSnap when prompted.',
+            'Quit and reopen SnipSnap (Cmd + Q). macOS only applies the grant to a fresh app process.',
           ],
           tip:
-              'macOS ties the grant to the exact app build. After updating SnipSnap the old grant may no longer match, which is why re-toggling fixes it.',
+              'macOS ties Screen Recording to the binary code signature. After rebuilding or updating, remove the old entry with the minus button so macOS binds the permission to the current build.',
         ),
         ManualSection(
           title: 'macOS Accessibility Permissions',

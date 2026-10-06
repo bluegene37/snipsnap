@@ -1389,18 +1389,39 @@ class _MainScreenState extends State<MainScreen> {
   /// a newly granted Screen Recording permission after a relaunch, so the
   /// message says that rather than inviting the user to retry immediately.
   ///
-  /// The "already on? turn it off and on" wording is deliberate: TCC binds the
-  /// grant to the binary's code signature, so after a rebuild or update of an
-  /// ad-hoc signed build the toggle in System Settings still shows on for the
-  /// old binary while this one is refused. Re-toggling rebinds it.
+  // Gene - Oct, 06, 2026: Updated Screen Recording prompt instructions. On macOS Sonoma/Sequoia,
+  // toggling an ad-hoc signed app off and on does not re-read or update a stale cdhash/csreq in TCC.db;
+  // users must remove the stale entry via the [-] button or tccutil, then grant and relaunch.
+  // Old implementation:
+  // /// The "already on? turn it off and on" wording is deliberate: TCC binds the
+  // /// grant to the binary's code signature, so after a rebuild or update of an
+  // /// ad-hoc signed build the toggle in System Settings still shows on for the
+  // /// old binary while this one is refused. Re-toggling rebinds it.
+  // Future<bool> _ensureCapturePermission() async {
+  //   if (await _captureService.hasScreenCapturePermission()) return true;
+  //   if (!mounted) return false;
+  //   _showToast(
+  //     'SnipSnap needs Screen Recording access. In System Settings > Privacy & '
+  //     'Security > Screen Recording, turn SnipSnap on (if it already shows on, '
+  //     'turn it off and on again), then relaunch SnipSnap.',
+  //     duration: const Duration(seconds: 8),
+  //     action: SnackBarAction(
+  //       label: 'Open Settings',
+  //       textColor: _theme.emphasis,
+  //       onPressed: () =>
+  //           unawaited(_captureService.openScreenRecordingSettings()),
+  //     ),
+  //   );
+  //   return false;
+  // }
   Future<bool> _ensureCapturePermission() async {
     if (await _captureService.hasScreenCapturePermission()) return true;
     if (!mounted) return false;
     _showToast(
       'SnipSnap needs Screen Recording access. In System Settings > Privacy & '
-      'Security > Screen Recording, turn SnipSnap on (if it already shows on, '
-      'turn it off and on again), then relaunch SnipSnap.',
-      duration: const Duration(seconds: 8),
+      'Security > Screen Recording, turn SnipSnap on. If already on, remove SnipSnap '
+      'using the [-] button first, then quit & reopen SnipSnap.',
+      duration: const Duration(seconds: 10),
       action: SnackBarAction(
         label: 'Open Settings',
         textColor: _theme.emphasis,
