@@ -16,4 +16,7 @@ PRODUCT_COPYRIGHT = Copyright © 2026 genexis.dev. All rights reserved.
 // The Apple Developer Team ID used to sign the app. Leave empty for local, ad-hoc
 // signed builds; set it (or export DEVELOPMENT_TEAM in CI) before producing a
 // Developer ID or App Store build.
-DEVELOPMENT_TEAM =
+// DEVELOPMENT_TEAM =
+// DEVELOPMENT_TEAM = J9V2X635Y6
+// Gene - Oct 07, 2026: Configured Apple Developer Team ID to T7LB768N2Z for Developer ID signing
+DEVELOPMENT_TEAM = T7LB768N2Z
