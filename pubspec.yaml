@@ -91,10 +91,32 @@ flutter_launcher_icons:
 # step with `version:` above.
 msix_config:
   display_name: SnipSnap
-  publisher_display_name: genexis.dev
-  identity_name: dev.genexis.snipsnap
+  # publisher_display_name: genexis.dev
+  # identity_name: dev.genexis.snipsnap
+  # msix_version: 1.0.4.0
+  # logo_path: windows/runner/resources/app_icon.ico
+  # Gene - Oct, 14, 2026: Microsoft Store submission config. The three
+  # identity values MUST be copied verbatim from Partner Center →
+  # Apps and games → SnipSnap → Product management → Product identity:
+  #   Package/Identity/Name           → identity_name
+  #   Package/Identity/Publisher      → publisher
+  #   Package/Properties/PublisherDisplayName → publisher_display_name
+  # Build with: dart run msix:create --store   (unsigned; the Store signs it)
+  publisher_display_name: REPLACE_WITH_PublisherDisplayName
+  identity_name: REPLACE_WITH_Package.Identity.Name
+  publisher: CN=REPLACE-WITH-PUBLISHER-GUID
   msix_version: 1.0.4.0
-  logo_path: windows/runner/resources/app_icon.ico
+  # Store requires a PNG logo; msix generates every tile/scale asset from it.
+  logo_path: assets/icon/app_icon.png
+  # runFullTrust (implicit) lets the Win32 runner use global hotkeys, GDI
+  # capture, PowerShell clipboard and Windows.Media.Ocr as it does today.
+  capabilities: internetClient
+  languages: en-us
+  architecture: x64
+  # Disables the GitHub self-updater (see AppInfo.isStoreBuild).
+  windows_build_args: --dart-define=SNIPSNAP_STORE=true
+  output_path: build/windows/msix
+  output_name: SnipSnap
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

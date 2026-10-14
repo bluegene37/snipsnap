@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
+import '../app_info.dart';
 import '../models/annotation.dart';
 import '../models/app_shortcut.dart';
 import '../models/capture_item.dart';
@@ -2125,7 +2126,12 @@ class _MainScreenState extends State<MainScreen> {
                       zoomScale: _zoomScale,
                       onZoomScaleChanged: (val) =>
                           setState(() => _zoomScale = val),
-                      updateController: _updateController,
+                      // updateController: _updateController,
+                      // Gene - Oct, 14, 2026: Hide the GitHub update button
+                      // in Microsoft Store builds (Store handles updates).
+                      updateController: AppInfo.isStoreBuild
+                          ? null
+                          : _updateController,
                     ),
 
                     // Main Work Area (Canvas + Right Properties Sidebar)

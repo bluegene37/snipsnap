@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app_info.dart';
 import '../../services/update/update_controller.dart';
 import '../dialogs/update_dialog.dart';
 
@@ -24,6 +25,13 @@ class _UpdateGateState extends State<UpdateGate> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onUpdateStateChanged);
+    // WidgetsBinding.instance.addPostFrameCallback((_) {
+    //   if (!mounted) return;
+    //   widget.controller.checkSilently();
+    // });
+    // Gene - Oct, 14, 2026: Skip the GitHub update check in Microsoft Store
+    // builds — the Store delivers updates and forbids self-updating.
+    if (AppInfo.isStoreBuild) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       widget.controller.checkSilently();
