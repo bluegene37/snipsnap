@@ -102,9 +102,13 @@ msix_config:
   #   Package/Identity/Publisher      → publisher
   #   Package/Properties/PublisherDisplayName → publisher_display_name
   # Build with: dart run msix:create --store   (unsigned; the Store signs it)
-  publisher_display_name: REPLACE_WITH_PublisherDisplayName
-  identity_name: REPLACE_WITH_Package.Identity.Name
-  publisher: CN=REPLACE-WITH-PUBLISHER-GUID
+  # publisher_display_name: REPLACE_WITH_PublisherDisplayName
+  # identity_name: REPLACE_WITH_Package.Identity.Name
+  # publisher: CN=REPLACE-WITH-PUBLISHER-GUID
+  # Gene - Oct, 14, 2026: Filled in Partner Center product identity values.
+  publisher_display_name: genexis.dev
+  identity_name: genexis.dev.SnipSnap
+  publisher: CN=1DFE82D6-D264-4FA7-BD15-F2DFAE3C949D
   msix_version: 1.0.4.0
   # Store requires a PNG logo; msix generates every tile/scale asset from it.
   logo_path: assets/icon/app_icon.png
