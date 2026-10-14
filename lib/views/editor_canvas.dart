@@ -3605,18 +3605,33 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // _emptyStatePill(
+                //   t,
+                //   Icons.crop_free_rounded,
+                //   'Snip Area',
+                //   'Cmd+Shift+1',
+                // ),
+                // const SizedBox(width: 8),
+                // _emptyStatePill(
+                //   t,
+                //   Icons.file_open_rounded,
+                //   'Open Image',
+                //   'Cmd+O',
+                // ),
+                // Gene - Oct, 14, 2026: Made empty state shortcut pills platform-aware
+                // (Cmd on macOS, Ctrl on Windows and Linux).
                 _emptyStatePill(
                   t,
                   Icons.crop_free_rounded,
                   'Snip Area',
-                  'Cmd+Shift+1',
+                  Platform.isMacOS ? 'Cmd+Shift+1' : 'Ctrl+Shift+X',
                 ),
                 const SizedBox(width: 8),
                 _emptyStatePill(
                   t,
                   Icons.file_open_rounded,
                   'Open Image',
-                  'Cmd+O',
+                  Platform.isMacOS ? 'Cmd+O' : 'Ctrl+O',
                 ),
               ],
             ),
