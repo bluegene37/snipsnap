@@ -691,13 +691,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         );
       }
       unawaited(
-        compute(img.decodeImage, bytes).then((decodedImg) {
-          if (mounted && token == _baseImageToken) {
-            _cachedSourceImage = decodedImg;
-          }
-        }).catchError((Object e) {
-          debugPrint('Background img.decodeImage note: $e');
-        }),
+        compute(img.decodeImage, bytes)
+            .then((decodedImg) {
+              if (mounted && token == _baseImageToken) {
+                _cachedSourceImage = decodedImg;
+              }
+            })
+            .catchError((Object e) {
+              debugPrint('Background img.decodeImage note: $e');
+            }),
       );
     } catch (e) {
       // A failed load keeps the previous bitmap on screen; without at least a

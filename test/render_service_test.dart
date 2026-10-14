@@ -359,4 +359,3 @@ void main() {
     expect(image, isNull);
   });
 }
-

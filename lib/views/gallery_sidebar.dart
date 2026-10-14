@@ -422,7 +422,7 @@ class GallerySidebar extends StatelessWidget {
                                                   : Center(
                                                       child: Icon(
                                                         Icons
-                                                          .image_not_supported_rounded,
+                                                            .image_not_supported_rounded,
                                                         color: t.inkMuted,
                                                         size: 20,
                                                       ),
@@ -442,7 +442,10 @@ class GallerySidebar extends StatelessWidget {
                                                 shape: BoxShape.circle,
                                                 boxShadow: [
                                                   BoxShadow(
-                                                    color: Colors.black.withValues(alpha: 0.25),
+                                                    color: Colors.black
+                                                        .withValues(
+                                                          alpha: 0.25,
+                                                        ),
                                                     blurRadius: 3,
                                                     offset: const Offset(0, 1),
                                                   ),
