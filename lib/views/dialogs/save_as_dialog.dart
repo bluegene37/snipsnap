@@ -4,8 +4,36 @@ import 'package:path/path.dart' as p;
 import '../../utils/constants.dart';
 import '../../utils/snip_theme.dart';
 
-enum SaveFormat { png, jpg }
+// Gene - Oct, 22, 2026: Added pdf option to SaveFormat enum and defined PdfPageSize and PdfMargin enums for PDF export.
+// enum SaveFormat { png, jpg }
+enum SaveFormat { png, jpg, pdf }
 
+enum PdfPageSize { fitImage, a4, letter }
+
+enum PdfMargin { none, standard }
+
+// Gene - Oct, 22, 2026: Added PDF configuration options (pdfPageSize, pdfMargin) to SaveOptions with defaults.
+// class SaveOptions {
+//   final String fileName;
+//   final SaveFormat format;
+//   final int quality;
+//   final String? customFolderPath;
+//   final double framingPadding;
+//   final double cornerRadius;
+//   final double shadowBlur;
+//   final int? gradientIndex;
+// 
+//   SaveOptions({
+//     required this.fileName,
+//     required this.format,
+//     this.quality = 90,
+//     this.customFolderPath,
+//     this.framingPadding = 0.0,
+//     this.cornerRadius = 0.0,
+//     this.shadowBlur = 0.0,
+//     this.gradientIndex,
+//   });
+// }
 class SaveOptions {
   final String fileName;
   final SaveFormat format;
@@ -15,6 +43,9 @@ class SaveOptions {
   final double cornerRadius;
   final double shadowBlur;
   final int? gradientIndex;
+  // Gene - Oct, 22, 2026: Added PDF configuration options.
+  final PdfPageSize pdfPageSize;
+  final PdfMargin pdfMargin;
 
   SaveOptions({
     required this.fileName,
@@ -25,6 +56,8 @@ class SaveOptions {
     this.cornerRadius = 0.0,
     this.shadowBlur = 0.0,
     this.gradientIndex,
+    this.pdfPageSize = PdfPageSize.fitImage,
+    this.pdfMargin = PdfMargin.none,
   });
 }
 
@@ -54,6 +87,9 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
   bool _enableShadow = false;
   int _selectedGradientIndex = 0;
   bool _isFramingExpanded = false;
+  // Gene - Oct, 22, 2026: State variables for PDF export options.
+  PdfPageSize _selectedPdfPageSize = PdfPageSize.fitImage;
+  PdfMargin _selectedPdfMargin = PdfMargin.none;
 
   @override
   void initState() {
@@ -61,10 +97,19 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
     String clean = widget.initialName
         .replaceAll(RegExp(r'[\\/:*?"<>|]'), '-')
         .replaceAll(' ', '_');
+    // Gene - Oct, 22, 2026: Strip .pdf extension in initial name clean up.
+    // if (clean.toLowerCase().endsWith('.png')) {
+    //   clean = clean.substring(0, clean.length - 4);
+    // } else if (clean.toLowerCase().endsWith('.jpg') ||
+    //     clean.toLowerCase().endsWith('.jpeg')) {
+    //   clean = clean.substring(0, clean.length - 4);
+    // }
     if (clean.toLowerCase().endsWith('.png')) {
       clean = clean.substring(0, clean.length - 4);
     } else if (clean.toLowerCase().endsWith('.jpg') ||
         clean.toLowerCase().endsWith('.jpeg')) {
+      clean = clean.substring(0, clean.length - 4);
+    } else if (clean.toLowerCase().endsWith('.pdf')) {
       clean = clean.substring(0, clean.length - 4);
     }
     _nameController = TextEditingController(text: clean);
@@ -347,6 +392,32 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                       ),
                     ),
                     const SizedBox(height: 8),
+                    // Gene - Oct, 22, 2026: Replaced 2-format row with 3-format row (PNG, JPEG, PDF).
+                    // Row(
+                    //   children: [
+                    //     Expanded(
+                    //       child: _FormatTile(
+                    //         label: 'PNG (.png)',
+                    //         subtitle: 'Lossless quality',
+                    //         isSelected: _selectedFormat == SaveFormat.png,
+                    //         onTap: () => setState(
+                    //           () => _selectedFormat = SaveFormat.png,
+                    //         ),
+                    //       ),
+                    //     ),
+                    //     const SizedBox(width: 10),
+                    //     Expanded(
+                    //       child: _FormatTile(
+                    //         label: 'JPEG (.jpg)',
+                    //         subtitle: 'Smaller file size',
+                    //         isSelected: _selectedFormat == SaveFormat.jpg,
+                    //         onTap: () => setState(
+                    //           () => _selectedFormat = SaveFormat.jpg,
+                    //         ),
+                    //       ),
+                    //     ),
+                    //   ],
+                    // ),
                     Row(
                       children: [
                         Expanded(
@@ -359,7 +430,7 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: _FormatTile(
                             label: 'JPEG (.jpg)',
@@ -367,6 +438,17 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                             isSelected: _selectedFormat == SaveFormat.jpg,
                             onTap: () => setState(
                               () => _selectedFormat = SaveFormat.jpg,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _FormatTile(
+                            label: 'PDF (.pdf)',
+                            subtitle: 'Document file',
+                            isSelected: _selectedFormat == SaveFormat.pdf,
+                            onTap: () => setState(
+                              () => _selectedFormat = SaveFormat.pdf,
                             ),
                           ),
                         ),
@@ -406,6 +488,145 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                         inactiveColor: t.border,
                         onChanged: (val) => setState(() => _jpgQuality = val),
                       ),
+                    ],
+
+                    // Gene - Oct, 22, 2026: PDF options section for Page Size and Margins.
+                    if (_selectedFormat == SaveFormat.pdf) ...[
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Page Size:',
+                            style: TextStyle(
+                              color: t.inkMuted,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                alignment: WrapAlignment.end,
+                                children: [
+                                  (PdfPageSize.fitImage, 'Match Image'),
+                                  (PdfPageSize.a4, 'A4 Paper'),
+                                  (PdfPageSize.letter, 'US Letter'),
+                                ].map((entry) {
+                                  final isSelected =
+                                      _selectedPdfPageSize == entry.$1;
+                                  return ChoiceChip(
+                                    label: Text(
+                                      entry.$2,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: t.controlForeground(
+                                          active: isSelected,
+                                          exclusive: true,
+                                        ),
+                                      ),
+                                    ),
+                                    selected: isSelected,
+                                    selectedColor: t.activeFill,
+                                    backgroundColor: Colors.transparent,
+                                    side: BorderSide(
+                                      color: isSelected
+                                          ? t.activeFill
+                                          : t.border,
+                                    ),
+                                    showCheckmark: false,
+                                    onSelected: (sel) {
+                                      if (sel) {
+                                        setState(
+                                          () => _selectedPdfPageSize = entry.$1,
+                                        );
+                                      }
+                                    },
+                                  );
+                                }).toList(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_selectedPdfPageSize != PdfPageSize.fitImage) ...[
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Margins:',
+                              style: TextStyle(
+                                color: t.inkMuted,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  alignment: WrapAlignment.end,
+                                  children: [
+                                    (PdfMargin.none, 'None'),
+                                    (PdfMargin.standard, 'Standard (0.5")'),
+                                  ].map((entry) {
+                                    final isSelected =
+                                        _selectedPdfMargin == entry.$1;
+                                    return ChoiceChip(
+                                      label: Text(
+                                        entry.$2,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: t.controlForeground(
+                                            active: isSelected,
+                                            exclusive: true,
+                                          ),
+                                        ),
+                                      ),
+                                      selected: isSelected,
+                                      selectedColor: t.activeFill,
+                                      backgroundColor: Colors.transparent,
+                                      side: BorderSide(
+                                        color: isSelected
+                                            ? t.activeFill
+                                            : t.border,
+                                      ),
+                                      showCheckmark: false,
+                                      onSelected: (sel) {
+                                        if (sel) {
+                                          setState(
+                                            () => _selectedPdfMargin = entry.$1,
+                                          );
+                                        }
+                                      },
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            'Auto orientation: Fits image aspect ratio',
+                            style: TextStyle(
+                              color: t.inkMuted,
+                              fontSize: 11,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ],
                 ),
@@ -685,6 +906,23 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                         final rawName = _nameController.text.trim();
                         final name = rawName.isEmpty ? 'screenshot' : rawName;
                         Navigator.pop(context);
+                        // Gene - Oct, 22, 2026: Pass pdfPageSize and pdfMargin to SaveOptions on confirm.
+                        // widget.onConfirm(
+                        //   SaveOptions(
+                        //     fileName: name,
+                        //     format: _selectedFormat,
+                        //     quality: _jpgQuality.round(),
+                        //     customFolderPath: _selectedLocationKey == 'custom'
+                        //         ? _customFolderPath
+                        //         : _selectedLocationKey,
+                        //     framingPadding: _framingPadding,
+                        //     cornerRadius: _cornerRadius,
+                        //     shadowBlur: _enableShadow ? 24.0 : 0.0,
+                        //     gradientIndex: _framingPadding > 0
+                        //         ? _selectedGradientIndex
+                        //         : null,
+                        //   ),
+                        // );
                         widget.onConfirm(
                           SaveOptions(
                             fileName: name,
@@ -699,6 +937,8 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                             gradientIndex: _framingPadding > 0
                                 ? _selectedGradientIndex
                                 : null,
+                            pdfPageSize: _selectedPdfPageSize,
+                            pdfMargin: _selectedPdfMargin,
                           ),
                         );
                       },

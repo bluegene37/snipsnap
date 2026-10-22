@@ -19,6 +19,8 @@ Uint8List _transcodeToJpg(({Uint8List bytes, int quality}) req) {
 }
 
 class StorageService {
+  // Gene - Oct, 22, 2026: Added isPdf flag to handle saving .pdf format captures.
+  /*
   /// Save image bytes with specific format (.png or .jpg) to user selected location
   static Future<String?> exportImageDialogWithFormat({
     required List<int> bytes,
@@ -28,6 +30,17 @@ class StorageService {
     String? customFolderPath,
   }) async {
     final ext = isJpg ? 'jpg' : 'png';
+  */
+  /// Save image bytes with specific format (.png, .jpg, or .pdf) to user selected location
+  static Future<String?> exportImageDialogWithFormat({
+    required List<int> bytes,
+    required String fileName,
+    required bool isJpg,
+    bool isPdf = false,
+    int jpgQuality = 90,
+    String? customFolderPath,
+  }) async {
+    final ext = isPdf ? 'pdf' : (isJpg ? 'jpg' : 'png');
     String cleanName = fileName
         .replaceAll(RegExp(r'[\\/:*?"<>|]'), '-')
         .replaceAll(' ', '_')

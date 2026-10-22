@@ -39,6 +39,8 @@ dependencies:
   sqlite3: ^3.5.2
   sqlite3_flutter_libs: ^0.6.0+eol
   shared_preferences: ^2.5.5
+  # Gene - Oct, 22, 2026: Added pdf package for exporting screenshot captures as PDF documents.
+  pdf: ^3.13.1
 
 dev_dependencies:
   flutter_test:

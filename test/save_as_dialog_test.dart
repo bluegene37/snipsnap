@@ -165,6 +165,78 @@ void _runStateTests(SnipThemeMode mode) {
     );
   });
 
+  // Gene - Oct, 22, 2026: Added widget test for selecting PDF tile, verifying PDF options chips, and onConfirm emission.
+  testWidgets('[$label] selecting PDF tile updates state and reveals PDF options', (
+    tester,
+  ) async {
+    SaveOptions? result;
+    await _pump(tester, mode: mode, onConfirm: (o) => result = o);
+
+    expect(find.text('PDF (.pdf)'), findsOneWidget);
+    await tester.tap(find.text('PDF (.pdf)'));
+    await tester.pump();
+
+    expect(find.text('Page Size:'), findsOneWidget);
+    expect(find.text('Match Image'), findsOneWidget);
+    expect(find.text('A4 Paper'), findsOneWidget);
+    expect(find.text('US Letter'), findsOneWidget);
+
+    // Margins should not be visible when fitImage (Match Image) is selected
+    expect(find.text('Margins:'), findsNothing);
+
+    // Switch to A4 Paper
+    await tester.tap(find.text('A4 Paper'));
+    await tester.pump();
+
+    expect(find.text('Margins:'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, 'None'), findsOneWidget);
+    expect(find.text('Standard (0.5")'), findsOneWidget);
+    expect(find.text('Auto orientation: Fits image aspect ratio'), findsOneWidget);
+
+    // Switch margin to Standard (0.5")
+    await tester.tap(find.text('Standard (0.5")'));
+    await tester.pump();
+
+    // Gene - Oct, 22, 2026: Scroll Save button into view before tapping because expanded PDF options exceed default test window height.
+    // await tester.tap(find.text('Save'));
+    // await tester.pump();
+    await tester.ensureVisible(find.text('Save'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+
+    expect(result?.format, SaveFormat.pdf);
+    expect(result?.pdfPageSize, PdfPageSize.a4);
+    expect(result?.pdfMargin, PdfMargin.standard);
+  });
+
+  // Gene - Oct, 22, 2026: Added widget test verifying PDF format tile uses exclusive-active plate and theme styling.
+  testWidgets('[$label] PDF format tile uses exclusive-active plate and theme styling', (
+    tester,
+  ) async {
+    await _pump(tester, mode: mode);
+
+    // Initially unselected — plain ink
+    final pdfLabel = tester.widget<Text>(find.text('PDF (.pdf)'));
+    expect(
+      pdfLabel.style?.color,
+      t.ink,
+      reason: '$label: unselected PDF tile text must be plain ink',
+    );
+
+    // Tap PDF tile
+    await tester.tap(find.text('PDF (.pdf)'));
+    await tester.pump();
+
+    // Now selected — onActive knockout
+    final selectedPdfLabel = tester.widget<Text>(find.text('PDF (.pdf)'));
+    expect(
+      selectedPdfLabel.style?.color,
+      t.onActive,
+      reason: '$label: selected PDF tile text must be onActive knockout',
+    );
+  });
+
   testWidgets('[$label] Save fires onConfirm with the entered name', (
     tester,
   ) async {
@@ -234,7 +306,60 @@ void _runStateTests(SnipThemeMode mode) {
   });
 }
 
+// Gene - Oct, 22, 2026: Added SaveOptions PDF defaults/properties tests and .pdf extension stripping test.
+// void main() {
+//   for (final mode in SnipThemeMode.values) {
+//     _runStateTests(mode);
+//   }
+// }
 void main() {
+  group('SaveOptions PDF defaults and properties', () {
+    test('SaveOptions defaults to fitImage and no margins for PDF', () {
+      final options = SaveOptions(
+        fileName: 'test',
+        format: SaveFormat.pdf,
+      );
+      expect(options.pdfPageSize, PdfPageSize.fitImage);
+      expect(options.pdfMargin, PdfMargin.none);
+    });
+
+    test('SaveOptions accepts custom pdfPageSize and pdfMargin', () {
+      final options = SaveOptions(
+        fileName: 'test',
+        format: SaveFormat.pdf,
+        pdfPageSize: PdfPageSize.a4,
+        pdfMargin: PdfMargin.standard,
+      );
+      expect(options.pdfPageSize, PdfPageSize.a4);
+      expect(options.pdfMargin, PdfMargin.standard);
+    });
+  });
+
+  group('SaveAsDialog filename cleaning', () {
+    testWidgets('strips .pdf extension from initialName', (tester) async {
+      SaveOptions? result;
+      await tester.pumpWidget(
+        SnipThemeScope(
+          theme: SnipTheme.forMode(SnipThemeMode.light),
+          child: MaterialApp(
+            home: Scaffold(
+              body: SaveAsDialog(
+                initialName: 'document.pdf',
+                onConfirm: (o) => result = o,
+              ),
+            ),
+          ),
+        ),
+      );
+      tester.takeException();
+
+      await tester.tap(find.text('Save'));
+      await tester.pump();
+
+      expect(result?.fileName, 'document');
+    });
+  });
+
   for (final mode in SnipThemeMode.values) {
     _runStateTests(mode);
   }

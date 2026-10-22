@@ -22,6 +22,8 @@ import '../services/ocr/ocr_service.dart';
 import '../services/render_service.dart';
 import '../services/shortcut_service.dart';
 import '../services/storage_service.dart';
+// Gene - Oct, 22, 2026: Import PdfExportService for PDF export.
+import '../services/pdf_export_service.dart';
 import '../services/update/update_controller.dart';
 import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
@@ -1753,11 +1755,31 @@ class _MainScreenState extends State<MainScreen> {
                 }
               }
 
+              // Gene - Oct, 22, 2026: If PDF format is requested, convert export bytes into a PDF document and pass isPdf flag.
+              /*
               final savedPath =
                   await StorageService.exportImageDialogWithFormat(
                     bytes: exportBytes,
                     fileName: options.fileName,
                     isJpg: options.format == SaveFormat.jpg,
+                    jpgQuality: options.quality,
+                    customFolderPath: options.customFolderPath,
+                  );
+              */
+              if (options.format == SaveFormat.pdf) {
+                exportBytes = await PdfExportService.generatePdf(
+                  imageBytes: exportBytes,
+                  pageSize: options.pdfPageSize,
+                  margin: options.pdfMargin,
+                );
+              }
+
+              final savedPath =
+                  await StorageService.exportImageDialogWithFormat(
+                    bytes: exportBytes,
+                    fileName: options.fileName,
+                    isJpg: options.format == SaveFormat.jpg,
+                    isPdf: options.format == SaveFormat.pdf,
                     jpgQuality: options.quality,
                     customFolderPath: options.customFolderPath,
                   );
