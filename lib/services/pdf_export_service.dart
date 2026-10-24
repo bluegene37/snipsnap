@@ -7,11 +7,9 @@ import 'package:pdf/widgets.dart' as pw;
 import '../views/dialogs/save_as_dialog.dart';
 
 /// Top-level isolate computation for PDF generation to keep the UI smooth.
-Future<Uint8List> _buildPdfDocument(({
-  Uint8List imageBytes,
-  PdfPageSize pageSize,
-  PdfMargin margin,
-}) req) async {
+Future<Uint8List> _buildPdfDocument(
+  ({Uint8List imageBytes, PdfPageSize pageSize, PdfMargin margin}) req,
+) async {
   final decoded = img.decodeImage(req.imageBytes);
   if (decoded == null) {
     throw ArgumentError(
@@ -61,9 +59,7 @@ Future<Uint8List> _buildPdfDocument(({
             child: pw.Image(pdfImage, fit: pw.BoxFit.fill),
           );
         }
-        return pw.Center(
-          child: pw.Image(pdfImage, fit: pw.BoxFit.contain),
-        );
+        return pw.Center(child: pw.Image(pdfImage, fit: pw.BoxFit.contain));
       },
     ),
   );

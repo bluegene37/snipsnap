@@ -9,8 +9,11 @@ class AppInfo {
   AppInfo._();
 
   static const String appName = 'SnipSnap';
-  static const String appVersion = '1.0.4';
-  static const String appBuild = '3';
+  // Gene - Oct, 24, 2026: Bumped appVersion and appBuild to 1.0.5+4 for PDF export release.
+  // static const String appVersion = '1.0.4';
+  // static const String appBuild = '3';
+  static const String appVersion = '1.0.5';
+  static const String appBuild = '4';
 
   // Gene - Oct, 14, 2026: Added Microsoft Store build flag. Store builds are
   // compiled with `--dart-define=SNIPSNAP_STORE=true` (see msix_config in

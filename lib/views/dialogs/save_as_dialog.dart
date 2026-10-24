@@ -22,7 +22,7 @@ enum PdfMargin { none, standard }
 //   final double cornerRadius;
 //   final double shadowBlur;
 //   final int? gradientIndex;
-// 
+//
 //   SaveOptions({
 //     required this.fileName,
 //     required this.format,
@@ -512,42 +512,44 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                 spacing: 6,
                                 runSpacing: 4,
                                 alignment: WrapAlignment.end,
-                                children: [
-                                  (PdfPageSize.fitImage, 'Match Image'),
-                                  (PdfPageSize.a4, 'A4 Paper'),
-                                  (PdfPageSize.letter, 'US Letter'),
-                                ].map((entry) {
-                                  final isSelected =
-                                      _selectedPdfPageSize == entry.$1;
-                                  return ChoiceChip(
-                                    label: Text(
-                                      entry.$2,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: t.controlForeground(
-                                          active: isSelected,
-                                          exclusive: true,
+                                children:
+                                    [
+                                      (PdfPageSize.fitImage, 'Match Image'),
+                                      (PdfPageSize.a4, 'A4 Paper'),
+                                      (PdfPageSize.letter, 'US Letter'),
+                                    ].map((entry) {
+                                      final isSelected =
+                                          _selectedPdfPageSize == entry.$1;
+                                      return ChoiceChip(
+                                        label: Text(
+                                          entry.$2,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: t.controlForeground(
+                                              active: isSelected,
+                                              exclusive: true,
+                                            ),
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                    selected: isSelected,
-                                    selectedColor: t.activeFill,
-                                    backgroundColor: Colors.transparent,
-                                    side: BorderSide(
-                                      color: isSelected
-                                          ? t.activeFill
-                                          : t.border,
-                                    ),
-                                    showCheckmark: false,
-                                    onSelected: (sel) {
-                                      if (sel) {
-                                        setState(
-                                          () => _selectedPdfPageSize = entry.$1,
-                                        );
-                                      }
-                                    },
-                                  );
-                                }).toList(),
+                                        selected: isSelected,
+                                        selectedColor: t.activeFill,
+                                        backgroundColor: Colors.transparent,
+                                        side: BorderSide(
+                                          color: isSelected
+                                              ? t.activeFill
+                                              : t.border,
+                                        ),
+                                        showCheckmark: false,
+                                        onSelected: (sel) {
+                                          if (sel) {
+                                            setState(
+                                              () => _selectedPdfPageSize =
+                                                  entry.$1,
+                                            );
+                                          }
+                                        },
+                                      );
+                                    }).toList(),
                               ),
                             ),
                           ),
@@ -574,41 +576,43 @@ class _SaveAsDialogState extends State<SaveAsDialog> {
                                   spacing: 6,
                                   runSpacing: 4,
                                   alignment: WrapAlignment.end,
-                                  children: [
-                                    (PdfMargin.none, 'None'),
-                                    (PdfMargin.standard, 'Standard (0.5")'),
-                                  ].map((entry) {
-                                    final isSelected =
-                                        _selectedPdfMargin == entry.$1;
-                                    return ChoiceChip(
-                                      label: Text(
-                                        entry.$2,
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: t.controlForeground(
-                                            active: isSelected,
-                                            exclusive: true,
+                                  children:
+                                      [
+                                        (PdfMargin.none, 'None'),
+                                        (PdfMargin.standard, 'Standard (0.5")'),
+                                      ].map((entry) {
+                                        final isSelected =
+                                            _selectedPdfMargin == entry.$1;
+                                        return ChoiceChip(
+                                          label: Text(
+                                            entry.$2,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: t.controlForeground(
+                                                active: isSelected,
+                                                exclusive: true,
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                      ),
-                                      selected: isSelected,
-                                      selectedColor: t.activeFill,
-                                      backgroundColor: Colors.transparent,
-                                      side: BorderSide(
-                                        color: isSelected
-                                            ? t.activeFill
-                                            : t.border,
-                                      ),
-                                      showCheckmark: false,
-                                      onSelected: (sel) {
-                                        if (sel) {
-                                          setState(
-                                            () => _selectedPdfMargin = entry.$1,
-                                          );
-                                        }
-                                      },
-                                    );
-                                  }).toList(),
+                                          selected: isSelected,
+                                          selectedColor: t.activeFill,
+                                          backgroundColor: Colors.transparent,
+                                          side: BorderSide(
+                                            color: isSelected
+                                                ? t.activeFill
+                                                : t.border,
+                                          ),
+                                          showCheckmark: false,
+                                          onSelected: (sel) {
+                                            if (sel) {
+                                              setState(
+                                                () => _selectedPdfMargin =
+                                                    entry.$1,
+                                              );
+                                            }
+                                          },
+                                        );
+                                      }).toList(),
                                 ),
                               ),
                             ),

@@ -30,41 +30,50 @@ void main() {
       expect(header, '%PDF-');
     });
 
-    test('generates PDF with A4 paper format in landscape for wide image', () async {
-      final widePng = _createTestPngBytes(width: 400, height: 200);
-      final pdfBytes = await PdfExportService.generatePdf(
-        imageBytes: widePng,
-        pageSize: PdfPageSize.a4,
-        margin: PdfMargin.standard,
-      );
+    test(
+      'generates PDF with A4 paper format in landscape for wide image',
+      () async {
+        final widePng = _createTestPngBytes(width: 400, height: 200);
+        final pdfBytes = await PdfExportService.generatePdf(
+          imageBytes: widePng,
+          pageSize: PdfPageSize.a4,
+          margin: PdfMargin.standard,
+        );
 
-      expect(pdfBytes, isNotEmpty);
-      expect(ascii.decode(pdfBytes.sublist(0, 5)), '%PDF-');
-    });
+        expect(pdfBytes, isNotEmpty);
+        expect(ascii.decode(pdfBytes.sublist(0, 5)), '%PDF-');
+      },
+    );
 
-    test('generates PDF with Letter paper format in portrait for tall image', () async {
-      final tallPng = _createTestPngBytes(width: 200, height: 400);
-      final pdfBytes = await PdfExportService.generatePdf(
-        imageBytes: tallPng,
-        pageSize: PdfPageSize.letter,
-        margin: PdfMargin.none,
-      );
+    test(
+      'generates PDF with Letter paper format in portrait for tall image',
+      () async {
+        final tallPng = _createTestPngBytes(width: 200, height: 400);
+        final pdfBytes = await PdfExportService.generatePdf(
+          imageBytes: tallPng,
+          pageSize: PdfPageSize.letter,
+          margin: PdfMargin.none,
+        );
 
-      expect(pdfBytes, isNotEmpty);
-      expect(ascii.decode(pdfBytes.sublist(0, 5)), '%PDF-');
-    });
+        expect(pdfBytes, isNotEmpty);
+        expect(ascii.decode(pdfBytes.sublist(0, 5)), '%PDF-');
+      },
+    );
 
     // Gene - Oct, 22, 2026: Added unit test verifying ArgumentError when passed corrupted/empty image bytes.
-    test('throws ArgumentError when passed corrupted or empty image bytes', () async {
-      expect(
-        () => PdfExportService.generatePdf(
-          imageBytes: Uint8List(0),
-          pageSize: PdfPageSize.fitImage,
-          margin: PdfMargin.none,
-        ),
-        throwsA(isA<ArgumentError>()),
-      );
-    });
+    test(
+      'throws ArgumentError when passed corrupted or empty image bytes',
+      () async {
+        expect(
+          () => PdfExportService.generatePdf(
+            imageBytes: Uint8List(0),
+            pageSize: PdfPageSize.fitImage,
+            margin: PdfMargin.none,
+          ),
+          throwsA(isA<ArgumentError>()),
+        );
+      },
+    );
 
     // Gene - Oct, 22, 2026: Added integration test verifying PDF file export through StorageService.
     test('StorageService exports PDF bytes with .pdf extension', () async {
