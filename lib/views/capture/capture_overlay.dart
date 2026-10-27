@@ -37,11 +37,36 @@ class CaptureColors {
 /// Written in Flutter rather than per-platform so macOS, Windows and Linux get
 /// the same overlay from one implementation — the interaction rules live in
 /// [CaptureSelectionModel], which is tested without a screen.
+// Gene - Oct, 27, 2026: Added optional onScrollingCapture callback to CaptureOverlay for panoramic capture.
+// Old implementation:
+// class CaptureOverlay extends StatefulWidget {
+//   const CaptureOverlay({
+//     super.key,
+//     required this.onCapture,
+//     required this.onCancel,
+//     this.background,
+//     this.devicePixelRatio = 1.0,
+//   });
+//
+//   /// The chosen region, in the overlay's logical coordinates. The caller maps
+//   /// it onto the screen bitmap.
+//   final ValueChanged<Rect> onCapture;
+//
+//   final VoidCallback onCancel;
+//
+//   /// Pre-captured screen bitmap shown beneath the wash. Null renders the
+//   /// overlay transparent, for a window that already shows the live desktop.
+//   final ui.Image? background;
+//
+//   /// Used only for the `1234 × 567 px` readout, so it reports real pixels
+//   /// rather than logical ones.
+//   final double devicePixelRatio;
 class CaptureOverlay extends StatefulWidget {
   const CaptureOverlay({
     super.key,
     required this.onCapture,
     required this.onCancel,
+    this.onScrollingCapture,
     this.background,
     this.devicePixelRatio = 1.0,
   });
@@ -51,6 +76,9 @@ class CaptureOverlay extends StatefulWidget {
   final ValueChanged<Rect> onCapture;
 
   final VoidCallback onCancel;
+
+  /// Optional callback triggered when initiating panoramic scrolling capture.
+  final ValueChanged<Rect>? onScrollingCapture;
 
   /// Pre-captured screen bitmap shown beneath the wash. Null renders the
   /// overlay transparent, for a window that already shows the live desktop.
@@ -70,13 +98,25 @@ class _CaptureOverlayState extends State<CaptureOverlay> {
   final FocusNode _focusNode = FocusNode();
 
   static const double _pillWidth = 122;
+  static const double _scrollPillWidth = 108;
   static const double _controlHeight = 34;
   static const double _controlGap = 8;
 
-  /// Placement is computed for the pair as one block, so the model's
-  /// edge-flipping keeps both buttons on screen together.
-  static const Size _buttonSize = Size(
-    _pillWidth + _controlGap + _controlHeight,
+  // Gene - Oct, 27, 2026: Dynamically compute button size to include Scroll button when onScrollingCapture is set.
+  // Old implementation:
+  // /// Placement is computed for the pair as one block, so the model's
+  // /// edge-flipping keeps both buttons on screen together.
+  // static const Size _buttonSize = Size(
+  //   _pillWidth + _controlGap + _controlHeight,
+  //   _controlHeight,
+  // );
+  Size get _buttonSize => Size(
+    _pillWidth +
+        (widget.onScrollingCapture != null
+            ? _controlGap + _scrollPillWidth
+            : 0) +
+        _controlGap +
+        _controlHeight,
     _controlHeight,
   );
 
@@ -188,6 +228,30 @@ class _CaptureOverlayState extends State<CaptureOverlay> {
                 ),
               ),
 
+              // Gene - Oct, 27, 2026: Render Scroll button in settled control pill row when onScrollingCapture is set.
+              // Old implementation:
+              // if (!buttonRect.isEmpty)
+              //   Positioned(
+              //     left: buttonRect.left,
+              //     top: buttonRect.top,
+              //     width: buttonRect.width,
+              //     height: buttonRect.height,
+              //     child: Row(
+              //       children: [
+              //         SizedBox(
+              //           width: _pillWidth,
+              //           height: _controlHeight,
+              //           child: _CaptureButton(onPressed: _confirm),
+              //         ),
+              //         const SizedBox(width: _controlGap),
+              //         SizedBox(
+              //           width: _controlHeight,
+              //           height: _controlHeight,
+              //           child: _CancelButton(onPressed: widget.onCancel),
+              //         ),
+              //       ],
+              //     ),
+              //   ),
               if (!buttonRect.isEmpty)
                 Positioned(
                   left: buttonRect.left,
@@ -201,6 +265,20 @@ class _CaptureOverlayState extends State<CaptureOverlay> {
                         height: _controlHeight,
                         child: _CaptureButton(onPressed: _confirm),
                       ),
+                      if (widget.onScrollingCapture != null) ...[
+                        const SizedBox(width: _controlGap),
+                        SizedBox(
+                          width: _scrollPillWidth,
+                          height: _controlHeight,
+                          child: _ScrollButton(
+                            onPressed: () {
+                              final m = _model;
+                              if (m == null || !m.hasUsableSelection) return;
+                              widget.onScrollingCapture!(m.selection!);
+                            },
+                          ),
+                        ),
+                      ],
                       const SizedBox(width: _controlGap),
                       SizedBox(
                         width: _controlHeight,
@@ -290,6 +368,63 @@ class _CaptureButtonState extends State<_CaptureButton> {
               SizedBox(width: 7),
               Text(
                 'Capture',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Gene - Oct, 27, 2026: Added _ScrollButton for initiating panoramic scrolling capture.
+class _ScrollButton extends StatefulWidget {
+  const _ScrollButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  State<_ScrollButton> createState() => _ScrollButtonState();
+}
+
+class _ScrollButtonState extends State<_ScrollButton> {
+  bool _hot = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hot = true),
+      onExit: (_) => setState(() => _hot = false),
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: _hot
+                ? Color.lerp(CaptureColors.coffee, CaptureColors.crema, 0.35)
+                : CaptureColors.coffee,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x55000000),
+                blurRadius: 10,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.unfold_more_rounded, size: 16, color: Colors.white),
+              SizedBox(width: 6),
+              Text(
+                'Scroll',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 13,

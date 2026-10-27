@@ -24,12 +24,15 @@ import '../services/shortcut_service.dart';
 import '../services/storage_service.dart';
 // Gene - Oct, 22, 2026: Import PdfExportService for PDF export.
 import '../services/pdf_export_service.dart';
+// Gene - Oct, 27, 2026: Added imports for panoramic scrolling capture.
+import '../services/scrolling/scrolling_capture_controller.dart';
 import '../services/update/update_controller.dart';
 import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 import '../utils/image_eviction.dart';
 import '../utils/image_operations.dart';
 import '../utils/snip_theme.dart';
+import 'capture/scrolling_capture_hud.dart';
 import 'components/canvas_busy_overlay.dart';
 import 'components/header_bar.dart';
 import 'components/ocr_result_panel.dart';
@@ -321,6 +324,9 @@ class _MainScreenState extends State<MainScreen> {
   bool _isSidebarOpen = true;
   bool _isPropertiesOpen = true;
   bool _isCapturing = false;
+  // Gene - Oct, 27, 2026: Added scrolling capture controller and completion tracker.
+  ScrollingCaptureController? _scrollingController;
+  Completer<String?>? _scrollingCompleter;
   bool _darkMode = true;
 
   /// Caption for the progress overlay shown over the canvas, or null when
@@ -584,6 +590,8 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void dispose() {
     _updateController.dispose();
+    // Gene - Oct, 27, 2026: Dispose active scrolling capture controller if still running.
+    _scrollingController?.dispose();
     _lifecycleListener?.dispose();
     // Flush any annotation edit still waiting on the debounce timer.
     _persistDebounce?.cancel();
@@ -1477,6 +1485,72 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  // Gene - Oct, 27, 2026: Added panoramic scrolling capture handler.
+  Future<void> _handleScrollingCapture([
+    Rect? initialRect,
+    ScrollingCaptureController? customController,
+  ]) async {
+    if (!await _ensureCapturePermission()) return;
+    if (!mounted) return;
+    setState(() => _isCapturing = true);
+
+    final rect =
+        initialRect ??
+        (_canvasSize.isEmpty
+            ? const Rect.fromLTWH(0, 0, 800, 600)
+            : Offset.zero & _canvasSize);
+
+    final controller =
+        customController ??
+        ScrollingCaptureController(captureService: _captureService);
+    _scrollingController = controller;
+
+    try {
+      final dpr = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
+      await controller.startCapture(viewportRect: rect, devicePixelRatio: dpr);
+
+      if (controller.status == ScrollingCaptureStatus.cancelled) {
+        return;
+      }
+
+      final completer = Completer<String?>();
+      _scrollingCompleter = completer;
+
+      final path = await completer.future;
+      if (path != null) {
+        await _addCaptureFromPath(path);
+      }
+    } catch (e) {
+      debugPrint('SnipSnap scrolling capture error: $e');
+    } finally {
+      controller.dispose();
+      if (mounted) {
+        setState(() {
+          _scrollingController = null;
+          _scrollingCompleter = null;
+          _isCapturing = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _finishScrollingCapture() async {
+    final controller = _scrollingController;
+    if (controller != null) {
+      final path = await controller.finishCapture();
+      if (!(_scrollingCompleter?.isCompleted ?? true)) {
+        _scrollingCompleter?.complete(path);
+      }
+    }
+  }
+
+  void _cancelScrollingCapture() {
+    _scrollingController?.cancelCapture();
+    if (!(_scrollingCompleter?.isCompleted ?? true)) {
+      _scrollingCompleter?.complete(null);
+    }
+  }
+
   Future<void> _handleImportImage() async {
     try {
       final result = await FilePicker.pickFile(
@@ -2116,8 +2190,16 @@ class _MainScreenState extends State<MainScreen> {
                 child: Column(
                   children: [
                     // Top Header Bar
+                    // Gene - Oct, 27, 2026: Wired onSnipScrolling to _handleScrollingCapture.
+                    // Old implementation:
+                    // HeaderBar(
+                    //   onSnipInteractive: _handleInteractiveCapture,
+                    //   onSnipFullScreen: _handleFullScreenCapture,
+                    //   onSnipTimer: _handleTimerCapture,
+                    //   onImportImage: _handleImportImage,
                     HeaderBar(
                       onSnipInteractive: _handleInteractiveCapture,
+                      onSnipScrolling: _handleScrollingCapture,
                       onSnipFullScreen: _handleFullScreenCapture,
                       onSnipTimer: _handleTimerCapture,
                       onImportImage: _handleImportImage,
@@ -2521,10 +2603,33 @@ class _MainScreenState extends State<MainScreen> {
                           // polarity in dark mode (a light wash instead of a dim)
                           // and risk the white spinner/caption vanishing against it
                           // — see SnipTheme.scrim's own doc comment.
-                          if (_isCapturing)
+                          // Gene - Oct, 27, 2026: Show CanvasBusyOverlay only when not showing scrolling capture HUD.
+                          // Old implementation:
+                          // if (_isCapturing)
+                          //   const Positioned.fill(
+                          //     child: CanvasBusyOverlay(
+                          //       message: 'Waiting for screen capture...',
+                          //     ),
+                          //   ),
+                          if (_isCapturing && _scrollingController == null)
                             const Positioned.fill(
                               child: CanvasBusyOverlay(
                                 message: 'Waiting for screen capture...',
+                              ),
+                            ),
+
+                          // Gene - Oct, 27, 2026: Mount ScrollingCaptureHud when a scrolling capture session is active.
+                          if (_scrollingController != null)
+                            Positioned(
+                              bottom: 24,
+                              left: 0,
+                              right: 0,
+                              child: Center(
+                                child: ScrollingCaptureHud(
+                                  controller: _scrollingController!,
+                                  onDone: _finishScrollingCapture,
+                                  onCancel: _cancelScrollingCapture,
+                                ),
                               ),
                             ),
 

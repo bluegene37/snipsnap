@@ -19,9 +19,15 @@ class HeaderBar extends StatelessWidget {
   static const double _compactBreakpoint = 1180;
   static const double _iconOnlyBreakpoint = 940;
 
+  // Gene - Oct, 27, 2026: Added optional onSnipScrolling callback to HeaderBar.
+  // Old implementation:
+  // final VoidCallback onSnipInteractive;
+  // final VoidCallback? onSnipFullScreen;
+  // final VoidCallback? onSnipTimer;
   final VoidCallback onSnipInteractive;
   final VoidCallback? onSnipFullScreen;
   final VoidCallback? onSnipTimer;
+  final VoidCallback? onSnipScrolling;
   final VoidCallback onImportImage;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
@@ -49,11 +55,20 @@ class HeaderBar extends StatelessWidget {
   /// toggle. Null keeps the header updater-free (e.g. in isolated tests).
   final UpdateController? updateController;
 
+  // Gene - Oct, 27, 2026: Added this.onSnipScrolling parameter.
+  // Old implementation:
+  // const HeaderBar({
+  //   super.key,
+  //   required this.onSnipInteractive,
+  //   this.onSnipFullScreen,
+  //   this.onSnipTimer,
+  //   required this.onImportImage,
   const HeaderBar({
     super.key,
     required this.onSnipInteractive,
     this.onSnipFullScreen,
     this.onSnipTimer,
+    this.onSnipScrolling,
     required this.onImportImage,
     required this.onUndo,
     required this.onRedo,
@@ -253,6 +268,55 @@ class HeaderBar extends StatelessWidget {
                 ),
               ),
               Container(height: 24, width: t.hairline, color: t.border),
+              // Gene - Oct, 27, 2026: Added Scrolling Capture mode to capture dropdown menu.
+              // Old implementation:
+              // PopupMenuButton<String>(
+              //   tooltip: 'Capture Modes',
+              //   position: PopupMenuPosition.under,
+              //   color: t.surfaceRaised,
+              //   shape: RoundedRectangleBorder(
+              //     borderRadius: BorderRadius.circular(10),
+              //     side: BorderSide(color: t.border),
+              //   ),
+              //   onSelected: (val) => switch (val) {
+              //     'area' => onSnipInteractive(),
+              //     'full' => onSnipFullScreen?.call(),
+              //     'timer' => onSnipTimer?.call(),
+              //     _ => null,
+              //   },
+              //   itemBuilder: (ctx) => [
+              //     _captureMenuItem(
+              //       t,
+              //       value: 'area',
+              //       icon: Icons.crop_free_rounded,
+              //       title: 'Capture Area',
+              //       subtitle: _shortcut(
+              //         AppShortcutAction.interactiveSnip,
+              //         'Cmd+Shift+1',
+              //       ),
+              //     ),
+              //     _captureMenuItem(
+              //       t,
+              //       value: 'full',
+              //       icon: Icons.fullscreen_rounded,
+              //       title: 'Capture Full Screen',
+              //       subtitle: _shortcut(
+              //         AppShortcutAction.fullScreenSnip,
+              //         'Cmd+Shift+2',
+              //       ),
+              //     ),
+              //     _captureMenuItem(
+              //       t,
+              //       value: 'timer',
+              //       icon: Icons.timer_rounded,
+              //       title: 'Timed Capture (3s)',
+              //       subtitle: _shortcut(
+              //         AppShortcutAction.timerSnip,
+              //         'Cmd+Shift+5',
+              //       ),
+              //     ),
+              //   ],
+              //   child: Padding(
               PopupMenuButton<String>(
                 tooltip: 'Capture Modes',
                 position: PopupMenuPosition.under,
@@ -263,6 +327,7 @@ class HeaderBar extends StatelessWidget {
                 ),
                 onSelected: (val) => switch (val) {
                   'area' => onSnipInteractive(),
+                  'scroll' => onSnipScrolling?.call(),
                   'full' => onSnipFullScreen?.call(),
                   'timer' => onSnipTimer?.call(),
                   _ => null,
@@ -278,6 +343,14 @@ class HeaderBar extends StatelessWidget {
                       'Cmd+Shift+1',
                     ),
                   ),
+                  if (onSnipScrolling != null)
+                    _captureMenuItem(
+                      t,
+                      value: 'scroll',
+                      icon: Icons.unfold_more_rounded,
+                      title: 'Scrolling Capture',
+                      subtitle: 'Panoramic',
+                    ),
                   _captureMenuItem(
                     t,
                     value: 'full',

@@ -70,6 +70,52 @@ class CapturePlugin: NSObject {
       // relaunch, which is why the Dart side words its message that way.
       result(CGRequestScreenCaptureAccess())
 
+    // Gene - Oct, 27, 2026: Added captureRect and simulateScroll for panoramic scrolling capture.
+    case "captureRect":
+      guard
+        let args = call.arguments as? [String: Any],
+        let xVal = (args["x"] as? NSNumber)?.doubleValue ?? (args["x"] as? Double),
+        let yVal = (args["y"] as? NSNumber)?.doubleValue ?? (args["y"] as? Double),
+        let wVal = (args["width"] as? NSNumber)?.doubleValue ?? (args["width"] as? Double),
+        let hVal = (args["height"] as? NSNumber)?.doubleValue ?? (args["height"] as? Double)
+      else {
+        result(FlutterError(code: "bad_args", message: "rect parameters missing", details: nil))
+        return
+      }
+      let rect = CGRect(x: CGFloat(xVal), y: CGFloat(yVal), width: CGFloat(wVal), height: CGFloat(hVal))
+      guard
+        let image = CGWindowListCreateImage(rect, .optionOnScreenOnly, kCGNullWindowID, .bestResolution),
+        let rep = NSBitmapImageRep(cgImage: image),
+        let data = rep.representation(using: .png, properties: [:])
+      else {
+        result(nil)
+        return
+      }
+      result(FlutterStandardTypedData(bytes: data))
+
+    case "simulateScroll":
+      guard
+        let args = call.arguments as? [String: Any],
+        let deltaY = (args["deltaY"] as? NSNumber)?.int32Value ?? (args["deltaY"] as? Int32)
+      else {
+        result(nil)
+        return
+      }
+      let scrollEvent = CGEvent(
+        scrollWheelEvent2Source: nil,
+        units: .pixel,
+        wheelCount: 1,
+        wheel1: deltaY,
+        wheel2: 0,
+        wheel3: 0
+      )
+      if let xVal = (args["x"] as? NSNumber)?.doubleValue ?? (args["x"] as? Double),
+         let yVal = (args["y"] as? NSNumber)?.doubleValue ?? (args["y"] as? Double) {
+        scrollEvent?.location = CGPoint(x: CGFloat(xVal), y: CGFloat(yVal))
+      }
+      scrollEvent?.post(tap: .cghidEventTap)
+      result(true)
+
     default:
       result(FlutterMethodNotImplemented)
     }
