@@ -540,6 +540,11 @@ class _MainScreenState extends State<MainScreen> {
     _loadHistory();
     _loadThemePreference();
     _loadSavedColors();
+    // Gene - Oct, 27, 2026: Register callbacks for native panoramic scrolling capture HUD.
+    _captureService.setScrollingCallbacks(
+      onDone: _finishScrollingCapture,
+      onCancel: _cancelScrollingCapture,
+    );
   }
 
   Future<void> _loadSavedColors() async {
@@ -1538,7 +1543,55 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  // Gene - Oct, 27, 2026: Added panoramic scrolling capture handler.
+  // Gene - Oct, 27, 2026: Added panoramic scrolling capture handler with native HUD integration.
+  // Old implementation:
+  // Future<void> _handleScrollingCapture([
+  //   Rect? initialRect,
+  //   ScrollingCaptureController? customController,
+  // ]) async {
+  //   if (!await _ensureCapturePermission()) return;
+  //   if (!mounted) return;
+  //   setState(() => _isCapturing = true);
+  //
+  //   final rect =
+  //       initialRect ??
+  //       (_canvasSize.isEmpty
+  //           ? const Rect.fromLTWH(0, 0, 800, 600)
+  //           : Offset.zero & _canvasSize);
+  //
+  //   final controller =
+  //       customController ??
+  //       ScrollingCaptureController(captureService: _captureService);
+  //   _scrollingController = controller;
+  //
+  //   try {
+  //     final dpr = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
+  //     await controller.startCapture(viewportRect: rect, devicePixelRatio: dpr);
+  //
+  //     if (controller.status == ScrollingCaptureStatus.cancelled) {
+  //       return;
+  //     }
+  //
+  //     final completer = Completer<String?>();
+  //     _scrollingCompleter = completer;
+  //
+  //     final path = await completer.future;
+  //     if (path != null) {
+  //       await _addCaptureFromPath(path);
+  //     }
+  //   } catch (e) {
+  //     debugPrint('SnipSnap scrolling capture error: $e');
+  //   } finally {
+  //     controller.dispose();
+  //     if (mounted) {
+  //       setState(() {
+  //         _scrollingController = null;
+  //         _scrollingCompleter = null;
+  //         _isCapturing = false;
+  //       });
+  //     }
+  //   }
+  // }
   Future<void> _handleScrollingCapture([
     Rect? initialRect,
     ScrollingCaptureController? customController,
@@ -1558,8 +1611,20 @@ class _MainScreenState extends State<MainScreen> {
         ScrollingCaptureController(captureService: _captureService);
     _scrollingController = controller;
 
+    final dpr = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
+
+    // Gene - Oct, 27, 2026: Show native floating HUD anchored to viewport on macOS so target app remains active.
+    await _captureService.showScrollingHud(rect);
+
+    void onControllerUpdate() {
+      _captureService.updateScrollingHud(
+        controller.cumulativeHeight,
+        controller.frameCount,
+      );
+    }
+    controller.addListener(onControllerUpdate);
+
     try {
-      final dpr = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
       await controller.startCapture(viewportRect: rect, devicePixelRatio: dpr);
 
       if (controller.status == ScrollingCaptureStatus.cancelled) {
@@ -1576,7 +1641,9 @@ class _MainScreenState extends State<MainScreen> {
     } catch (e) {
       debugPrint('SnipSnap scrolling capture error: $e');
     } finally {
+      controller.removeListener(onControllerUpdate);
       controller.dispose();
+      await _captureService.closeScrollingHud();
       if (mounted) {
         setState(() {
           _scrollingController = null;

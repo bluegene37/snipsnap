@@ -230,4 +230,60 @@ void main() {
     expect(File(result!).existsSync(), isTrue);
     expect(await File(result).readAsBytes(), [10, 20, 30, 40]);
   });
+
+  // Gene - Oct, 27, 2026: Added unit tests for native scrolling HUD methods and callbacks.
+  group('Scrolling HUD Native Channel Methods', () {
+    test('showScrollingHud invokes method channel with rect coordinates', () async {
+      await captureService.showScrollingHud(const Rect.fromLTWH(100, 200, 800, 600));
+
+      if (Platform.isMacOS) {
+        expect(methodCalls.where((c) => c.method == 'showScrollingHud'), hasLength(1));
+        final call = methodCalls.firstWhere((c) => c.method == 'showScrollingHud');
+        expect(call.arguments['x'], 100.0);
+        expect(call.arguments['y'], 200.0);
+        expect(call.arguments['width'], 800.0);
+        expect(call.arguments['height'], 600.0);
+      }
+    });
+
+    test('updateScrollingHud invokes method channel with height and frame count', () async {
+      await captureService.updateScrollingHud(1500, 5);
+
+      if (Platform.isMacOS) {
+        expect(methodCalls.where((c) => c.method == 'updateScrollingHud'), hasLength(1));
+        final call = methodCalls.firstWhere((c) => c.method == 'updateScrollingHud');
+        expect(call.arguments['height'], 1500);
+        expect(call.arguments['frameCount'], 5);
+      }
+    });
+
+    test('closeScrollingHud invokes method channel to dismiss native HUD', () async {
+      await captureService.closeScrollingHud();
+
+      if (Platform.isMacOS) {
+        expect(methodCalls.where((c) => c.method == 'closeScrollingHud'), hasLength(1));
+      }
+    });
+
+    test('setScrollingCallbacks dispatches onScrollingDone and onScrollingCancel', () async {
+      var doneCalled = false;
+      var cancelCalled = false;
+
+      captureService.setScrollingCallbacks(
+        onDone: () => doneCalled = true,
+        onCancel: () => cancelCalled = true,
+      );
+
+      // Simulate native channel calling back into Dart
+      const channel = MethodChannel('snipsnap/capture');
+      final binding = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      final doneMessage = channel.codec.encodeMethodCall(const MethodCall('onScrollingDone'));
+      await binding.handlePlatformMessage('snipsnap/capture', doneMessage, (_) {});
+      expect(doneCalled, isTrue);
+
+      final cancelMessage = channel.codec.encodeMethodCall(const MethodCall('onScrollingCancel'));
+      await binding.handlePlatformMessage('snipsnap/capture', cancelMessage, (_) {});
+      expect(cancelCalled, isTrue);
+    });
+  });
 }

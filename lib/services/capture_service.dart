@@ -340,4 +340,61 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
       return null;
     }
   }
+
+  // Gene - Oct, 27, 2026: Added scrolling capture callbacks and native HUD methods for panoramic scrolling capture.
+  VoidCallback? _onScrollingDone;
+  VoidCallback? _onScrollingCancel;
+
+  void setScrollingCallbacks({
+    VoidCallback? onDone,
+    VoidCallback? onCancel,
+  }) {
+    _onScrollingDone = onDone;
+    _onScrollingCancel = onCancel;
+    _channel.setMethodCallHandler(_handleNativeMethodCall);
+  }
+
+  Future<dynamic> _handleNativeMethodCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onScrollingDone':
+        _onScrollingDone?.call();
+      case 'onScrollingCancel':
+        _onScrollingCancel?.call();
+    }
+  }
+
+  Future<void> showScrollingHud(Rect rect) async {
+    if (!Platform.isMacOS) return;
+    try {
+      await _channel.invokeMethod('showScrollingHud', {
+        'x': rect.left,
+        'y': rect.top,
+        'width': rect.width,
+        'height': rect.height,
+      });
+    } catch (e) {
+      debugPrint('SnipSnap showScrollingHud error: $e');
+    }
+  }
+
+  Future<void> updateScrollingHud(int height, int frameCount) async {
+    if (!Platform.isMacOS) return;
+    try {
+      await _channel.invokeMethod('updateScrollingHud', {
+        'height': height,
+        'frameCount': frameCount,
+      });
+    } catch (e) {
+      debugPrint('SnipSnap updateScrollingHud error: $e');
+    }
+  }
+
+  Future<void> closeScrollingHud() async {
+    if (!Platform.isMacOS) return;
+    try {
+      await _channel.invokeMethod('closeScrollingHud');
+    } catch (e) {
+      debugPrint('SnipSnap closeScrollingHud error: $e');
+    }
+  }
 }

@@ -8,21 +8,45 @@ import FlutterMacOS
 /// - Clicking and dragging captures the selected rectangular area.
 /// - Pressing any key escapes and cancels capture (no screenshot taken).
 class CapturePlugin: NSObject {
+  // Gene - Oct, 27, 2026: Retain FlutterMethodChannel reference and scrolling HUD windows on CapturePlugin instance.
+  // Old implementation:
+  // static func register(with registrar: FlutterPluginRegistrar) {
+  //   let channel = FlutterMethodChannel(
+  //     name: "snipsnap/capture",
+  //     binaryMessenger: registrar.messenger
+  //   )
+  //   let instance = CapturePlugin()
+  //   channel.setMethodCallHandler { call, result in
+  //     instance.handle(call, result: result)
+  //   }
+  // }
+  //
+  // private var activeWindows: [CaptureOverlayWindow] = []
+  // private var localKeyMonitor: Any?
+  // private var globalKeyMonitor: Any?
+  // private var activeResult: FlutterResult?
   static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(
       name: "snipsnap/capture",
       binaryMessenger: registrar.messenger
     )
     let instance = CapturePlugin()
+    instance.channel = channel
     channel.setMethodCallHandler { call, result in
       instance.handle(call, result: result)
     }
   }
 
+  private var channel: FlutterMethodChannel?
   private var activeWindows: [CaptureOverlayWindow] = []
   private var localKeyMonitor: Any?
   private var globalKeyMonitor: Any?
   private var activeResult: FlutterResult?
+
+  private var scrollingGuideWindow: NSPanel?
+  private var scrollingHudWindow: NSPanel?
+  private var scrollingKeyMonitor: Any?
+  private var scrollingLocalKeyMonitor: Any?
 
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
@@ -71,6 +95,7 @@ class CapturePlugin: NSObject {
       result(CGRequestScreenCaptureAccess())
 
     // Gene - Oct, 27, 2026: Added captureRect and simulateScroll for panoramic scrolling capture.
+    // Gene - Oct, 27, 2026: Updated captureRect to convert Retina pixel coordinates to Quartz points using backingScaleFactor.
     case "captureRect":
       guard
         let args = call.arguments as? [String: Any],
@@ -82,19 +107,23 @@ class CapturePlugin: NSObject {
         result(FlutterError(code: "bad_args", message: "rect parameters missing", details: nil))
         return
       }
-      let rect = CGRect(x: CGFloat(xVal), y: CGFloat(yVal), width: CGFloat(wVal), height: CGFloat(hVal))
-      // Gene - Oct, 27, 2026: Fixed NSBitmapImageRep initialization; it is non-optional in Swift so cannot be in guard let.
       // Old implementation:
+      // let rect = CGRect(x: CGFloat(xVal), y: CGFloat(yVal), width: CGFloat(wVal), height: CGFloat(hVal))
       // guard
-      //   let image = CGWindowListCreateImage(rect, .optionOnScreenOnly, kCGNullWindowID, .bestResolution),
-      //   let rep = NSBitmapImageRep(cgImage: image),
-      //   let data = rep.representation(using: .png, properties: [:])
+      //   let image = CGWindowListCreateImage(rect, .optionOnScreenOnly, kCGNullWindowID, .bestResolution)
       // else {
       //   result(nil)
       //   return
       // }
+      let scale = NSScreen.screens.first?.backingScaleFactor ?? 1.0
+      let pointRect = CGRect(
+        x: CGFloat(xVal) / scale,
+        y: CGFloat(yVal) / scale,
+        width: CGFloat(wVal) / scale,
+        height: CGFloat(hVal) / scale
+      )
       guard
-        let image = CGWindowListCreateImage(rect, .optionOnScreenOnly, kCGNullWindowID, .bestResolution)
+        let image = CGWindowListCreateImage(pointRect, .optionOnScreenOnly, kCGNullWindowID, .bestResolution)
       else {
         result(nil)
         return
@@ -105,6 +134,38 @@ class CapturePlugin: NSObject {
         return
       }
       result(FlutterStandardTypedData(bytes: data))
+
+    // Gene - Oct, 27, 2026: Added native floating HUD controls for panoramic scrolling capture.
+    case "showScrollingHud":
+      guard
+        let args = call.arguments as? [String: Any],
+        let xVal = (args["x"] as? NSNumber)?.doubleValue ?? (args["x"] as? Double),
+        let yVal = (args["y"] as? NSNumber)?.doubleValue ?? (args["y"] as? Double),
+        let wVal = (args["width"] as? NSNumber)?.doubleValue ?? (args["width"] as? Double),
+        let hVal = (args["height"] as? NSNumber)?.doubleValue ?? (args["height"] as? Double)
+      else {
+        result(FlutterError(code: "bad_args", message: "rect parameters missing", details: nil))
+        return
+      }
+      let rect = CGRect(x: CGFloat(xVal), y: CGFloat(yVal), width: CGFloat(wVal), height: CGFloat(hVal))
+      showScrollingHud(for: rect)
+      result(true)
+
+    case "updateScrollingHud":
+      guard
+        let args = call.arguments as? [String: Any],
+        let height = (args["height"] as? NSNumber)?.intValue ?? (args["height"] as? Int),
+        let frameCount = (args["frameCount"] as? NSNumber)?.intValue ?? (args["frameCount"] as? Int)
+      else {
+        result(FlutterError(code: "bad_args", message: "stats parameters missing", details: nil))
+        return
+      }
+      updateScrollingHud(height: height, frameCount: frameCount)
+      result(true)
+
+    case "closeScrollingHud":
+      closeScrollingHud()
+      result(true)
 
     case "simulateScroll":
       guard
@@ -231,7 +292,10 @@ class CapturePlugin: NSObject {
             let quartzH = selRect.height
             let resultString = String(format: "scrolling:%.1f:%.1f:%.1f:%.1f", quartzX, quartzY, quartzW, quartzH)
             self.finishWithResult(resultString)
-            NSApp.activate(ignoringOtherApps: true)
+            // Gene - Oct, 27, 2026: Order out SnipSnap main window and do NOT activate NSApp so user's target app remains active and visible.
+            // Old implementation:
+            // NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first?.orderOut(nil)
           },
           onCancel: { [weak self] in
             self?.finishWithResult(nil)
@@ -322,6 +386,113 @@ class CapturePlugin: NSObject {
   }
 
   // MARK: - Save PNG Helper
+
+  // Gene - Oct, 27, 2026: Added showScrollingHud, updateScrollingHud, and closeScrollingHud for native floating HUD and viewport outline.
+  private func showScrollingHud(for rect: CGRect) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      self.closeScrollingHudInternal()
+
+      let primaryHeight = NSScreen.screens.first?.frame.height ?? 1080.0
+      let appKitY = primaryHeight - (rect.origin.y + rect.height)
+      let guideFrame = NSRect(x: rect.origin.x, y: appKitY, width: rect.width, height: rect.height)
+
+      let guideWin = ScrollingGuideWindow(contentRect: guideFrame)
+      self.scrollingGuideWindow = guideWin
+      guideWin.orderFrontRegardless()
+
+      let hudW: CGFloat = 310
+      let hudH: CGFloat = 38
+      var hudY = guideFrame.minY - hudH - 10
+      if hudY < 20 {
+        hudY = min(guideFrame.maxY + 10, primaryHeight - hudH - 20)
+      }
+      let screenWidth = NSScreen.screens.first?.frame.width ?? 1920
+      let hudX = max(10, min(guideFrame.midX - hudW / 2, screenWidth - hudW - 10))
+      let hudFrame = NSRect(x: hudX, y: hudY, width: hudW, height: hudH)
+
+      let hudWin = ScrollingHudWindow(
+        contentRect: hudFrame,
+        onDone: { [weak self] in
+          self?.finishScrollingSession()
+        },
+        onCancel: { [weak self] in
+          self?.cancelScrollingSession()
+        }
+      )
+      self.scrollingHudWindow = hudWin
+      hudWin.orderFrontRegardless()
+
+      let escapeKeyCode: UInt16 = 53
+      let returnKeyCode: UInt16 = 36
+      let numpadEnterKeyCode: UInt16 = 76
+      self.scrollingKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+        if event.keyCode == escapeKeyCode {
+          self?.cancelScrollingSession()
+        } else if event.keyCode == returnKeyCode || event.keyCode == numpadEnterKeyCode {
+          self?.finishScrollingSession()
+        }
+      }
+      self.scrollingLocalKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+        if event.keyCode == escapeKeyCode {
+          self?.cancelScrollingSession()
+          return nil
+        } else if event.keyCode == returnKeyCode || event.keyCode == numpadEnterKeyCode {
+          self?.finishScrollingSession()
+          return nil
+        }
+        return event
+      }
+    }
+  }
+
+  private func finishScrollingSession() {
+    DispatchQueue.main.async { [weak self] in
+      self?.channel?.invokeMethod("onScrollingDone", arguments: nil)
+    }
+  }
+
+  private func cancelScrollingSession() {
+    DispatchQueue.main.async { [weak self] in
+      self?.channel?.invokeMethod("onScrollingCancel", arguments: nil)
+    }
+  }
+
+  private func updateScrollingHud(height: Int, frameCount: Int) {
+    DispatchQueue.main.async { [weak self] in
+      if let hudView = self?.scrollingHudWindow?.contentView as? ScrollingHudView {
+        hudView.update(height: height, frameCount: frameCount)
+      }
+    }
+  }
+
+  private func closeScrollingHudInternal() {
+    if let local = scrollingLocalKeyMonitor {
+      NSEvent.removeMonitor(local)
+      scrollingLocalKeyMonitor = nil
+    }
+    if let global = scrollingKeyMonitor {
+      NSEvent.removeMonitor(global)
+      scrollingKeyMonitor = nil
+    }
+    scrollingGuideWindow?.orderOut(nil)
+    scrollingGuideWindow = nil
+    scrollingHudWindow?.orderOut(nil)
+    scrollingHudWindow = nil
+  }
+
+  private func closeScrollingHud() {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      self.closeScrollingHudInternal()
+
+      // Restore and activate SnipSnap's main window now that scrolling capture is complete
+      if let mainWin = NSApp.windows.first {
+        mainWin.makeKeyAndOrderFront(nil)
+      }
+      NSApp.activate(ignoringOtherApps: true)
+    }
+  }
 
   private func saveImage(_ image: CGImage, toPath path: String) -> Bool {
     let rep = NSBitmapImageRep(cgImage: image)
@@ -1280,5 +1451,261 @@ private class CaptureOverlayView: NSView {
     let w = abs(p1.x - p2.x)
     let h = abs(p1.y - p2.y)
     return NSRect(x: x, y: y, width: w, height: h)
+  }
+}
+
+// MARK: - Native Floating Scrolling Capture HUD & Guide Frame
+
+// Gene - Oct, 27, 2026: Native floating HUD and viewport outline classes for panoramic scrolling capture.
+
+private class ScrollingGuideWindow: NSPanel {
+  init(contentRect: NSRect) {
+    super.init(
+      contentRect: contentRect,
+      styleMask: [.borderless, .nonactivatingPanel],
+      backing: .buffered,
+      defer: false
+    )
+    self.isOpaque = false
+    self.backgroundColor = .clear
+    self.level = .floating
+    self.hasShadow = false
+    self.ignoresMouseEvents = true
+    self.hidesOnDeactivate = false
+    self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+
+    let view = ScrollingGuideView(frame: NSRect(origin: .zero, size: contentRect.size))
+    self.contentView = view
+  }
+
+  override var canBecomeKey: Bool { return false }
+  override var canBecomeMain: Bool { return false }
+}
+
+private class ScrollingGuideView: NSView {
+  override func draw(_ dirtyRect: NSRect) {
+    super.draw(dirtyRect)
+    let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 4, yRadius: 4)
+    path.lineWidth = 2.0
+    NSColor(red: 0.435, green: 0.306, blue: 0.216, alpha: 0.9).setStroke()
+    path.stroke()
+
+    let outerPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+    outerPath.lineWidth = 1.0
+    NSColor.white.withAlphaComponent(0.6).setStroke()
+    outerPath.stroke()
+  }
+}
+
+private class ScrollingHudWindow: NSPanel {
+  init(
+    contentRect: NSRect,
+    onDone: @escaping () -> Void,
+    onCancel: @escaping () -> Void
+  ) {
+    super.init(
+      contentRect: contentRect,
+      styleMask: [.borderless, .nonactivatingPanel],
+      backing: .buffered,
+      defer: false
+    )
+    self.isOpaque = false
+    self.backgroundColor = .clear
+    self.level = .floating
+    self.hasShadow = true
+    self.ignoresMouseEvents = false
+    self.acceptsMouseMovedEvents = true
+    self.hidesOnDeactivate = false
+    self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+
+    let view = ScrollingHudView(
+      frame: NSRect(origin: .zero, size: contentRect.size),
+      onDone: onDone,
+      onCancel: onCancel
+    )
+    self.contentView = view
+  }
+
+  override var canBecomeKey: Bool { return true }
+  override var canBecomeMain: Bool { return false }
+}
+
+private class ScrollingHudView: NSView {
+  private let onDone: () -> Void
+  private let onCancel: () -> Void
+
+  private var height: Int = 0
+  private var frameCount: Int = 1
+  private var doneHot = false
+  private var cancelHot = false
+
+  private var doneRect: NSRect = .zero
+  private var cancelRect: NSRect = .zero
+
+  private let bean = NSColor(red: 0.11, green: 0.075, blue: 0.05, alpha: 0.94)
+  private let coffee = NSColor(red: 0.435, green: 0.306, blue: 0.216, alpha: 1.0)
+  private let crema = NSColor(red: 0.784, green: 0.635, blue: 0.478, alpha: 1.0)
+
+  init(frame: NSRect, onDone: @escaping () -> Void, onCancel: @escaping () -> Void) {
+    self.onDone = onDone
+    self.onCancel = onCancel
+    super.init(frame: frame)
+    self.wantsLayer = true
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func update(height: Int, frameCount: Int) {
+    self.height = height
+    self.frameCount = frameCount
+    self.needsDisplay = true
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    for area in trackingAreas {
+      removeTrackingArea(area)
+    }
+    addTrackingArea(
+      NSTrackingArea(
+        rect: bounds,
+        options: [.activeAlways, .mouseMoved, .inVisibleRect],
+        owner: self,
+        userInfo: nil
+      )
+    )
+  }
+
+  override func mouseMoved(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    let dHot = !doneRect.isEmpty && doneRect.contains(point)
+    let cHot = !cancelRect.isEmpty && cancelRect.contains(point)
+    if dHot != doneHot || cHot != cancelHot {
+      doneHot = dHot
+      cancelHot = cHot
+      needsDisplay = true
+    }
+  }
+
+  override func resetCursorRects() {
+    if !doneRect.isEmpty {
+      addCursorRect(doneRect, cursor: .pointingHand)
+    }
+    if !cancelRect.isEmpty {
+      addCursorRect(cancelRect, cursor: .pointingHand)
+    }
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    if !doneRect.isEmpty && doneRect.contains(point) {
+      onDone()
+      return
+    }
+    if !cancelRect.isEmpty && cancelRect.contains(point) {
+      onCancel()
+      return
+    }
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    super.draw(dirtyRect)
+
+    // Pill container background
+    let bgPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+    bean.setFill()
+    bgPath.fill()
+    NSColor(white: 1.0, alpha: 0.25).setStroke()
+    bgPath.lineWidth = 1.0
+    bgPath.stroke()
+
+    let midY = bounds.midY
+
+    // 1. Red recording dot
+    let dotD: CGFloat = 8
+    let dotRect = NSRect(x: 14, y: midY - dotD / 2, width: dotD, height: dotD)
+    let dotPath = NSBezierPath(ovalIn: dotRect)
+    NSColor(red: 0.95, green: 0.26, blue: 0.21, alpha: 1.0).setFill()
+    dotPath.fill()
+
+    // 2. Height text
+    let heightStr = "\(height) px"
+    let heightAttrs: [NSAttributedString.Key: Any] = [
+      .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold),
+      .foregroundColor: NSColor.white
+    ]
+    let heightAttrStr = NSAttributedString(string: heightStr, attributes: heightAttrs)
+    let heightSize = heightAttrStr.size()
+    heightAttrStr.draw(at: NSPoint(x: 28, y: midY - heightSize.height / 2))
+
+    // 3. Frames text
+    let framesStr = "(\(frameCount) \(frameCount == 1 ? "frame" : "frames"))"
+    let framesAttrs: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+      .foregroundColor: NSColor(white: 1.0, alpha: 0.65)
+    ]
+    let framesAttrStr = NSAttributedString(string: framesStr, attributes: framesAttrs)
+    let framesSize = framesAttrStr.size()
+    let framesX = 28 + heightSize.width + 5
+    framesAttrStr.draw(at: NSPoint(x: framesX, y: midY - framesSize.height / 2))
+
+    // 4. Cancel (X) button at right
+    let cancelD: CGFloat = 24
+    let cancelX = bounds.maxX - cancelD - 7
+    cancelRect = NSRect(x: cancelX, y: midY - cancelD / 2, width: cancelD, height: cancelD)
+    let cancelPath = NSBezierPath(ovalIn: cancelRect)
+    (cancelHot ? coffee : NSColor(white: 1.0, alpha: 0.15)).setFill()
+    cancelPath.fill()
+    NSColor(white: 1.0, alpha: 0.3).setStroke()
+    cancelPath.lineWidth = 1.0
+    cancelPath.stroke()
+
+    // Draw X
+    let inset = cancelD * 0.32
+    let xBox = cancelRect.insetBy(dx: inset, dy: inset)
+    let cross = NSBezierPath()
+    cross.move(to: NSPoint(x: xBox.minX, y: xBox.minY))
+    cross.line(to: NSPoint(x: xBox.maxX, y: xBox.maxY))
+    cross.move(to: NSPoint(x: xBox.minX, y: xBox.maxY))
+    cross.line(to: NSPoint(x: xBox.maxX, y: xBox.minY))
+    cross.lineWidth = 1.6
+    cross.lineCapStyle = .round
+    NSColor.white.setStroke()
+    cross.stroke()
+
+    // 5. Done button
+    let doneH: CGFloat = 26
+    let doneW: CGFloat = 72
+    let doneX = cancelX - doneW - 6
+    doneRect = NSRect(x: doneX, y: midY - doneH / 2, width: doneW, height: doneH)
+    let donePath = NSBezierPath(roundedRect: doneRect, xRadius: doneH / 2, yRadius: doneH / 2)
+    (doneHot ? coffee.blended(withFraction: 0.35, of: crema) ?? coffee : coffee).setFill()
+    donePath.fill()
+    NSColor(white: 1.0, alpha: 0.35).setStroke()
+    donePath.lineWidth = 1.0
+    donePath.stroke()
+
+    // Checkmark icon + "Done"
+    let checkmark = NSBezierPath()
+    let checkX = doneRect.minX + 9
+    checkmark.move(to: NSPoint(x: checkX, y: midY))
+    checkmark.line(to: NSPoint(x: checkX + 3.5, y: midY - 3.5))
+    checkmark.line(to: NSPoint(x: checkX + 9, y: midY + 4))
+    checkmark.lineWidth = 1.6
+    checkmark.lineCapStyle = .round
+    checkmark.lineJoinStyle = .round
+    NSColor.white.setStroke()
+    checkmark.stroke()
+
+    let doneLabel = "Done"
+    let doneAttrs: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
+      .foregroundColor: NSColor.white
+    ]
+    let doneAttrStr = NSAttributedString(string: doneLabel, attributes: doneAttrs)
+    let doneSize = doneAttrStr.size()
+    doneAttrStr.draw(at: NSPoint(x: checkX + 13, y: midY - doneSize.height / 2))
   }
 }
