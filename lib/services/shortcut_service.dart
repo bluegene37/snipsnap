@@ -15,6 +15,15 @@ class ShortcutService {
       ctrl: !Platform.isMacOS,
       shift: true,
     ),
+    // Gene - Oct, 27, 2026: Added default hotkey for scrollingSnip (Panoramic Snip).
+    AppShortcutAction.scrollingSnip: CustomShortcut(
+      action: AppShortcutAction.scrollingSnip,
+      keyId: LogicalKeyboardKey.keyP.keyId,
+      keyLabel: 'P',
+      meta: Platform.isMacOS,
+      ctrl: !Platform.isMacOS,
+      shift: true,
+    ),
     AppShortcutAction.fullScreenSnip: CustomShortcut(
       action: AppShortcutAction.fullScreenSnip,
       keyId: LogicalKeyboardKey.digit2.keyId,
@@ -152,8 +161,17 @@ class ShortcutService {
       for (final entry in shortcuts.entries) {
         final action = entry.key;
 
-        // Only register global OS-wide hotkeys for specific actions
+        // Gene - Oct, 27, 2026: Include scrollingSnip in registered global OS-wide capture hotkeys.
+        // Old implementation:
+        // // Only register global OS-wide hotkeys for specific actions
+        // if (action != AppShortcutAction.interactiveSnip &&
+        //     action != AppShortcutAction.fullScreenSnip &&
+        //     action != AppShortcutAction.timerSnip) {
+        //   continue;
+        // }
+        // Only register global OS-wide hotkeys for specific capture actions
         if (action != AppShortcutAction.interactiveSnip &&
+            action != AppShortcutAction.scrollingSnip &&
             action != AppShortcutAction.fullScreenSnip &&
             action != AppShortcutAction.timerSnip) {
           continue;

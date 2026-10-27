@@ -895,10 +895,40 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  // Gene - Oct, 27, 2026: Added handling for AppShortcutAction.scrollingSnip.
+  // Old implementation:
+  // VoidCallback? _getHandlerForAction(AppShortcutAction action) {
+  //   switch (action) {
+  //     case AppShortcutAction.interactiveSnip:
+  //       return _handleInteractiveCapture;
+  //     case AppShortcutAction.fullScreenSnip:
+  //       return _handleFullScreenCapture;
+  //     case AppShortcutAction.timerSnip:
+  //       return _handleTimerCapture;
+  //     case AppShortcutAction.openImage:
+  //       return _handleImportImage;
+  //     case AppShortcutAction.copyToClipboard:
+  //       return _handleCopyToClipboard;
+  //     case AppShortcutAction.saveAs:
+  //       return _handleSaveAs;
+  //     case AppShortcutAction.undo:
+  //       return _undoStack.isNotEmpty ? _undo : null;
+  //     case AppShortcutAction.redo:
+  //       return _redoStack.isNotEmpty ? _redo : null;
+  //     case AppShortcutAction.clearAnnotations:
+  //       return _annotations.isNotEmpty ? _clearAnnotations : null;
+  //     case AppShortcutAction.toggleHistory:
+  //       return () => setState(() => _isSidebarOpen = !_isSidebarOpen);
+  //     case AppShortcutAction.flattenCanvas:
+  //       return _annotations.isNotEmpty ? _handleFlattenCanvas : null;
+  //   }
+  // }
   VoidCallback? _getHandlerForAction(AppShortcutAction action) {
     switch (action) {
       case AppShortcutAction.interactiveSnip:
         return _handleInteractiveCapture;
+      case AppShortcutAction.scrollingSnip:
+        return _handleScrollingCapture;
       case AppShortcutAction.fullScreenSnip:
         return _handleFullScreenCapture;
       case AppShortcutAction.timerSnip:

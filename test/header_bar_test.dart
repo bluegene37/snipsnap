@@ -3,6 +3,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/components/header_bar.dart';
 
+// Gene - Oct, 27, 2026: Added optional onSnipScrolling parameter to _harness.
+// Old implementation:
+// Widget _harness({
+//   required double width,
+//   bool hasCapture = true,
+//   bool canUndo = true,
+//   bool canRedo = true,
+//   bool canClear = true,
+//   bool isDarkMode = true,
+//   VoidCallback? onFlattenCanvas,
+// }) {
 Widget _harness({
   required double width,
   bool hasCapture = true,
@@ -11,6 +22,7 @@ Widget _harness({
   bool canClear = true,
   bool isDarkMode = true,
   VoidCallback? onFlattenCanvas,
+  VoidCallback? onSnipScrolling,
 }) {
   return SnipThemeScope(
     theme: SnipTheme.forMode(
@@ -22,6 +34,7 @@ Widget _harness({
           width: width,
           child: HeaderBar(
             onSnipInteractive: () {},
+            onSnipScrolling: onSnipScrolling,
             onSnipFullScreen: () {},
             onSnipTimer: () {},
             onImportImage: () {},
@@ -324,5 +337,30 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(manualOpened, isTrue);
+  });
+
+  // Gene - Oct, 27, 2026: Verifies Panoramic capture button beside Snip triggers onSnipScrolling.
+  testWidgets('shows Panoramic capture button beside Snip when onSnipScrolling is provided', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 700);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    bool scrolled = false;
+    await tester.pumpWidget(
+      _harness(
+        width: 1440,
+        onSnipScrolling: () => scrolled = true,
+      ),
+    );
+
+    expect(find.text('Panoramic'), findsOneWidget);
+    expect(find.byIcon(Icons.unfold_more_rounded), findsOneWidget);
+
+    await tester.tap(find.text('Panoramic'));
+    await tester.pump();
+
+    expect(scrolled, isTrue);
   });
 }
