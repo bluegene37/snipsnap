@@ -173,38 +173,79 @@ class StorageService {
         final existingPaths = items.map((i) => i.filePath).toSet();
         final files = await snapDir.list().toList();
         for (final f in files) {
+          // Gene - Oct, 27, 2026: Supported adopting existing .mp4 video captures from the storage directory alongside images.
+          // Old implementation:
+          // if (f is File &&
+          //     (f.path.endsWith('.png') ||
+          //         f.path.endsWith('.jpg') ||
+          //         f.path.endsWith('.jpeg'))) {
+          //   if (!existingPaths.contains(f.path)) {
+          //     final stat = await f.stat();
+          //     int w = 0;
+          //     int h = 0;
+          //     try {
+          //       final decoded = await compute(
+          //         img.decodeImage,
+          //         await f.readAsBytes(),
+          //       );
+          //       if (decoded != null) {
+          //         w = decoded.width;
+          //         h = decoded.height;
+          //       }
+          //     } catch (e) {
+          //       debugPrint('SnipSnap dimension read error: $e');
+          //     }
+          //     final newItem = CaptureItem(
+          //       id: '${stat.modified.millisecondsSinceEpoch}_${p.basename(f.path)}',
+          //       filePath: f.path,
+          //       title:
+          //           'Snap ${stat.modified.hour.toString().padLeft(2, '0')}:${stat.modified.minute.toString().padLeft(2, '0')}:${stat.modified.second.toString().padLeft(2, '0')}',
+          //       createdAt: stat.modified,
+          //       width: w,
+          //       height: h,
+          //     );
+          //     items.add(newItem);
+          //     await DatabaseService.saveCaptureToDb(newItem);
+          //   }
+          // }
           if (f is File &&
               (f.path.endsWith('.png') ||
                   f.path.endsWith('.jpg') ||
-                  f.path.endsWith('.jpeg'))) {
+                  f.path.endsWith('.jpeg') ||
+                  f.path.endsWith('.mp4'))) {
             if (!existingPaths.contains(f.path)) {
               final stat = await f.stat();
+              final isVideo = f.path.endsWith('.mp4');
               int w = 0;
               int h = 0;
-              try {
-                // Off the UI isolate, like every other decode in the app: this
-                // loop runs at startup over every file in the library folder,
-                // and a pure-Dart PNG decode of a Retina capture is long
-                // enough to be seen as a freeze once there are a few of them.
-                final decoded = await compute(
-                  img.decodeImage,
-                  await f.readAsBytes(),
-                );
-                if (decoded != null) {
-                  w = decoded.width;
-                  h = decoded.height;
+              if (!isVideo) {
+                try {
+                  // Off the UI isolate, like every other decode in the app: this
+                  // loop runs at startup over every file in the library folder,
+                  // and a pure-Dart PNG decode of a Retina capture is long
+                  // enough to be seen as a freeze once there are a few of them.
+                  final decoded = await compute(
+                    img.decodeImage,
+                    await f.readAsBytes(),
+                  );
+                  if (decoded != null) {
+                    w = decoded.width;
+                    h = decoded.height;
+                  }
+                } catch (e) {
+                  debugPrint('SnipSnap dimension read error: $e');
                 }
-              } catch (e) {
-                debugPrint('SnipSnap dimension read error: $e');
               }
+              final prefix = isVideo ? 'Recording' : 'Snap';
               final newItem = CaptureItem(
                 id: '${stat.modified.millisecondsSinceEpoch}_${p.basename(f.path)}',
                 filePath: f.path,
                 title:
-                    'Snap ${stat.modified.hour.toString().padLeft(2, '0')}:${stat.modified.minute.toString().padLeft(2, '0')}:${stat.modified.second.toString().padLeft(2, '0')}',
+                    '$prefix ${stat.modified.hour.toString().padLeft(2, '0')}:${stat.modified.minute.toString().padLeft(2, '0')}:${stat.modified.second.toString().padLeft(2, '0')}',
                 createdAt: stat.modified,
                 width: w,
                 height: h,
+                mediaType: isVideo ? CaptureMediaType.video : CaptureMediaType.image,
               );
               items.add(newItem);
               await DatabaseService.saveCaptureToDb(newItem);

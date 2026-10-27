@@ -15,6 +15,12 @@ class Captures extends Table {
   IntColumn get height => integer().withDefault(const Constant(0))();
   TextColumn get tags => text().nullable()();
 
+  // Gene - Oct, 27, 2026: Added video recording fields for Phase 1 of screen recording (v6 migration).
+  TextColumn get mediaType => text().withDefault(const Constant('image'))();
+  IntColumn get durationMs => integer().withDefault(const Constant(0))();
+  BoolColumn get hasAudio => boolean().withDefault(const Constant(false))();
+  TextColumn get thumbnailPath => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -93,8 +99,11 @@ class AppDatabase extends _$AppDatabase {
   /// Production always omits it and gets the on-disk connection.
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
+  // Gene - Oct, 27, 2026: Bumped schemaVersion to 6 for video recording fields on Captures table.
+  // @override
+  // int get schemaVersion => 5;
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration {
@@ -116,6 +125,13 @@ class AppDatabase extends _$AppDatabase {
         }
         if (from < 5) {
           await m.addColumn(annotations, annotations.patchBytes);
+        }
+        // Gene - Oct, 27, 2026: Added migration for v6 schema adding mediaType, durationMs, hasAudio, and thumbnailPath to captures.
+        if (from < 6) {
+          await m.addColumn(captures, captures.mediaType);
+          await m.addColumn(captures, captures.durationMs);
+          await m.addColumn(captures, captures.hasAudio);
+          await m.addColumn(captures, captures.thumbnailPath);
         }
       },
     );

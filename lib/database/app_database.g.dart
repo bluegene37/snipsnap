@@ -77,6 +77,56 @@ class $CapturesTable extends Captures with TableInfo<$CapturesTable, Capture> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _mediaTypeMeta = const VerificationMeta(
+    'mediaType',
+  );
+  @override
+  late final GeneratedColumn<String> mediaType = GeneratedColumn<String>(
+    'media_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('image'),
+  );
+  static const VerificationMeta _durationMsMeta = const VerificationMeta(
+    'durationMs',
+  );
+  @override
+  late final GeneratedColumn<int> durationMs = GeneratedColumn<int>(
+    'duration_ms',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _hasAudioMeta = const VerificationMeta(
+    'hasAudio',
+  );
+  @override
+  late final GeneratedColumn<bool> hasAudio = GeneratedColumn<bool>(
+    'has_audio',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("has_audio" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _thumbnailPathMeta = const VerificationMeta(
+    'thumbnailPath',
+  );
+  @override
+  late final GeneratedColumn<String> thumbnailPath = GeneratedColumn<String>(
+    'thumbnail_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -86,6 +136,10 @@ class $CapturesTable extends Captures with TableInfo<$CapturesTable, Capture> {
     width,
     height,
     tags,
+    mediaType,
+    durationMs,
+    hasAudio,
+    thumbnailPath,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -146,6 +200,33 @@ class $CapturesTable extends Captures with TableInfo<$CapturesTable, Capture> {
         tags.isAcceptableOrUnknown(data['tags']!, _tagsMeta),
       );
     }
+    if (data.containsKey('media_type')) {
+      context.handle(
+        _mediaTypeMeta,
+        mediaType.isAcceptableOrUnknown(data['media_type']!, _mediaTypeMeta),
+      );
+    }
+    if (data.containsKey('duration_ms')) {
+      context.handle(
+        _durationMsMeta,
+        durationMs.isAcceptableOrUnknown(data['duration_ms']!, _durationMsMeta),
+      );
+    }
+    if (data.containsKey('has_audio')) {
+      context.handle(
+        _hasAudioMeta,
+        hasAudio.isAcceptableOrUnknown(data['has_audio']!, _hasAudioMeta),
+      );
+    }
+    if (data.containsKey('thumbnail_path')) {
+      context.handle(
+        _thumbnailPathMeta,
+        thumbnailPath.isAcceptableOrUnknown(
+          data['thumbnail_path']!,
+          _thumbnailPathMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -183,6 +264,22 @@ class $CapturesTable extends Captures with TableInfo<$CapturesTable, Capture> {
         DriftSqlType.string,
         data['${effectivePrefix}tags'],
       ),
+      mediaType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}media_type'],
+      )!,
+      durationMs: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}duration_ms'],
+      )!,
+      hasAudio: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}has_audio'],
+      )!,
+      thumbnailPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}thumbnail_path'],
+      ),
     );
   }
 
@@ -200,6 +297,10 @@ class Capture extends DataClass implements Insertable<Capture> {
   final int width;
   final int height;
   final String? tags;
+  final String mediaType;
+  final int durationMs;
+  final bool hasAudio;
+  final String? thumbnailPath;
   const Capture({
     required this.id,
     required this.filePath,
@@ -208,6 +309,10 @@ class Capture extends DataClass implements Insertable<Capture> {
     required this.width,
     required this.height,
     this.tags,
+    required this.mediaType,
+    required this.durationMs,
+    required this.hasAudio,
+    this.thumbnailPath,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -221,6 +326,12 @@ class Capture extends DataClass implements Insertable<Capture> {
     if (!nullToAbsent || tags != null) {
       map['tags'] = Variable<String>(tags);
     }
+    map['media_type'] = Variable<String>(mediaType);
+    map['duration_ms'] = Variable<int>(durationMs);
+    map['has_audio'] = Variable<bool>(hasAudio);
+    if (!nullToAbsent || thumbnailPath != null) {
+      map['thumbnail_path'] = Variable<String>(thumbnailPath);
+    }
     return map;
   }
 
@@ -233,6 +344,12 @@ class Capture extends DataClass implements Insertable<Capture> {
       width: Value(width),
       height: Value(height),
       tags: tags == null && nullToAbsent ? const Value.absent() : Value(tags),
+      mediaType: Value(mediaType),
+      durationMs: Value(durationMs),
+      hasAudio: Value(hasAudio),
+      thumbnailPath: thumbnailPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(thumbnailPath),
     );
   }
 
@@ -249,6 +366,10 @@ class Capture extends DataClass implements Insertable<Capture> {
       width: serializer.fromJson<int>(json['width']),
       height: serializer.fromJson<int>(json['height']),
       tags: serializer.fromJson<String?>(json['tags']),
+      mediaType: serializer.fromJson<String>(json['mediaType']),
+      durationMs: serializer.fromJson<int>(json['durationMs']),
+      hasAudio: serializer.fromJson<bool>(json['hasAudio']),
+      thumbnailPath: serializer.fromJson<String?>(json['thumbnailPath']),
     );
   }
   @override
@@ -262,6 +383,10 @@ class Capture extends DataClass implements Insertable<Capture> {
       'width': serializer.toJson<int>(width),
       'height': serializer.toJson<int>(height),
       'tags': serializer.toJson<String?>(tags),
+      'mediaType': serializer.toJson<String>(mediaType),
+      'durationMs': serializer.toJson<int>(durationMs),
+      'hasAudio': serializer.toJson<bool>(hasAudio),
+      'thumbnailPath': serializer.toJson<String?>(thumbnailPath),
     };
   }
 
@@ -273,6 +398,10 @@ class Capture extends DataClass implements Insertable<Capture> {
     int? width,
     int? height,
     Value<String?> tags = const Value.absent(),
+    String? mediaType,
+    int? durationMs,
+    bool? hasAudio,
+    Value<String?> thumbnailPath = const Value.absent(),
   }) => Capture(
     id: id ?? this.id,
     filePath: filePath ?? this.filePath,
@@ -281,6 +410,12 @@ class Capture extends DataClass implements Insertable<Capture> {
     width: width ?? this.width,
     height: height ?? this.height,
     tags: tags.present ? tags.value : this.tags,
+    mediaType: mediaType ?? this.mediaType,
+    durationMs: durationMs ?? this.durationMs,
+    hasAudio: hasAudio ?? this.hasAudio,
+    thumbnailPath: thumbnailPath.present
+        ? thumbnailPath.value
+        : this.thumbnailPath,
   );
   Capture copyWithCompanion(CapturesCompanion data) {
     return Capture(
@@ -291,6 +426,14 @@ class Capture extends DataClass implements Insertable<Capture> {
       width: data.width.present ? data.width.value : this.width,
       height: data.height.present ? data.height.value : this.height,
       tags: data.tags.present ? data.tags.value : this.tags,
+      mediaType: data.mediaType.present ? data.mediaType.value : this.mediaType,
+      durationMs: data.durationMs.present
+          ? data.durationMs.value
+          : this.durationMs,
+      hasAudio: data.hasAudio.present ? data.hasAudio.value : this.hasAudio,
+      thumbnailPath: data.thumbnailPath.present
+          ? data.thumbnailPath.value
+          : this.thumbnailPath,
     );
   }
 
@@ -303,14 +446,29 @@ class Capture extends DataClass implements Insertable<Capture> {
           ..write('createdAt: $createdAt, ')
           ..write('width: $width, ')
           ..write('height: $height, ')
-          ..write('tags: $tags')
+          ..write('tags: $tags, ')
+          ..write('mediaType: $mediaType, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('hasAudio: $hasAudio, ')
+          ..write('thumbnailPath: $thumbnailPath')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, filePath, title, createdAt, width, height, tags);
+  int get hashCode => Object.hash(
+    id,
+    filePath,
+    title,
+    createdAt,
+    width,
+    height,
+    tags,
+    mediaType,
+    durationMs,
+    hasAudio,
+    thumbnailPath,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -321,7 +479,11 @@ class Capture extends DataClass implements Insertable<Capture> {
           other.createdAt == this.createdAt &&
           other.width == this.width &&
           other.height == this.height &&
-          other.tags == this.tags);
+          other.tags == this.tags &&
+          other.mediaType == this.mediaType &&
+          other.durationMs == this.durationMs &&
+          other.hasAudio == this.hasAudio &&
+          other.thumbnailPath == this.thumbnailPath);
 }
 
 class CapturesCompanion extends UpdateCompanion<Capture> {
@@ -332,6 +494,10 @@ class CapturesCompanion extends UpdateCompanion<Capture> {
   final Value<int> width;
   final Value<int> height;
   final Value<String?> tags;
+  final Value<String> mediaType;
+  final Value<int> durationMs;
+  final Value<bool> hasAudio;
+  final Value<String?> thumbnailPath;
   final Value<int> rowid;
   const CapturesCompanion({
     this.id = const Value.absent(),
@@ -341,6 +507,10 @@ class CapturesCompanion extends UpdateCompanion<Capture> {
     this.width = const Value.absent(),
     this.height = const Value.absent(),
     this.tags = const Value.absent(),
+    this.mediaType = const Value.absent(),
+    this.durationMs = const Value.absent(),
+    this.hasAudio = const Value.absent(),
+    this.thumbnailPath = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CapturesCompanion.insert({
@@ -351,6 +521,10 @@ class CapturesCompanion extends UpdateCompanion<Capture> {
     this.width = const Value.absent(),
     this.height = const Value.absent(),
     this.tags = const Value.absent(),
+    this.mediaType = const Value.absent(),
+    this.durationMs = const Value.absent(),
+    this.hasAudio = const Value.absent(),
+    this.thumbnailPath = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        filePath = Value(filePath),
@@ -364,6 +538,10 @@ class CapturesCompanion extends UpdateCompanion<Capture> {
     Expression<int>? width,
     Expression<int>? height,
     Expression<String>? tags,
+    Expression<String>? mediaType,
+    Expression<int>? durationMs,
+    Expression<bool>? hasAudio,
+    Expression<String>? thumbnailPath,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -374,6 +552,10 @@ class CapturesCompanion extends UpdateCompanion<Capture> {
       if (width != null) 'width': width,
       if (height != null) 'height': height,
       if (tags != null) 'tags': tags,
+      if (mediaType != null) 'media_type': mediaType,
+      if (durationMs != null) 'duration_ms': durationMs,
+      if (hasAudio != null) 'has_audio': hasAudio,
+      if (thumbnailPath != null) 'thumbnail_path': thumbnailPath,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -386,6 +568,10 @@ class CapturesCompanion extends UpdateCompanion<Capture> {
     Value<int>? width,
     Value<int>? height,
     Value<String?>? tags,
+    Value<String>? mediaType,
+    Value<int>? durationMs,
+    Value<bool>? hasAudio,
+    Value<String?>? thumbnailPath,
     Value<int>? rowid,
   }) {
     return CapturesCompanion(
@@ -396,6 +582,10 @@ class CapturesCompanion extends UpdateCompanion<Capture> {
       width: width ?? this.width,
       height: height ?? this.height,
       tags: tags ?? this.tags,
+      mediaType: mediaType ?? this.mediaType,
+      durationMs: durationMs ?? this.durationMs,
+      hasAudio: hasAudio ?? this.hasAudio,
+      thumbnailPath: thumbnailPath ?? this.thumbnailPath,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -424,6 +614,18 @@ class CapturesCompanion extends UpdateCompanion<Capture> {
     if (tags.present) {
       map['tags'] = Variable<String>(tags.value);
     }
+    if (mediaType.present) {
+      map['media_type'] = Variable<String>(mediaType.value);
+    }
+    if (durationMs.present) {
+      map['duration_ms'] = Variable<int>(durationMs.value);
+    }
+    if (hasAudio.present) {
+      map['has_audio'] = Variable<bool>(hasAudio.value);
+    }
+    if (thumbnailPath.present) {
+      map['thumbnail_path'] = Variable<String>(thumbnailPath.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -440,6 +642,10 @@ class CapturesCompanion extends UpdateCompanion<Capture> {
           ..write('width: $width, ')
           ..write('height: $height, ')
           ..write('tags: $tags, ')
+          ..write('mediaType: $mediaType, ')
+          ..write('durationMs: $durationMs, ')
+          ..write('hasAudio: $hasAudio, ')
+          ..write('thumbnailPath: $thumbnailPath, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2295,6 +2501,10 @@ typedef $$CapturesTableCreateCompanionBuilder =
       Value<int> width,
       Value<int> height,
       Value<String?> tags,
+      Value<String> mediaType,
+      Value<int> durationMs,
+      Value<bool> hasAudio,
+      Value<String?> thumbnailPath,
       Value<int> rowid,
     });
 typedef $$CapturesTableUpdateCompanionBuilder =
@@ -2306,6 +2516,10 @@ typedef $$CapturesTableUpdateCompanionBuilder =
       Value<int> width,
       Value<int> height,
       Value<String?> tags,
+      Value<String> mediaType,
+      Value<int> durationMs,
+      Value<bool> hasAudio,
+      Value<String?> thumbnailPath,
       Value<int> rowid,
     });
 
@@ -2350,6 +2564,26 @@ class $$CapturesTableFilterComposer
 
   ColumnFilters<String> get tags => $composableBuilder(
     column: $table.tags,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get mediaType => $composableBuilder(
+    column: $table.mediaType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get hasAudio => $composableBuilder(
+    column: $table.hasAudio,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get thumbnailPath => $composableBuilder(
+    column: $table.thumbnailPath,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2397,6 +2631,26 @@ class $$CapturesTableOrderingComposer
     column: $table.tags,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get mediaType => $composableBuilder(
+    column: $table.mediaType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get hasAudio => $composableBuilder(
+    column: $table.hasAudio,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get thumbnailPath => $composableBuilder(
+    column: $table.thumbnailPath,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CapturesTableAnnotationComposer
@@ -2428,6 +2682,22 @@ class $$CapturesTableAnnotationComposer
 
   GeneratedColumn<String> get tags =>
       $composableBuilder(column: $table.tags, builder: (column) => column);
+
+  GeneratedColumn<String> get mediaType =>
+      $composableBuilder(column: $table.mediaType, builder: (column) => column);
+
+  GeneratedColumn<int> get durationMs => $composableBuilder(
+    column: $table.durationMs,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get hasAudio =>
+      $composableBuilder(column: $table.hasAudio, builder: (column) => column);
+
+  GeneratedColumn<String> get thumbnailPath => $composableBuilder(
+    column: $table.thumbnailPath,
+    builder: (column) => column,
+  );
 }
 
 class $$CapturesTableTableManager
@@ -2465,6 +2735,10 @@ class $$CapturesTableTableManager
                 Value<int> width = const Value.absent(),
                 Value<int> height = const Value.absent(),
                 Value<String?> tags = const Value.absent(),
+                Value<String> mediaType = const Value.absent(),
+                Value<int> durationMs = const Value.absent(),
+                Value<bool> hasAudio = const Value.absent(),
+                Value<String?> thumbnailPath = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CapturesCompanion(
                 id: id,
@@ -2474,6 +2748,10 @@ class $$CapturesTableTableManager
                 width: width,
                 height: height,
                 tags: tags,
+                mediaType: mediaType,
+                durationMs: durationMs,
+                hasAudio: hasAudio,
+                thumbnailPath: thumbnailPath,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2485,6 +2763,10 @@ class $$CapturesTableTableManager
                 Value<int> width = const Value.absent(),
                 Value<int> height = const Value.absent(),
                 Value<String?> tags = const Value.absent(),
+                Value<String> mediaType = const Value.absent(),
+                Value<int> durationMs = const Value.absent(),
+                Value<bool> hasAudio = const Value.absent(),
+                Value<String?> thumbnailPath = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CapturesCompanion.insert(
                 id: id,
@@ -2494,10 +2776,23 @@ class $$CapturesTableTableManager
                 width: width,
                 height: height,
                 tags: tags,
+                mediaType: mediaType,
+                durationMs: durationMs,
+                hasAudio: hasAudio,
+                thumbnailPath: thumbnailPath,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$CapturesTable, Capture>(table),
+                  BaseReferences<_$AppDatabase, $CapturesTable, Capture>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -3010,7 +3305,16 @@ class $$AnnotationsTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$AnnotationsTable, DbAnnotation>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $AnnotationsTable,
+                    DbAnnotation
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -3245,7 +3549,16 @@ class $$ShortcutsTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$ShortcutsTable, Shortcut>(table),
+                  BaseReferences<_$AppDatabase, $ShortcutsTable, Shortcut>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -3381,7 +3694,16 @@ class $$AppSettingsTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$AppSettingsTable, AppSetting>(table),
+                  BaseReferences<_$AppDatabase, $AppSettingsTable, AppSetting>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),

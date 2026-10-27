@@ -28,6 +28,20 @@ class DatabaseService {
       final annRows = await db.getAnnotationsForCapture(row.id);
       final parsed = _annotationsFor(annRows);
 
+      // Gene - Oct, 27, 2026: Updated CaptureItem loading to include video recording metadata from v6 schema.
+      // Old implementation:
+      // items.add(
+      //   CaptureItem(
+      //     id: row.id,
+      //     filePath: row.filePath,
+      //     title: row.title,
+      //     createdAt: row.createdAt,
+      //     width: row.width,
+      //     height: row.height,
+      //     annotations: parsed.annotations,
+      //     annotationsNeedConversion: parsed.needsConversion,
+      //   ),
+      // );
       items.add(
         CaptureItem(
           id: row.id,
@@ -38,6 +52,10 @@ class DatabaseService {
           height: row.height,
           annotations: parsed.annotations,
           annotationsNeedConversion: parsed.needsConversion,
+          mediaType: CaptureMediaType.fromString(row.mediaType),
+          durationMs: row.durationMs,
+          hasAudio: row.hasAudio,
+          thumbnailPath: row.thumbnailPath,
         ),
       );
     }
@@ -86,6 +104,20 @@ class DatabaseService {
   /// [saveAllCapturesToDb] path alike — so this is where the coordinate-space
   /// guard lives. Placing it here rather than at the call sites means no
   /// present or future caller can bypass it.
+  // Gene - Oct, 27, 2026: Updated saveCaptureToDb to persist video recording metadata (mediaType, durationMs, hasAudio, thumbnailPath).
+  // Old implementation:
+  // static Future<void> saveCaptureToDb(CaptureItem item) async {
+  //   await db.insertOrUpdateCapture(
+  //     CapturesCompanion(
+  //       id: Value(item.id),
+  //       filePath: Value(item.filePath),
+  //       title: Value(item.title),
+  //       createdAt: Value(item.createdAt),
+  //       width: Value(item.width),
+  //       height: Value(item.height),
+  //     ),
+  //   );
+  // }
   static Future<void> saveCaptureToDb(CaptureItem item) async {
     await db.insertOrUpdateCapture(
       CapturesCompanion(
@@ -95,6 +127,10 @@ class DatabaseService {
         createdAt: Value(item.createdAt),
         width: Value(item.width),
         height: Value(item.height),
+        mediaType: Value(item.mediaType.name),
+        durationMs: Value(item.durationMs),
+        hasAudio: Value(item.hasAudio),
+        thumbnailPath: Value(item.thumbnailPath),
       ),
     );
 
