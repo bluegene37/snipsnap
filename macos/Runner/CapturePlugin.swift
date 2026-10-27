@@ -159,8 +159,15 @@ class CapturePlugin: NSObject {
 
   // MARK: - Interactive Capture
 
+  // Gene - Oct, 27, 2026: Explicit weak self in outer DispatchQueue.main.async to eliminate Swift implicit-strong-capture warnings.
+  // Old implementation:
+  // private func startInteractiveCapture(targetPath: String, result: @escaping FlutterResult) {
+  //   DispatchQueue.main.async {
+  //     self.cleanup()
+  //     self.activeResult = result
   private func startInteractiveCapture(targetPath: String, result: @escaping FlutterResult) {
-    DispatchQueue.main.async {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
       self.cleanup()
       self.activeResult = result
 
@@ -179,6 +186,28 @@ class CapturePlugin: NSObject {
       }
 
       // Create overlay window for each screen
+      // Gene - Oct, 27, 2026: Added onPanoramicCapture handler to CaptureOverlayWindow.
+      // Old implementation:
+      // for screen in screens {
+      //   let image = screenImages[screen]
+      //   let overlayWindow = CaptureOverlayWindow(
+      //     screen: screen,
+      //     screenImage: image,
+      //     onCapture: { [weak self] capturedImage in
+      //       guard let self = self else { return }
+      //       if let capturedImage = capturedImage, self.saveImage(capturedImage, toPath: targetPath) {
+      //         self.finishWithResult(targetPath)
+      //       } else {
+      //         self.finishWithResult(nil)
+      //       }
+      //     },
+      //     onCancel: { [weak self] in
+      //       self?.finishWithResult(nil)
+      //     }
+      //   )
+      //   self.activeWindows.append(overlayWindow)
+      //   overlayWindow.orderFrontRegardless()
+      // }
       for screen in screens {
         let image = screenImages[screen]
         let overlayWindow = CaptureOverlayWindow(
@@ -192,15 +221,23 @@ class CapturePlugin: NSObject {
               self.finishWithResult(nil)
             }
           },
+          onPanoramicCapture: { [weak self] selRect in
+            guard let self = self else { return }
+            let screenFrame = screen.frame
+            let primaryHeight = NSScreen.screens.first?.frame.height ?? screenFrame.height
+            let quartzX = screenFrame.origin.x + selRect.origin.x
+            let quartzY = primaryHeight - (screenFrame.origin.y + selRect.origin.y + selRect.height)
+            let quartzW = selRect.width
+            let quartzH = selRect.height
+            let resultString = String(format: "scrolling:%.1f:%.1f:%.1f:%.1f", quartzX, quartzY, quartzW, quartzH)
+            self.finishWithResult(resultString)
+            NSApp.activate(ignoringOtherApps: true)
+          },
           onCancel: { [weak self] in
             self?.finishWithResult(nil)
           }
         )
         self.activeWindows.append(overlayWindow)
-        // `orderFrontRegardless`, not `makeKeyAndOrderFront`: the latter is
-        // ignored while another app is active, which for a capture launched
-        // from the global hotkey is always. Showing the window first also
-        // means it is already up if activation moves Spaces underneath it.
         overlayWindow.orderFrontRegardless()
       }
 
@@ -317,10 +354,44 @@ class CapturePlugin: NSObject {
 /// of it passed the same test: on screen, on the active Space, key, click
 /// delivered. Nothing else about the configuration mattered.
 private class CaptureOverlayWindow: NSPanel {
+  // Gene - Oct, 27, 2026: Added onPanoramicCapture parameter to CaptureOverlayWindow.
+  // Old implementation:
+  // init(
+  //   screen: NSScreen,
+  //   screenImage: CGImage?,
+  //   onCapture: @escaping (CGImage?) -> Void,
+  //   onCancel: @escaping () -> Void
+  // ) {
+  //   super.init(
+  //     contentRect: screen.frame,
+  //     styleMask: [.borderless, .nonactivatingPanel],
+  //     backing: .buffered,
+  //     defer: false
+  //   )
+  //
+  //   self.isOpaque = false
+  //   self.backgroundColor = .clear
+  //   self.level = .screenSaver
+  //   self.hasShadow = false
+  //   self.ignoresMouseEvents = false
+  //   self.acceptsMouseMovedEvents = true
+  //   self.hidesOnDeactivate = false
+  //   self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+  //
+  //   let view = CaptureOverlayView(
+  //     frame: NSRect(origin: .zero, size: screen.frame.size),
+  //     screenImage: screenImage,
+  //     scaleFactor: screen.backingScaleFactor,
+  //     onCapture: onCapture,
+  //     onCancel: onCancel
+  //   )
+  //   self.contentView = view
+  // }
   init(
     screen: NSScreen,
     screenImage: CGImage?,
     onCapture: @escaping (CGImage?) -> Void,
+    onPanoramicCapture: ((NSRect) -> Void)? = nil,
     onCancel: @escaping () -> Void
   ) {
     super.init(
@@ -349,6 +420,7 @@ private class CaptureOverlayWindow: NSPanel {
       screenImage: screenImage,
       scaleFactor: screen.backingScaleFactor,
       onCapture: onCapture,
+      onPanoramicCapture: onPanoramicCapture,
       onCancel: onCancel
     )
     self.contentView = view
@@ -401,6 +473,8 @@ private class CaptureOverlayView: NSView {
   private let screenImage: CGImage?
   private let scaleFactor: CGFloat
   private let onCapture: (CGImage?) -> Void
+  // Gene - Oct, 27, 2026: Added onPanoramicCapture callback.
+  private let onPanoramicCapture: ((NSRect) -> Void)?
   private let onCancel: () -> Void
 
   private var mode: OverlayMode = .idle
@@ -418,6 +492,10 @@ private class CaptureOverlayView: NSView {
   /// every draw because it tracks the selection around the screen.
   private var captureButtonRect: NSRect = .zero
   private var captureButtonHot = false
+
+  // Gene - Oct, 27, 2026: Added panoramicButtonRect and hot tracking.
+  private var panoramicButtonRect: NSRect = .zero
+  private var panoramicButtonHot = false
 
   /// Where the cancel control was last drawn. Escape and right-click already
   /// cancel, but neither announces itself — this is the visible way out.
@@ -454,16 +532,34 @@ private class CaptureOverlayView: NSView {
   /// nothing orders those two, so the latch is what actually guarantees it.
   private var hasSettled = false
 
+  // Gene - Oct, 27, 2026: Added onPanoramicCapture parameter to CaptureOverlayView.
+  // Old implementation:
+  // init(
+  //   frame: NSRect,
+  //   screenImage: CGImage?,
+  //   scaleFactor: CGFloat,
+  //   onCapture: @escaping (CGImage?) -> Void,
+  //   onCancel: @escaping () -> Void
+  // ) {
+  //   self.screenImage = screenImage
+  //   self.scaleFactor = scaleFactor
+  //   self.onCapture = onCapture
+  //   self.onCancel = onCancel
+  //   super.init(frame: frame)
+  //   self.wantsLayer = true
+  // }
   init(
     frame: NSRect,
     screenImage: CGImage?,
     scaleFactor: CGFloat,
     onCapture: @escaping (CGImage?) -> Void,
+    onPanoramicCapture: ((NSRect) -> Void)? = nil,
     onCancel: @escaping () -> Void
   ) {
     self.screenImage = screenImage
     self.scaleFactor = scaleFactor
     self.onCapture = onCapture
+    self.onPanoramicCapture = onPanoramicCapture
     self.onCancel = onCancel
     super.init(frame: frame)
     self.wantsLayer = true
@@ -506,12 +602,42 @@ private class CaptureOverlayView: NSView {
     )
   }
 
+  // Gene - Oct, 27, 2026: Updated mouseMoved and resetCursorRects to track panoramicButtonRect.
+  // Old implementation:
+  // override func mouseMoved(with event: NSEvent) {
+  //   let point = convert(event.locationInWindow, from: nil)
+  //   let captureHot = !captureButtonRect.isEmpty && captureButtonRect.contains(point)
+  //   let cancelHot = !cancelButtonRect.isEmpty && cancelButtonRect.contains(point)
+  //   if captureHot != captureButtonHot || cancelHot != cancelButtonHot {
+  //     captureButtonHot = captureHot
+  //     cancelButtonHot = cancelHot
+  //     needsDisplay = true
+  //   }
+  // }
+  //
+  // override func resetCursorRects() {
+  //   addCursorRect(bounds, cursor: .crosshair)
+  //
+  //   guard case .adjusting = mode, let sel = selection else { return }
+  //   addCursorRect(sel, cursor: .openHand)
+  //   for (grip, rect) in gripRects(for: sel) {
+  //     addCursorRect(rect, cursor: cursor(for: grip))
+  //   }
+  //   if !captureButtonRect.isEmpty {
+  //     addCursorRect(captureButtonRect, cursor: .pointingHand)
+  //   }
+  //   if !cancelButtonRect.isEmpty {
+  //     addCursorRect(cancelButtonRect, cursor: .pointingHand)
+  //   }
+  // }
   override func mouseMoved(with event: NSEvent) {
     let point = convert(event.locationInWindow, from: nil)
     let captureHot = !captureButtonRect.isEmpty && captureButtonRect.contains(point)
+    let panoramicHot = !panoramicButtonRect.isEmpty && panoramicButtonRect.contains(point)
     let cancelHot = !cancelButtonRect.isEmpty && cancelButtonRect.contains(point)
-    if captureHot != captureButtonHot || cancelHot != cancelButtonHot {
+    if captureHot != captureButtonHot || panoramicHot != panoramicButtonHot || cancelHot != cancelButtonHot {
       captureButtonHot = captureHot
+      panoramicButtonHot = panoramicHot
       cancelButtonHot = cancelHot
       needsDisplay = true
     }
@@ -527,6 +653,9 @@ private class CaptureOverlayView: NSView {
     }
     if !captureButtonRect.isEmpty {
       addCursorRect(captureButtonRect, cursor: .pointingHand)
+    }
+    if !panoramicButtonRect.isEmpty {
+      addCursorRect(panoramicButtonRect, cursor: .pointingHand)
     }
     if !cancelButtonRect.isEmpty {
       addCursorRect(cancelButtonRect, cursor: .pointingHand)
@@ -634,6 +763,11 @@ private class CaptureOverlayView: NSView {
         captureCurrentSelection()
         return
       }
+      // Gene - Oct, 27, 2026: Check click on panoramicButtonRect to trigger panoramic capture.
+      if !panoramicButtonRect.isEmpty && panoramicButtonRect.contains(point) {
+        startPanoramicCapture()
+        return
+      }
       if let grip = grip(at: point, in: sel) {
         selectionAtDragStart = sel
         mode = (grip == .body) ? .moving : .resizing(grip)
@@ -733,6 +867,19 @@ private class CaptureOverlayView: NSView {
     settle(with: croppedImage(for: sel) ?? screenImage)
   }
 
+  // Gene - Oct, 27, 2026: Added startPanoramicCapture to settle with selected rect for panoramic capture.
+  private func startPanoramicCapture() {
+    guard let sel = selection, isUsable(sel) else { return }
+    settlePanoramic(with: sel)
+  }
+
+  private func settlePanoramic(with rect: NSRect) {
+    guard !hasSettled else { return }
+    hasSettled = true
+    mode = .idle
+    onPanoramicCapture?(rect)
+  }
+
   /// Crops the pre-captured screen bitmap to [rect], which is in view
   /// coordinates: bottom-left origin, points not pixels.
   private func croppedImage(for rect: NSRect) -> CGImage? {
@@ -827,6 +974,7 @@ private class CaptureOverlayView: NSView {
       drawCaptureButton(for: selRect, accent: accent)
     } else {
       captureButtonRect = .zero
+      panoramicButtonRect = .zero
       cancelButtonRect = .zero
     }
   }
@@ -880,6 +1028,69 @@ private class CaptureOverlayView: NSView {
   /// The Capture button: a pill just outside the selection, flipped to
   /// whichever side has room so it never sits off screen or over the region
   /// being captured.
+  // Gene - Oct, 27, 2026: Added Panoramic capture button beside the Capture button in the interactive overlay.
+  // Old implementation:
+  // private func drawCaptureButton(for selRect: NSRect, accent: NSColor) {
+  //   let label = "Capture"
+  //   let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+  //   let attrs: [NSAttributedString.Key: Any] = [
+  //     .font: font,
+  //     .foregroundColor: NSColor.white
+  //   ]
+  //   let attrString = NSAttributedString(string: label, attributes: attrs)
+  //   let textSize = attrString.size()
+  //
+  //   let iconW: CGFloat = 15
+  //   let gap: CGFloat = 6
+  //   let padH: CGFloat = 11
+  //   let padV: CGFloat = 6
+  //   let pillW = padH * 2 + iconW + gap + textSize.width
+  //   let buttonH = max(textSize.height + padV * 2, 24)
+  //   let margin: CGFloat = 8
+  //   // Capture and cancel are placed as one block, so the edge-flipping below
+  //   // can never leave the X off screen while Capture stays visible.
+  //   let controlGap: CGFloat = 7
+  //   let buttonW = pillW + controlGap + buttonH
+  //
+  //   // Below the selection by default, above it when that would run off the
+  //   // bottom, and pulled inside when the selection reaches both edges.
+  //   var y = selRect.minY - buttonH - margin
+  //   if y < 4 {
+  //     y = selRect.maxY + margin
+  //   }
+  //   if y + buttonH > bounds.height - 4 {
+  //     y = max(4, selRect.minY + margin)
+  //   }
+  //   var x = selRect.maxX - buttonW
+  //   if x < 4 { x = 4 }
+  //   if x + buttonW > bounds.width - 4 { x = bounds.width - buttonW - 4 }
+  //
+  //   let block = NSRect(x: x, y: y, width: buttonW, height: buttonH)
+  //   let rect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
+  //   captureButtonRect = rect
+  //   cancelButtonRect = NSRect(
+  //     x: block.maxX - buttonH,
+  //     y: block.minY,
+  //     width: buttonH,
+  //     height: buttonH
+  //   )
+  //
+  //   let path = NSBezierPath(roundedRect: rect, xRadius: buttonH / 2, yRadius: buttonH / 2)
+  //   (captureButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : accent).setFill()
+  //   path.fill()
+  //   NSColor(white: 1.0, alpha: 0.35).setStroke()
+  //   path.lineWidth = 1
+  //   path.stroke()
+  //
+  //   drawCameraGlyph(
+  //     in: NSRect(x: rect.minX + padH, y: rect.midY - 5.5, width: iconW, height: 11)
+  //   )
+  //   attrString.draw(
+  //     at: NSPoint(x: rect.minX + padH + iconW + gap, y: rect.midY - textSize.height / 2)
+  //   )
+  //
+  //   drawCancelButton(in: cancelButtonRect, accent: accent)
+  // }
   private func drawCaptureButton(for selRect: NSRect, accent: NSColor) {
     let label = "Capture"
     let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
@@ -897,10 +1108,16 @@ private class CaptureOverlayView: NSView {
     let pillW = padH * 2 + iconW + gap + textSize.width
     let buttonH = max(textSize.height + padV * 2, 24)
     let margin: CGFloat = 8
-    // Capture and cancel are placed as one block, so the edge-flipping below
-    // can never leave the X off screen while Capture stays visible.
     let controlGap: CGFloat = 7
-    let buttonW = pillW + controlGap + buttonH
+
+    // Panoramic button metrics
+    let panoLabel = "Panoramic"
+    let panoAttrString = NSAttributedString(string: panoLabel, attributes: attrs)
+    let panoTextSize = panoAttrString.size()
+    let panoPillW = padH * 2 + iconW + gap + panoTextSize.width
+
+    // Total width: [Capture] + [Panoramic] + [Cancel (X)]
+    let buttonW = pillW + controlGap + panoPillW + controlGap + buttonH
 
     // Below the selection by default, above it when that would run off the
     // bottom, and pulled inside when the selection reaches both edges.
@@ -916,8 +1133,12 @@ private class CaptureOverlayView: NSView {
     if x + buttonW > bounds.width - 4 { x = bounds.width - buttonW - 4 }
 
     let block = NSRect(x: x, y: y, width: buttonW, height: buttonH)
-    let rect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
-    captureButtonRect = rect
+    let captureRect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
+    captureButtonRect = captureRect
+
+    let panoRect = NSRect(x: block.minX + pillW + controlGap, y: block.minY, width: panoPillW, height: buttonH)
+    panoramicButtonRect = panoRect
+
     cancelButtonRect = NSRect(
       x: block.maxX - buttonH,
       y: block.minY,
@@ -925,21 +1146,63 @@ private class CaptureOverlayView: NSView {
       height: buttonH
     )
 
-    let path = NSBezierPath(roundedRect: rect, xRadius: buttonH / 2, yRadius: buttonH / 2)
+    // 1. Draw Capture button
+    let capturePath = NSBezierPath(roundedRect: captureRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
     (captureButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : accent).setFill()
-    path.fill()
+    capturePath.fill()
     NSColor(white: 1.0, alpha: 0.35).setStroke()
-    path.lineWidth = 1
-    path.stroke()
+    capturePath.lineWidth = 1
+    capturePath.stroke()
 
     drawCameraGlyph(
-      in: NSRect(x: rect.minX + padH, y: rect.midY - 5.5, width: iconW, height: 11)
+      in: NSRect(x: captureRect.minX + padH, y: captureRect.midY - 5.5, width: iconW, height: 11)
     )
     attrString.draw(
-      at: NSPoint(x: rect.minX + padH + iconW + gap, y: rect.midY - textSize.height / 2)
+      at: NSPoint(x: captureRect.minX + padH + iconW + gap, y: captureRect.midY - textSize.height / 2)
     )
 
+    // 2. Draw Panoramic button beside Capture
+    let panoPath = NSBezierPath(roundedRect: panoRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
+    (panoramicButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : accent).setFill()
+    panoPath.fill()
+    NSColor(white: 1.0, alpha: 0.35).setStroke()
+    panoPath.lineWidth = 1
+    panoPath.stroke()
+
+    drawPanoramicGlyph(
+      in: NSRect(x: panoRect.minX + padH, y: panoRect.midY - 5.5, width: iconW, height: 11)
+    )
+    panoAttrString.draw(
+      at: NSPoint(x: panoRect.minX + padH + iconW + gap, y: panoRect.midY - panoTextSize.height / 2)
+    )
+
+    // 3. Draw Cancel (X) button
     drawCancelButton(in: cancelButtonRect, accent: accent)
+  }
+
+  // Gene - Oct, 27, 2026: Glyph for Panoramic / Scrolling capture button.
+  private func drawPanoramicGlyph(in rect: NSRect) {
+    NSColor.white.setStroke()
+    let path = NSBezierPath()
+    let midX = rect.midX
+    let midY = rect.midY
+    let arrowW: CGFloat = 3.5
+    let arrowH: CGFloat = 3.0
+
+    // Up arrow
+    path.move(to: NSPoint(x: midX - arrowW, y: midY + 1))
+    path.line(to: NSPoint(x: midX, y: midY + 1 + arrowH))
+    path.line(to: NSPoint(x: midX + arrowW, y: midY + 1))
+
+    // Down arrow
+    path.move(to: NSPoint(x: midX - arrowW, y: midY - 1))
+    path.line(to: NSPoint(x: midX, y: midY - 1 - arrowH))
+    path.line(to: NSPoint(x: midX + arrowW, y: midY - 1))
+
+    path.lineWidth = 1.4
+    path.lineCapStyle = .round
+    path.lineJoinStyle = .round
+    path.stroke()
   }
 
   /// The way out, drawn quieter than Capture: this is the escape hatch, not

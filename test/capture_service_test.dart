@@ -41,6 +41,9 @@ void main() {
           if (call.method == 'captureInteractive' ||
               call.method == 'captureFullScreen') {
             if (mockCaptureResult != null) {
+              if (mockCaptureResult!.startsWith('scrolling:')) {
+                return mockCaptureResult;
+              }
               // Create a fake dummy image file at target path if requested
               final args = call.arguments as Map<dynamic, dynamic>?;
               final targetPath = args?['targetPath'] as String?;
@@ -96,6 +99,20 @@ void main() {
       final result = await captureService.captureInteractive();
 
       expect(result, isNull);
+      expect(methodCalls.length, 1);
+      expect(methodCalls.first.method, 'captureInteractive');
+    },
+    skip: skipOffMacOS,
+  );
+
+  // Gene - Oct, 27, 2026: Verifies scrolling result string returned when Panoramic button clicked.
+  test(
+    'captureInteractive returns scrolling coordinate string when Panoramic is chosen',
+    () async {
+      mockCaptureResult = 'scrolling:100.0:150.0:500.0:350.0';
+      final result = await captureService.captureInteractive();
+
+      expect(result, 'scrolling:100.0:150.0:500.0:350.0');
       expect(methodCalls.length, 1);
       expect(methodCalls.first.method, 'captureInteractive');
     },

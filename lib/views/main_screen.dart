@@ -1474,12 +1474,35 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // Capture Triggers
+  // Gene - Oct, 27, 2026: Handled "scrolling:x:y:w:h" result from interactive capture overlay to launch panoramic capture.
+  // Old implementation:
+  // Future<void> _handleInteractiveCapture() async {
+  //   if (!await _ensureCapturePermission()) return;
+  //   setState(() => _isCapturing = true);
+  //   final path = await _captureService.captureInteractive();
+  //   setState(() => _isCapturing = false);
+  //   if (path != null) {
+  //     await _addCaptureFromPath(path);
+  //   }
+  // }
   Future<void> _handleInteractiveCapture() async {
     if (!await _ensureCapturePermission()) return;
     setState(() => _isCapturing = true);
     final path = await _captureService.captureInteractive();
     setState(() => _isCapturing = false);
     if (path != null) {
+      if (path.startsWith('scrolling:')) {
+        final parts = path.substring('scrolling:'.length).split(':');
+        if (parts.length == 4) {
+          final x = double.tryParse(parts[0]) ?? 0.0;
+          final y = double.tryParse(parts[1]) ?? 0.0;
+          final w = double.tryParse(parts[2]) ?? 800.0;
+          final h = double.tryParse(parts[3]) ?? 600.0;
+          final rect = Rect.fromLTWH(x, y, w, h);
+          await _handleScrollingCapture(rect);
+        }
+        return;
+      }
       await _addCaptureFromPath(path);
     }
   }

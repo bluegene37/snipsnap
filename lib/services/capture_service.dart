@@ -115,6 +115,16 @@ class CaptureService {
             'captureInteractive',
             {'targetPath': targetPath},
           );
+          // Gene - Oct, 27, 2026: If the user clicked Panoramic in the overlay, result is formatted as "scrolling:x:y:w:h".
+          // Old implementation:
+          // if (result != null &&
+          //     await File(result).exists() &&
+          //     (await File(result).length()) > 0) {
+          //   return result;
+          // }
+          if (result != null && result.startsWith('scrolling:')) {
+            return result;
+          }
           if (result != null &&
               await File(result).exists() &&
               (await File(result).length()) > 0) {
