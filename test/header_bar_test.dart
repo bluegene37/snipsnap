@@ -339,28 +339,46 @@ void main() {
     expect(manualOpened, isTrue);
   });
 
-  // Gene - Oct, 27, 2026: Verifies Panoramic capture button beside Snip triggers onSnipScrolling.
-  testWidgets('shows Panoramic capture button beside Snip when onSnipScrolling is provided', (
+  // Gene - Oct, 27, 2026: Verifies Panoramic capture button is omitted from top left bar as requested.
+  // Old implementation:
+  // testWidgets('shows Panoramic capture button beside Snip when onSnipScrolling is provided', (
+  //   tester,
+  // ) async {
+  //   tester.view.physicalSize = const Size(1440, 700);
+  //   tester.view.devicePixelRatio = 1.0;
+  //   addTearDown(tester.view.reset);
+  //
+  //   bool scrolled = false;
+  //   await tester.pumpWidget(
+  //     _harness(
+  //       width: 1440,
+  //       onSnipScrolling: () => scrolled = true,
+  //     ),
+  //   );
+  //
+  //   expect(find.text('Panoramic'), findsOneWidget);
+  //   expect(find.byIcon(Icons.unfold_more_rounded), findsOneWidget);
+  //
+  //   await tester.tap(find.text('Panoramic'));
+  //   await tester.pump();
+  //
+  //   expect(scrolled, isTrue);
+  // });
+  testWidgets('omits Panoramic capture button from HeaderBar when onSnipScrolling is provided', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1440, 700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    bool scrolled = false;
     await tester.pumpWidget(
       _harness(
         width: 1440,
-        onSnipScrolling: () => scrolled = true,
+        onSnipScrolling: () {},
       ),
     );
 
-    expect(find.text('Panoramic'), findsOneWidget);
-    expect(find.byIcon(Icons.unfold_more_rounded), findsOneWidget);
-
-    await tester.tap(find.text('Panoramic'));
-    await tester.pump();
-
-    expect(scrolled, isTrue);
+    expect(find.text('Panoramic'), findsNothing);
+    expect(find.byIcon(Icons.unfold_more_rounded), findsNothing);
   });
 }

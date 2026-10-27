@@ -268,48 +268,47 @@ class HeaderBar extends StatelessWidget {
                 ),
               ),
               Container(height: 24, width: t.hairline, color: t.border),
-              // Gene - Oct, 27, 2026: Added Panoramic capture option directly beside the Snip capture button.
-              if (onSnipScrolling != null) ...[
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: onSnipScrolling,
-                    child: Tooltip(
-                      message:
-                          'Panoramic Snip (${_shortcut(AppShortcutAction.scrollingSnip, 'Cmd+Shift+P')})',
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.unfold_more_rounded,
-                              color: t.emphasis,
-                              size: 16,
-                            ),
-                            if (showLabels) ...[
-                              const SizedBox(width: 6),
-                              Text(
-                                'Panoramic',
-                                style: TextStyle(
-                                  color: t.emphasis,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Container(height: 24, width: t.hairline, color: t.border),
-              ],
-              // Gene - Oct, 27, 2026: Added Scrolling Capture mode to capture dropdown menu.
+              // Gene - Oct, 27, 2026: Removed Panoramic button from top left bar as requested; panoramic capture is initiated directly from the interactive selection overlay.
+              // Old implementation:
+              // if (onSnipScrolling != null) ...[
+              //   Material(
+              //     color: Colors.transparent,
+              //     child: InkWell(
+              //       onTap: onSnipScrolling,
+              //       child: Tooltip(
+              //         message:
+              //             'Panoramic Snip (${_shortcut(AppShortcutAction.scrollingSnip, 'Cmd+Shift+P')})',
+              //         child: Padding(
+              //           padding: const EdgeInsets.symmetric(horizontal: 10),
+              //           child: Row(
+              //             mainAxisSize: MainAxisSize.min,
+              //             children: [
+              //               Icon(
+              //                 Icons.unfold_more_rounded,
+              //                 color: t.emphasis,
+              //                 size: 16,
+              //               ),
+              //               if (showLabels) ...[
+              //                 const SizedBox(width: 6),
+              //                 Text(
+              //                   'Panoramic',
+              //                   style: TextStyle(
+              //                     color: t.emphasis,
+              //                     fontWeight: FontWeight.bold,
+              //                     fontSize: 13,
+              //                   ),
+              //                 ),
+              //               ],
+              //             ],
+              //           ),
+              //         ),
+              //       ),
+              //     ),
+              //   ),
+              //   Container(height: 24, width: t.hairline, color: t.border),
+              // ],
               // Old implementation:
               // PopupMenuButton<String>(
-              //   tooltip: 'Capture Modes',
               //   position: PopupMenuPosition.under,
               //   color: t.surfaceRaised,
               //   shape: RoundedRectangleBorder(
@@ -381,14 +380,16 @@ class HeaderBar extends StatelessWidget {
                       'Cmd+Shift+1',
                     ),
                   ),
-                  if (onSnipScrolling != null)
-                    _captureMenuItem(
-                      t,
-                      value: 'scroll',
-                      icon: Icons.unfold_more_rounded,
-                      title: 'Scrolling Capture',
-                      subtitle: 'Panoramic',
-                    ),
+                  // Gene - Oct, 27, 2026: Removed Scrolling Capture dropdown option from top left bar as requested; panoramic capture is initiated from the interactive selection overlay.
+                  // Old implementation:
+                  // if (onSnipScrolling != null)
+                  //   _captureMenuItem(
+                  //     t,
+                  //     value: 'scroll',
+                  //     icon: Icons.unfold_more_rounded,
+                  //     title: 'Scrolling Capture',
+                  //     subtitle: 'Panoramic',
+                  //   ),
                   _captureMenuItem(
                     t,
                     value: 'full',

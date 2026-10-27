@@ -179,28 +179,51 @@ void main() {
   });
 
   group('HeaderBar Scrolling Capture Integration', () {
+    // Gene - Oct, 27, 2026: Verifies Panoramic buttons and dropdown options are omitted from the left top bar as requested.
+    // Old implementation:
+    // testWidgets(
+    //   'shows Scrolling Capture option in dropdown when onSnipScrolling is provided',
+    //   (tester) async {
+    //     bool scrollingCalled = false;
+    //     await tester.pumpWidget(
+    //       _headerBarHarness(
+    //         width: 1200,
+    //         onSnipScrolling: () => scrollingCalled = true,
+    //       ),
+    //     );
+    //
+    //     // Open capture dropdown menu
+    //     await tester.tap(find.byTooltip('Capture Modes'));
+    //     await tester.pumpAndSettle();
+    //
+    //     expect(find.text('Scrolling Capture'), findsOneWidget);
+    //     expect(find.text('Panoramic'), findsOneWidget);
+    //
+    //     await tester.tap(find.text('Scrolling Capture'));
+    //     await tester.pumpAndSettle();
+    //
+    //     expect(scrollingCalled, isTrue);
+    //   },
+    // );
     testWidgets(
-      'shows Scrolling Capture option in dropdown when onSnipScrolling is provided',
+      'omits Panoramic and Scrolling Capture buttons from HeaderBar and dropdown',
       (tester) async {
-        bool scrollingCalled = false;
         await tester.pumpWidget(
           _headerBarHarness(
             width: 1200,
-            onSnipScrolling: () => scrollingCalled = true,
+            onSnipScrolling: () {},
           ),
         );
+
+        // Header bar itself should not show Panoramic button
+        expect(find.text('Panoramic'), findsNothing);
+        expect(find.byIcon(Icons.unfold_more_rounded), findsNothing);
 
         // Open capture dropdown menu
         await tester.tap(find.byTooltip('Capture Modes'));
         await tester.pumpAndSettle();
 
-        expect(find.text('Scrolling Capture'), findsOneWidget);
-        expect(find.text('Panoramic'), findsOneWidget);
-
-        await tester.tap(find.text('Scrolling Capture'));
-        await tester.pumpAndSettle();
-
-        expect(scrollingCalled, isTrue);
+        expect(find.text('Scrolling Capture'), findsNothing);
       },
     );
 
