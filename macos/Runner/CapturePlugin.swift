@@ -83,11 +83,24 @@ class CapturePlugin: NSObject {
         return
       }
       let rect = CGRect(x: CGFloat(xVal), y: CGFloat(yVal), width: CGFloat(wVal), height: CGFloat(hVal))
+      // Gene - Oct, 27, 2026: Fixed NSBitmapImageRep initialization; it is non-optional in Swift so cannot be in guard let.
+      // Old implementation:
+      // guard
+      //   let image = CGWindowListCreateImage(rect, .optionOnScreenOnly, kCGNullWindowID, .bestResolution),
+      //   let rep = NSBitmapImageRep(cgImage: image),
+      //   let data = rep.representation(using: .png, properties: [:])
+      // else {
+      //   result(nil)
+      //   return
+      // }
       guard
-        let image = CGWindowListCreateImage(rect, .optionOnScreenOnly, kCGNullWindowID, .bestResolution),
-        let rep = NSBitmapImageRep(cgImage: image),
-        let data = rep.representation(using: .png, properties: [:])
+        let image = CGWindowListCreateImage(rect, .optionOnScreenOnly, kCGNullWindowID, .bestResolution)
       else {
+        result(nil)
+        return
+      }
+      let rep = NSBitmapImageRep(cgImage: image)
+      guard let data = rep.representation(using: .png, properties: [:]) else {
         result(nil)
         return
       }

@@ -96,10 +96,17 @@ class StorageService {
 
     // 1. Try native save file dialog with target filename
     try {
+      // Gene - Oct, 27, 2026: Removed deprecated 'type' argument from FilePicker.saveFile as it has no effect in file_picker 13+.
+      // Old implementation:
+      // final savedUri = await FilePicker.saveFile(
+      //   dialogTitle: 'Save Screenshot As',
+      //   fileName: targetFileName,
+      //   type: FileType.any,
+      //   bytes: Uint8List.fromList(bytesToSave),
+      // );
       final savedUri = await FilePicker.saveFile(
         dialogTitle: 'Save Screenshot As',
         fileName: targetFileName,
-        type: FileType.any,
         bytes: Uint8List.fromList(bytesToSave),
       );
 
