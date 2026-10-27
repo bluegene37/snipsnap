@@ -545,18 +545,31 @@ class HeaderBar extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _HeaderButton(
-          icon: isSidebarOpen
-              ? Icons.photo_library_rounded
-              : Icons.photo_library_outlined,
-          isActive: isSidebarOpen,
-          tooltip: isSidebarOpen
-              ? 'Hide Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})'
-              : 'Show Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})',
-          onPressed: onToggleSidebar,
-        ),
-        if (onToggleProperties != null) ...[
-          const SizedBox(width: 6),
+        // Gene - Oct, 27, 2026: Removed the Screen icon button (gallery toggle) from HeaderBar.
+        // The gallery header bar is now permanently visible at the bottom and expandable via clicking its header.
+        // Old implementation:
+        // _HeaderButton(
+        //   icon: isSidebarOpen
+        //       ? Icons.photo_library_rounded
+        //       : Icons.photo_library_outlined,
+        //   isActive: isSidebarOpen,
+        //   tooltip: isSidebarOpen
+        //       ? 'Hide Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})'
+        //       : 'Show Screenshot Gallery (${_shortcut(AppShortcutAction.toggleHistory, 'Cmd+H')})',
+        //   onPressed: onToggleSidebar,
+        // ),
+        // if (onToggleProperties != null) ...[
+        //   const SizedBox(width: 6),
+        //   _HeaderButton(
+        //     icon: isPropertiesOpen ? Icons.tune_rounded : Icons.tune_outlined,
+        //     isActive: isPropertiesOpen,
+        //     tooltip: isPropertiesOpen
+        //         ? 'Hide Tool Properties'
+        //         : 'Show Tool Properties',
+        //     onPressed: onToggleProperties,
+        //   ),
+        // ],
+        if (onToggleProperties != null)
           _HeaderButton(
             icon: isPropertiesOpen ? Icons.tune_rounded : Icons.tune_outlined,
             isActive: isPropertiesOpen,
@@ -565,7 +578,6 @@ class HeaderBar extends StatelessWidget {
                 : 'Show Tool Properties',
             onPressed: onToggleProperties,
           ),
-        ],
       ],
     );
   }

@@ -2253,9 +2253,11 @@ class _MainScreenState extends State<MainScreen> {
                                 onShapeKindSelected: (kind) =>
                                     _updateActiveToolProperty(shapeKind: kind),
                                 isSidebarOpen: _isSidebarOpen,
-                                onToggleSidebar: () => setState(
-                                  () => _isSidebarOpen = !_isSidebarOpen,
-                                ),
+                                // Gene - Oct, 27, 2026: Removed onToggleSidebar from ToolSidebar so the tool rail
+                                // doesn't show a redundant screen icon button; the gallery is toggled from its own header bar.
+                                // onToggleSidebar: () => setState(
+                                //   () => _isSidebarOpen = !_isSidebarOpen,
+                                // ),
                               ),
 
                               // Editor Canvas
@@ -2646,15 +2648,29 @@ class _MainScreenState extends State<MainScreen> {
                     ),
 
                     // Bottom Gallery History Bar
-                    if (_isSidebarOpen)
-                      GallerySidebar(
-                        items: _captures,
-                        activeItem: _activeCapture,
-                        imageRevision: _imageRevision,
-                        zoomScale: _zoomScale,
-                        onZoomScaleChanged: (val) =>
-                            setState(() => _zoomScale = val),
-                        onSelectItem: (item) {
+                    // Gene - Oct, 27, 2026: Kept GallerySidebar always rendered at the bottom so its header bar
+                    // remains visible when collapsed. _isSidebarOpen controls isOpen.
+                    // Old implementation:
+                    // if (_isSidebarOpen)
+                    //   GallerySidebar(
+                    //     items: _captures,
+                    //     activeItem: _activeCapture,
+                    //     imageRevision: _imageRevision,
+                    //     zoomScale: _zoomScale,
+                    //     onZoomScaleChanged: (val) =>
+                    //         setState(() => _zoomScale = val),
+                    //     onSelectItem: (item) {
+                    GallerySidebar(
+                      items: _captures,
+                      activeItem: _activeCapture,
+                      imageRevision: _imageRevision,
+                      zoomScale: _zoomScale,
+                      onZoomScaleChanged: (val) =>
+                          setState(() => _zoomScale = val),
+                      isOpen: _isSidebarOpen,
+                      onToggleCollapse: () =>
+                          setState(() => _isSidebarOpen = !_isSidebarOpen),
+                      onSelectItem: (item) {
                           _syncCurrentCaptureAnnotations();
                           setState(() {
                             // A different bitmap: nothing cached for the old one can

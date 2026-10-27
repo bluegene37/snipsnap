@@ -76,8 +76,10 @@ void main() {
     expect(find.text('Open'), findsOneWidget);
     expect(find.text('Copy'), findsOneWidget);
     expect(find.text('Save As'), findsOneWidget);
-    // Gallery toggle + properties toggle + overflow menu.
-    expect(find.byIcon(Icons.photo_library_rounded), findsOneWidget);
+    // Gene - Oct, 27, 2026: Screen icon button (photo_library) was removed from HeaderBar; view group now holds properties toggle and overflow menu.
+    // Old implementation:
+    // expect(find.byIcon(Icons.photo_library_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.photo_library_rounded), findsNothing);
     expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
     expect(find.byIcon(Icons.more_vert_rounded), findsOneWidget);
   });

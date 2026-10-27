@@ -23,6 +23,25 @@ class GallerySidebar extends StatelessWidget {
   /// re-decodes — the other thumbnails keep their cached bitmaps untouched.
   final int imageRevision;
 
+  // Gene - Oct, 27, 2026: Added isOpen and onToggleCollapse to support keeping the header bar visible when collapsed.
+  final bool isOpen;
+  final VoidCallback? onToggleCollapse;
+
+  // Gene - Oct, 27, 2026: Updated constructor to accept isOpen and onToggleCollapse.
+  // Old implementation:
+  // const GallerySidebar({
+  //   super.key,
+  //   required this.items,
+  //   required this.activeItem,
+  //   required this.onSelectItem,
+  //   required this.onDeleteItem,
+  //   required this.onClose,
+  //   this.onOpenLibraryLocation,
+  //   this.onRevealItemInFolder,
+  //   this.zoomScale = 1.0,
+  //   this.onZoomScaleChanged,
+  //   this.imageRevision = 0,
+  // });
   const GallerySidebar({
     super.key,
     required this.items,
@@ -35,6 +54,8 @@ class GallerySidebar extends StatelessWidget {
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
     this.imageRevision = 0,
+    this.isOpen = true,
+    this.onToggleCollapse,
   });
 
   String _formatTime(DateTime date) {
@@ -55,35 +76,96 @@ class GallerySidebar extends StatelessWidget {
       thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
     );
 
-    return Container(
-      height: 145,
+    // Gene - Oct, 27, 2026: Changed Container to AnimatedContainer and height to isOpen ? 145 : 32 so the header bar remains visible when collapsed.
+    // Old implementation:
+    // return Container(
+    //   height: 145,
+    //   decoration: BoxDecoration(
+    //     color: t.surface,
+    //     border: Border(top: BorderSide(color: t.border)),
+    //   ),
+    //   child: Column(
+    //     children: [
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+      height: isOpen ? 145 : 33,
       decoration: BoxDecoration(
         color: t.surface,
         border: Border(top: BorderSide(color: t.border)),
       ),
-      child: Column(
-        children: [
-          // Snagit-style Tray Sub-Header Bar
-          Container(
-            height: 32,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: t.surfaceRaised,
-              border: Border(bottom: BorderSide(color: t.border)),
-            ),
-            child: Row(
-              children: [
-                // Screenshots Gallery Header
-                Icon(Icons.photo_library_rounded, color: t.ink, size: 15),
-                const SizedBox(width: 6),
-                Text(
-                  'Screenshots',
-                  style: TextStyle(
-                    color: t.ink,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+      child: ClipRect(
+        child: Column(
+          children: [
+            // Snagit-style Tray Sub-Header Bar
+            Container(
+              height: 32,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: t.surfaceRaised,
+                border: Border(bottom: BorderSide(color: t.border)),
+              ),
+              child: Row(
+                children: [
+                  // Screenshots Gallery Header
+                  // Gene - Oct, 27, 2026: Made the Screenshots title and small chevron icon clickable to hide/unhide the gallery.
+                  // Old implementation:
+                  // Icon(Icons.photo_library_rounded, color: t.ink, size: 15),
+                  // const SizedBox(width: 6),
+                  // Text(
+                  //   'Screenshots',
+                  //   style: TextStyle(
+                  //     color: t.ink,
+                  //     fontSize: 12,
+                  //     fontWeight: FontWeight.bold,
+                  //   ),
+                  // ),
+                  Tooltip(
+                    message: isOpen
+                        ? 'Hide Screenshots Tray (Cmd+H)'
+                        : 'Show Screenshots Tray (Cmd+H)',
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        hoverColor: t.hoverFill,
+                        onTap: onToggleCollapse ?? onClose,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 3,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isOpen
+                                    ? Icons.keyboard_arrow_down_rounded
+                                    : Icons.keyboard_arrow_up_rounded,
+                                color: t.ink,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.photo_library_rounded,
+                                color: t.ink,
+                                size: 15,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Screenshots',
+                                style: TextStyle(
+                                  color: t.ink,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
                 const SizedBox(width: 10),
 
                 // Open Screenshots Library Folder Button
@@ -271,26 +353,48 @@ class GallerySidebar extends StatelessWidget {
                 const SizedBox(width: 8),
 
                 // Right: Controls & Hide Button
+                // Gene - Oct, 27, 2026: Updated right toggle button to toggle between hide (chevron down) and show (chevron up).
+                // Old implementation:
+                // IconButton(
+                //   icon: Icon(Icons.close_rounded, color: t.inkMuted, size: 16),
+                //   padding: EdgeInsets.zero,
+                //   constraints: const BoxConstraints(
+                //     minWidth: 24,
+                //     minHeight: 24,
+                //   ),
+                //   tooltip: 'Hide Screenshots Tray',
+                //   onPressed: onClose,
+                // ),
                 IconButton(
-                  // Was a fixed Colors.white54 regardless of mode — already
-                  // a pre-existing legibility bug in light mode (white54 on
-                  // a near-white sub-header bar is nearly invisible).
-                  icon: Icon(Icons.close_rounded, color: t.inkMuted, size: 16),
+                  icon: Icon(
+                    isOpen
+                        ? Icons.keyboard_arrow_down_rounded
+                        : Icons.keyboard_arrow_up_rounded,
+                    color: t.inkMuted,
+                    size: 18,
+                  ),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(
                     minWidth: 24,
                     minHeight: 24,
                   ),
-                  tooltip: 'Hide Screenshots Tray',
-                  onPressed: onClose,
+                  tooltip: isOpen
+                      ? 'Hide Screenshots Tray'
+                      : 'Show Screenshots Tray',
+                  onPressed: onToggleCollapse ?? onClose,
                 ),
               ],
             ),
           ),
 
           // Horizontal Captures List
-          Expanded(
-            child: items.isEmpty
+          // Gene - Oct, 27, 2026: Only render the thumbnail list if isOpen is true.
+          // Old implementation:
+          // Expanded(
+          //   child: items.isEmpty
+          if (isOpen)
+            Expanded(
+              child: items.isEmpty
                 ? Center(
                     child: Text(
                       'No captures yet. Click "Snip" to start!',
@@ -582,6 +686,7 @@ class GallerySidebar extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

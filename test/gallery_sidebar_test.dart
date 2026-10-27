@@ -23,6 +23,37 @@ CaptureItem _item(String id, {int width = 0, int height = 0}) => CaptureItem(
   height: height,
 );
 
+// Gene - Oct, 27, 2026: Updated _pump to support testing isOpen and onToggleCollapse.
+// Old implementation:
+// Future<void> _pump(
+//   WidgetTester tester, {
+//   required SnipThemeMode mode,
+//   required List<CaptureItem> items,
+//   CaptureItem? activeItem,
+//   ValueChanged<CaptureItem>? onSelectItem,
+//   ValueChanged<CaptureItem>? onDeleteItem,
+//   double zoomScale = 1.0,
+//   ValueChanged<double>? onZoomScaleChanged,
+// }) {
+//   return tester.pumpWidget(
+//     SnipThemeScope(
+//       theme: SnipTheme.forMode(mode),
+//       child: MaterialApp(
+//         home: Scaffold(
+//           body: GallerySidebar(
+//             items: items,
+//             activeItem: activeItem,
+//             onSelectItem: onSelectItem ?? (_) {},
+//             onDeleteItem: onDeleteItem ?? (_) {},
+//             onClose: () {},
+//             zoomScale: zoomScale,
+//             onZoomScaleChanged: onZoomScaleChanged,
+//           ),
+//         ),
+//       ),
+//     ),
+//   );
+// }
 Future<void> _pump(
   WidgetTester tester, {
   required SnipThemeMode mode,
@@ -32,6 +63,8 @@ Future<void> _pump(
   ValueChanged<CaptureItem>? onDeleteItem,
   double zoomScale = 1.0,
   ValueChanged<double>? onZoomScaleChanged,
+  bool isOpen = true,
+  VoidCallback? onToggleCollapse,
 }) {
   return tester.pumpWidget(
     SnipThemeScope(
@@ -46,6 +79,8 @@ Future<void> _pump(
             onClose: () {},
             zoomScale: zoomScale,
             onZoomScaleChanged: onZoomScaleChanged,
+            isOpen: isOpen,
+            onToggleCollapse: onToggleCollapse,
           ),
         ),
       ),
@@ -243,6 +278,55 @@ void _runStateTests(SnipThemeMode mode) {
       );
       final decoration = badgeContainer.decoration as BoxDecoration;
       expect(decoration.color, t.ink, reason: '$label: badge fill');
+    },
+  );
+
+  // Gene - Oct, 27, 2026: Added tests verifying that when collapsed (isOpen: false), the gallery header bar remains visible and clicking "Screenshots" toggles it.
+  testWidgets(
+    '[$label] collapsed tray keeps header bar visible and hides thumbnail cards',
+    (tester) async {
+      final items = [_item('a'), _item('b')];
+      await _pump(tester, mode: mode, items: items, isOpen: false);
+
+      // Header bar with "Screenshots" text is still visible
+      expect(find.text('Screenshots'), findsOneWidget);
+      expect(find.byIcon(Icons.photo_library_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.keyboard_arrow_up_rounded), findsNWidgets(2)); // left chevron + right button
+
+      // Thumbnail cards are not rendered
+      expect(find.text('Capture a'), findsNothing);
+      expect(find.text('Capture b'), findsNothing);
+
+      // Gallery container height is 33 (32px header bar + 1px top border)
+      final animatedContainer = tester.widget<AnimatedContainer>(
+        find.byType(AnimatedContainer),
+      );
+      expect(animatedContainer.constraints?.maxHeight ?? 33, 33);
+    },
+  );
+
+  testWidgets(
+    '[$label] clicking the Screenshots text/icon or right toggle button triggers onToggleCollapse',
+    (tester) async {
+      int toggleCount = 0;
+      final items = [_item('a')];
+      await _pump(
+        tester,
+        mode: mode,
+        items: items,
+        isOpen: true,
+        onToggleCollapse: () => toggleCount++,
+      );
+
+      // 1. Click the "Screenshots" header text
+      await tester.tap(find.text('Screenshots'));
+      await tester.pump();
+      expect(toggleCount, 1);
+
+      // 2. Click the chevron icon button on the right
+      await tester.tap(find.byIcon(Icons.keyboard_arrow_down_rounded).last);
+      await tester.pump();
+      expect(toggleCount, 2);
     },
   );
 }
