@@ -122,8 +122,36 @@ jobs:
   # --store (Partner Center re-signs on ingestion). Download the
   # `microsoft-store-msix` artifact and upload it in Partner Center →
   # SnipSnap → Submission → Packages.
+  # msix:
+  #   name: Build Microsoft Store MSIX
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #
+  #     - uses: subosito/flutter-action@v2
+  #       with:
+  #         flutter-version: ${{ env.FLUTTER_VERSION }}
+  #         channel: stable
+  #         cache: true
+  #
+  #     - name: Install dependencies
+  #       shell: bash
+  #       run: bash scripts/ci_retry.sh flutter pub get
+  #
+  #     - name: Build Store MSIX
+  #       run: dart run msix:create --store
+  #
+  #     - name: Upload Store MSIX artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: microsoft-store-msix
+  #         path: build/windows/msix/*.msix
+  #         if-no-files-found: error
+
+  # Gene - Oct, 28, 2026: Added automated Microsoft Store CLI setup and publishing to Partner Center.
+  # Will build the MSIX and upload the artifact on every run; publishing is safely skipped until secrets are configured.
   msix:
-    name: Build Microsoft Store MSIX
+    name: Build & Publish Microsoft Store MSIX
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -147,6 +175,35 @@ jobs:
           name: microsoft-store-msix
           path: build/windows/msix/*.msix
           if-no-files-found: error
+
+      - name: Setup Microsoft Store CLI
+        if: ${{ secrets.AZURE_AD_CLIENT_SECRET != '' && secrets.STORE_PRODUCT_ID != '' }}
+        uses: microsoft/microsoft-store-apppublisher@v1
+
+      - name: Publish to Microsoft Store
+        if: ${{ secrets.AZURE_AD_CLIENT_SECRET != '' && secrets.STORE_PRODUCT_ID != '' }}
+        shell: pwsh
+        env:
+          TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+          SELLER_ID: ${{ secrets.STORE_SELLER_ID }}
+          CLIENT_ID: ${{ secrets.AZURE_AD_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.AZURE_AD_CLIENT_SECRET }}
+          PRODUCT_ID: ${{ secrets.STORE_PRODUCT_ID }}
+        run: |
+          msstore reconfigure `
+            --tenantId "$env:TENANT_ID" `
+            --sellerId "$env:SELLER_ID" `
+            --clientId "$env:CLIENT_ID" `
+            --clientSecret "$env:CLIENT_SECRET"
+
+          $msixFile = Get-ChildItem -Path "build/windows/msix/*.msix" | Select-Object -First 1
+          if (-not $msixFile) {
+            Write-Error "No MSIX file found in build/windows/msix/"
+            exit 1
+          }
+
+          Write-Host "Publishing $($msixFile.FullName) to Store Product ID: $env:PRODUCT_ID"
+          msstore publish --path "$($msixFile.FullName)" --appId "$env:PRODUCT_ID"
 
   release:
     name: Publish GitHub Release
