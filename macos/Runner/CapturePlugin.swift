@@ -801,14 +801,45 @@ private class CaptureOverlayView: NSView {
   //     addCursorRect(cancelButtonRect, cursor: .pointingHand)
   //   }
   // }
+  // Gene - Oct, 30, 2026: Switched off panoramicButtonHot tracking and cursor rect for beta testing.
+  // Old implementation:
+  // override func mouseMoved(with event: NSEvent) {
+  //   let point = convert(event.locationInWindow, from: nil)
+  //   let captureHot = !captureButtonRect.isEmpty && captureButtonRect.contains(point)
+  //   let panoramicHot = !panoramicButtonRect.isEmpty && panoramicButtonRect.contains(point)
+  //   let cancelHot = !cancelButtonRect.isEmpty && cancelButtonRect.contains(point)
+  //   if captureHot != captureButtonHot || panoramicHot != panoramicButtonHot || cancelHot != cancelButtonHot {
+  //     captureButtonHot = captureHot
+  //     panoramicButtonHot = panoramicHot
+  //     cancelButtonHot = cancelHot
+  //     needsDisplay = true
+  //   }
+  // }
+  //
+  // override func resetCursorRects() {
+  //   addCursorRect(bounds, cursor: .crosshair)
+  //
+  //   guard case .adjusting = mode, let sel = selection else { return }
+  //   addCursorRect(sel, cursor: .openHand)
+  //   for (grip, rect) in gripRects(for: sel) {
+  //     addCursorRect(rect, cursor: cursor(for: grip))
+  //   }
+  //   if !captureButtonRect.isEmpty {
+  //     addCursorRect(captureButtonRect, cursor: .pointingHand)
+  //   }
+  //   if !panoramicButtonRect.isEmpty {
+  //     addCursorRect(panoramicButtonRect, cursor: .pointingHand)
+  //   }
+  //   if !cancelButtonRect.isEmpty {
+  //     addCursorRect(cancelButtonRect, cursor: .pointingHand)
+  //   }
+  // }
   override func mouseMoved(with event: NSEvent) {
     let point = convert(event.locationInWindow, from: nil)
     let captureHot = !captureButtonRect.isEmpty && captureButtonRect.contains(point)
-    let panoramicHot = !panoramicButtonRect.isEmpty && panoramicButtonRect.contains(point)
     let cancelHot = !cancelButtonRect.isEmpty && cancelButtonRect.contains(point)
-    if captureHot != captureButtonHot || panoramicHot != panoramicButtonHot || cancelHot != cancelButtonHot {
+    if captureHot != captureButtonHot || cancelHot != cancelButtonHot {
       captureButtonHot = captureHot
-      panoramicButtonHot = panoramicHot
       cancelButtonHot = cancelHot
       needsDisplay = true
     }
@@ -824,9 +855,6 @@ private class CaptureOverlayView: NSView {
     }
     if !captureButtonRect.isEmpty {
       addCursorRect(captureButtonRect, cursor: .pointingHand)
-    }
-    if !panoramicButtonRect.isEmpty {
-      addCursorRect(panoramicButtonRect, cursor: .pointingHand)
     }
     if !cancelButtonRect.isEmpty {
       addCursorRect(cancelButtonRect, cursor: .pointingHand)
@@ -934,11 +962,13 @@ private class CaptureOverlayView: NSView {
         captureCurrentSelection()
         return
       }
-      // Gene - Oct, 27, 2026: Check click on panoramicButtonRect to trigger panoramic capture.
-      if !panoramicButtonRect.isEmpty && panoramicButtonRect.contains(point) {
-        startPanoramicCapture()
-        return
-      }
+      // Gene - Oct, 30, 2026: Switched off panoramic capture button handling in overlay for beta testing.
+      // Old implementation:
+      // // Gene - Oct, 27, 2026: Check click on panoramicButtonRect to trigger panoramic capture.
+      // if !panoramicButtonRect.isEmpty && panoramicButtonRect.contains(point) {
+      //   startPanoramicCapture()
+      //   return
+      // }
       if let grip = grip(at: point, in: sel) {
         selectionAtDragStart = sel
         mode = (grip == .body) ? .moving : .resizing(grip)
@@ -1281,14 +1311,79 @@ private class CaptureOverlayView: NSView {
     let margin: CGFloat = 8
     let controlGap: CGFloat = 7
 
-    // Panoramic button metrics
-    let panoLabel = "Panoramic"
-    let panoAttrString = NSAttributedString(string: panoLabel, attributes: attrs)
-    let panoTextSize = panoAttrString.size()
-    let panoPillW = padH * 2 + iconW + gap + panoTextSize.width
+    // Gene - Oct, 30, 2026: Switched off Panoramic button from selection overlay for beta testing.
+    // Old implementation:
+    // // Panoramic button metrics
+    // let panoLabel = "Panoramic"
+    // let panoAttrString = NSAttributedString(string: panoLabel, attributes: attrs)
+    // let panoTextSize = panoAttrString.size()
+    // let panoPillW = padH * 2 + iconW + gap + panoTextSize.width
+    //
+    // // Total width: [Capture] + [Panoramic] + [Cancel (X)]
+    // let buttonW = pillW + controlGap + panoPillW + controlGap + buttonH
+    //
+    // // Below the selection by default, above it when that would run off the
+    // // bottom, and pulled inside when the selection reaches both edges.
+    // var y = selRect.minY - buttonH - margin
+    // if y < 4 {
+    //   y = selRect.maxY + margin
+    // }
+    // if y + buttonH > bounds.height - 4 {
+    //   y = max(4, selRect.minY + margin)
+    // }
+    // var x = selRect.maxX - buttonW
+    // if x < 4 { x = 4 }
+    // if x + buttonW > bounds.width - 4 { x = bounds.width - buttonW - 4 }
+    //
+    // let block = NSRect(x: x, y: y, width: buttonW, height: buttonH)
+    // let captureRect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
+    // captureButtonRect = captureRect
+    //
+    // let panoRect = NSRect(x: block.minX + pillW + controlGap, y: block.minY, width: panoPillW, height: buttonH)
+    // panoramicButtonRect = panoRect
+    //
+    // cancelButtonRect = NSRect(
+    //   x: block.maxX - buttonH,
+    //   y: block.minY,
+    //   width: buttonH,
+    //   height: buttonH
+    // )
+    //
+    // // 1. Draw Capture button
+    // let capturePath = NSBezierPath(roundedRect: captureRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
+    // (captureButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : accent).setFill()
+    // capturePath.fill()
+    // NSColor(white: 1.0, alpha: 0.35).setStroke()
+    // capturePath.lineWidth = 1
+    // capturePath.stroke()
+    //
+    // drawCameraGlyph(
+    //   in: NSRect(x: captureRect.minX + padH, y: captureRect.midY - 5.5, width: iconW, height: 11)
+    // )
+    // attrString.draw(
+    //   at: NSPoint(x: captureRect.minX + padH + iconW + gap, y: captureRect.midY - textSize.height / 2)
+    // )
+    //
+    // // 2. Draw Panoramic button beside Capture
+    // let panoPath = NSBezierPath(roundedRect: panoRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
+    // (panoramicButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : accent).setFill()
+    // panoPath.fill()
+    // NSColor(white: 1.0, alpha: 0.35).setStroke()
+    // panoPath.lineWidth = 1
+    // panoPath.stroke()
+    //
+    // drawPanoramicGlyph(
+    //   in: NSRect(x: panoRect.minX + padH, y: panoRect.midY - 5.5, width: iconW, height: 11)
+    // )
+    // panoAttrString.draw(
+    //   at: NSPoint(x: panoRect.minX + padH + iconW + gap, y: panoRect.midY - panoTextSize.height / 2)
+    // )
+    //
+    // // 3. Draw Cancel (X) button
+    // drawCancelButton(in: cancelButtonRect, accent: accent)
 
-    // Total width: [Capture] + [Panoramic] + [Cancel (X)]
-    let buttonW = pillW + controlGap + panoPillW + controlGap + buttonH
+    // Capture and cancel are placed as one block: [Capture] + [Cancel (X)]
+    let buttonW = pillW + controlGap + buttonH
 
     // Below the selection by default, above it when that would run off the
     // bottom, and pulled inside when the selection reaches both edges.
@@ -1306,9 +1401,7 @@ private class CaptureOverlayView: NSView {
     let block = NSRect(x: x, y: y, width: buttonW, height: buttonH)
     let captureRect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
     captureButtonRect = captureRect
-
-    let panoRect = NSRect(x: block.minX + pillW + controlGap, y: block.minY, width: panoPillW, height: buttonH)
-    panoramicButtonRect = panoRect
+    panoramicButtonRect = .zero
 
     cancelButtonRect = NSRect(
       x: block.maxX - buttonH,
@@ -1332,22 +1425,7 @@ private class CaptureOverlayView: NSView {
       at: NSPoint(x: captureRect.minX + padH + iconW + gap, y: captureRect.midY - textSize.height / 2)
     )
 
-    // 2. Draw Panoramic button beside Capture
-    let panoPath = NSBezierPath(roundedRect: panoRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
-    (panoramicButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : accent).setFill()
-    panoPath.fill()
-    NSColor(white: 1.0, alpha: 0.35).setStroke()
-    panoPath.lineWidth = 1
-    panoPath.stroke()
-
-    drawPanoramicGlyph(
-      in: NSRect(x: panoRect.minX + padH, y: panoRect.midY - 5.5, width: iconW, height: 11)
-    )
-    panoAttrString.draw(
-      at: NSPoint(x: panoRect.minX + padH + iconW + gap, y: panoRect.midY - panoTextSize.height / 2)
-    )
-
-    // 3. Draw Cancel (X) button
+    // 2. Draw Cancel (X) button
     drawCancelButton(in: cancelButtonRect, accent: accent)
   }
 
