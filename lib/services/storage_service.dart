@@ -252,7 +252,9 @@ class StorageService {
                 createdAt: stat.modified,
                 width: w,
                 height: h,
-                mediaType: isVideo ? CaptureMediaType.video : CaptureMediaType.image,
+                mediaType: isVideo
+                    ? CaptureMediaType.video
+                    : CaptureMediaType.image,
               );
               items.add(newItem);
               await DatabaseService.saveCaptureToDb(newItem);

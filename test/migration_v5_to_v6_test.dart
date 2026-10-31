@@ -99,45 +99,48 @@ void main() {
     await db.close();
   });
 
-  test('v5 to v6 migration adds mediaType, durationMs, hasAudio, and thumbnailPath', () async {
-    // 1. Verify schema version upgraded to 6
-    expect(db.schemaVersion, 6);
+  test(
+    'v5 to v6 migration adds mediaType, durationMs, hasAudio, and thumbnailPath',
+    () async {
+      // 1. Verify schema version upgraded to 6
+      expect(db.schemaVersion, 6);
 
-    // 2. Load existing legacy capture; verify default values are applied
-    final items = await DatabaseService.loadCapturesFromDb();
-    expect(items.length, 1);
-    final legacy = items.single;
-    expect(legacy.id, 'legacy_snap');
-    expect(legacy.mediaType, CaptureMediaType.image);
-    expect(legacy.isImage, isTrue);
-    expect(legacy.isVideo, isFalse);
-    expect(legacy.durationMs, 0);
-    expect(legacy.hasAudio, isFalse);
-    expect(legacy.thumbnailPath, isNull);
+      // 2. Load existing legacy capture; verify default values are applied
+      final items = await DatabaseService.loadCapturesFromDb();
+      expect(items.length, 1);
+      final legacy = items.single;
+      expect(legacy.id, 'legacy_snap');
+      expect(legacy.mediaType, CaptureMediaType.image);
+      expect(legacy.isImage, isTrue);
+      expect(legacy.isVideo, isFalse);
+      expect(legacy.durationMs, 0);
+      expect(legacy.hasAudio, isFalse);
+      expect(legacy.thumbnailPath, isNull);
 
-    // 3. Save a new video capture item to verify columns accept video metadata
-    final video = CaptureItem(
-      id: 'rec_100',
-      filePath: '/tmp/rec_100.mp4',
-      title: 'Screen Recording 1',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(1710000000),
-      width: 2560,
-      height: 1440,
-      mediaType: CaptureMediaType.video,
-      durationMs: 42000,
-      hasAudio: true,
-      thumbnailPath: '/tmp/rec_100_thumb.png',
-    );
-    await DatabaseService.saveCaptureToDb(video);
+      // 3. Save a new video capture item to verify columns accept video metadata
+      final video = CaptureItem(
+        id: 'rec_100',
+        filePath: '/tmp/rec_100.mp4',
+        title: 'Screen Recording 1',
+        createdAt: DateTime.fromMillisecondsSinceEpoch(1710000000),
+        width: 2560,
+        height: 1440,
+        mediaType: CaptureMediaType.video,
+        durationMs: 42000,
+        hasAudio: true,
+        thumbnailPath: '/tmp/rec_100_thumb.png',
+      );
+      await DatabaseService.saveCaptureToDb(video);
 
-    // 4. Reload from database and verify persistence of video fields
-    final reloaded = await DatabaseService.loadCapturesFromDb();
-    expect(reloaded.length, 2);
-    final savedVideo = reloaded.firstWhere((i) => i.id == 'rec_100');
-    expect(savedVideo.mediaType, CaptureMediaType.video);
-    expect(savedVideo.isVideo, isTrue);
-    expect(savedVideo.durationMs, 42000);
-    expect(savedVideo.hasAudio, isTrue);
-    expect(savedVideo.thumbnailPath, '/tmp/rec_100_thumb.png');
-  });
+      // 4. Reload from database and verify persistence of video fields
+      final reloaded = await DatabaseService.loadCapturesFromDb();
+      expect(reloaded.length, 2);
+      final savedVideo = reloaded.firstWhere((i) => i.id == 'rec_100');
+      expect(savedVideo.mediaType, CaptureMediaType.video);
+      expect(savedVideo.isVideo, isTrue);
+      expect(savedVideo.durationMs, 42000);
+      expect(savedVideo.hasAudio, isTrue);
+      expect(savedVideo.thumbnailPath, '/tmp/rec_100_thumb.png');
+    },
+  );
 }

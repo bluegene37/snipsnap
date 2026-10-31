@@ -209,10 +209,7 @@ void main() {
       'omits Panoramic and Scrolling Capture buttons from HeaderBar and dropdown',
       (tester) async {
         await tester.pumpWidget(
-          _headerBarHarness(
-            width: 1200,
-            onSnipScrolling: () {},
-          ),
+          _headerBarHarness(width: 1200, onSnipScrolling: () {}),
         );
 
         // Header bar itself should not show Panoramic button

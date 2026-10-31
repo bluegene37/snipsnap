@@ -28,10 +28,10 @@ import 'package:flutter/services.dart';
 //     'Flatten Annotations',
 //     'Bake all annotations into background image',
 //   );
-// 
+//
 //   final String displayName;
 //   final String description;
-// 
+//
 //   const AppShortcutAction(this.displayName, this.description);
 // }
 enum AppShortcutAction {
@@ -39,10 +39,7 @@ enum AppShortcutAction {
     'Interactive Area Snip',
     'Drag rectangle to capture portion of screen',
   ),
-  scrollingSnip(
-    'Panoramic Snip',
-    'Capture scrolling content or full page',
-  ),
+  scrollingSnip('Panoramic Snip', 'Capture scrolling content or full page'),
   fullScreenSnip('Full Screen Snip', 'Capture entire desktop display'),
   timerSnip('3s Timer Snip', 'Wait 3 seconds then capture'),
   openImage('Open Image File', 'Import external image into editor'),

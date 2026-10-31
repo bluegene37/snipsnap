@@ -345,10 +345,7 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
   VoidCallback? _onScrollingDone;
   VoidCallback? _onScrollingCancel;
 
-  void setScrollingCallbacks({
-    VoidCallback? onDone,
-    VoidCallback? onCancel,
-  }) {
+  void setScrollingCallbacks({VoidCallback? onDone, VoidCallback? onCancel}) {
     _onScrollingDone = onDone;
     _onScrollingCancel = onCancel;
     _channel.setMethodCallHandler(_handleNativeMethodCall);

@@ -291,7 +291,10 @@ void _runStateTests(SnipThemeMode mode) {
       // Header bar with "Screenshots" text is still visible
       expect(find.text('Screenshots'), findsOneWidget);
       expect(find.byIcon(Icons.photo_library_rounded), findsOneWidget);
-      expect(find.byIcon(Icons.keyboard_arrow_up_rounded), findsNWidgets(2)); // left chevron + right button
+      expect(
+        find.byIcon(Icons.keyboard_arrow_up_rounded),
+        findsNWidgets(2),
+      ); // left chevron + right button
 
       // Thumbnail cards are not rendered
       expect(find.text('Capture a'), findsNothing);

@@ -364,21 +364,17 @@ void main() {
   //
   //   expect(scrolled, isTrue);
   // });
-  testWidgets('omits Panoramic capture button from HeaderBar when onSnipScrolling is provided', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1440, 700);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
+  testWidgets(
+    'omits Panoramic capture button from HeaderBar when onSnipScrolling is provided',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 700);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(
-      _harness(
-        width: 1440,
-        onSnipScrolling: () {},
-      ),
-    );
+      await tester.pumpWidget(_harness(width: 1440, onSnipScrolling: () {}));
 
-    expect(find.text('Panoramic'), findsNothing);
-    expect(find.byIcon(Icons.unfold_more_rounded), findsNothing);
-  });
+      expect(find.text('Panoramic'), findsNothing);
+      expect(find.byIcon(Icons.unfold_more_rounded), findsNothing);
+    },
+  );
 }

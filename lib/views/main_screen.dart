@@ -2855,118 +2855,117 @@ class _MainScreenState extends State<MainScreen> {
                       onToggleCollapse: () =>
                           setState(() => _isSidebarOpen = !_isSidebarOpen),
                       onSelectItem: (item) {
+                        _syncCurrentCaptureAnnotations();
+                        setState(() {
+                          // A different bitmap: nothing cached for the old one can
+                          // describe it, and the open panel is about the old one.
+                          _resetOcr();
+                          _activeCapture = item;
+                          _annotations = List.from(item.annotations);
+                          _undoStack.clear();
+                          _redoStack.clear();
+                          _stepCounter =
+                              _findMaxStepNumber(item.annotations) + 1;
+                        });
+                        DatabaseService.setSetting(
+                          'active_capture_id',
+                          item.id,
+                        );
+                        if (item.annotationsNeedConversion) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (!mounted) return;
+                            _convertActiveCaptureAnnotations();
+                          });
+                        }
+                      },
+                      onDeleteItem: (item) async {
+                        // Read before the setState below reassigns _activeCapture.
+                        final wasActive = _activeCapture?.id == item.id;
+                        if (wasActive) {
                           _syncCurrentCaptureAnnotations();
-                          setState(() {
-                            // A different bitmap: nothing cached for the old one can
-                            // describe it, and the open panel is about the old one.
+                        }
+                        setState(() {
+                          _captures.removeWhere((c) => c.id == item.id);
+                          if (_activeCapture?.id == item.id) {
                             _resetOcr();
-                            _activeCapture = item;
-                            _annotations = List.from(item.annotations);
+                            _activeCapture = _captures.isNotEmpty
+                                ? _captures.first
+                                : null;
+                            _annotations = _activeCapture != null
+                                ? List.from(_activeCapture!.annotations)
+                                : [];
                             _undoStack.clear();
                             _redoStack.clear();
-                            _stepCounter =
-                                _findMaxStepNumber(item.annotations) + 1;
-                          });
-                          DatabaseService.setSetting(
-                            'active_capture_id',
-                            item.id,
+                            _stepCounter = _activeCapture != null
+                                ? _findMaxStepNumber(_annotations) + 1
+                                : 1;
+                          }
+                        });
+                        if (_activeCapture != null) {
+                          unawaited(
+                            DatabaseService.setSetting(
+                              'active_capture_id',
+                              _activeCapture!.id,
+                            ),
                           );
-                          if (item.annotationsNeedConversion) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (!mounted) return;
-                              _convertActiveCaptureAnnotations();
-                            });
-                          }
-                        },
-                        onDeleteItem: (item) async {
-                          // Read before the setState below reassigns _activeCapture.
-                          final wasActive = _activeCapture?.id == item.id;
-                          if (wasActive) {
-                            _syncCurrentCaptureAnnotations();
-                          }
-                          setState(() {
-                            _captures.removeWhere((c) => c.id == item.id);
-                            if (_activeCapture?.id == item.id) {
-                              _resetOcr();
-                              _activeCapture = _captures.isNotEmpty
-                                  ? _captures.first
-                                  : null;
-                              _annotations = _activeCapture != null
-                                  ? List.from(_activeCapture!.annotations)
-                                  : [];
-                              _undoStack.clear();
-                              _redoStack.clear();
-                              _stepCounter = _activeCapture != null
-                                  ? _findMaxStepNumber(_annotations) + 1
-                                  : 1;
-                            }
+                        }
+                        // Deleting the active capture *promotes* the next one, which
+                        // is a selection change by any other name — so it owes the
+                        // same conversion onSelectItem schedules. Without this the
+                        // promoted capture spends the session with viewport numbers
+                        // treated as image pixels (markup at the wrong scale), and
+                        // because the save guard correctly refuses to persist it,
+                        // nothing the user draws on it is ever written.
+                        //
+                        // Gated on [wasActive] so deleting a *background* capture
+                        // does not schedule a redundant second conversion for the
+                        // unchanged active one — two in-flight runs could both pass
+                        // the flag check across the decode await and double-scale.
+                        if (wasActive &&
+                            (_activeCapture?.annotationsNeedConversion ??
+                                false)) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (!mounted) return;
+                            _convertActiveCaptureAnnotations();
                           });
-                          if (_activeCapture != null) {
-                            unawaited(
-                              DatabaseService.setSetting(
-                                'active_capture_id',
-                                _activeCapture!.id,
-                              ),
+                        }
+                        try {
+                          final file = File(item.filePath);
+                          if (file.existsSync()) {
+                            await file.delete();
+                          }
+                        } catch (_) {}
+                        // The row and its annotations, not just the file.
+                        // `saveHistory` below only rewrites the captures still in
+                        // the list; it never deletes, so without this the deleted
+                        // capture's rows lived on forever — and if the file delete
+                        // above failed (it is deliberately swallowed) the whole
+                        // capture reappeared, annotations and all, on next launch.
+                        //
+                        // Let the sync above finish first: its write is two
+                        // steps, and the delete landing between them left the
+                        // annotation rows behind without their capture.
+                        await _flushPersist();
+                        await StorageService.deleteCaptureItem(item.id);
+                        unawaited(StorageService.saveHistory(_captures));
+                      },
+                      onOpenLibraryLocation: () async {
+                        final opened = await StorageService.openLibraryFolder();
+                        if (!opened) {
+                          _showToast('Could not open screenshots folder');
+                        }
+                      },
+                      onRevealItemInFolder: (item) async {
+                        final revealed =
+                            await StorageService.revealFileInFolder(
+                              item.filePath,
                             );
-                          }
-                          // Deleting the active capture *promotes* the next one, which
-                          // is a selection change by any other name — so it owes the
-                          // same conversion onSelectItem schedules. Without this the
-                          // promoted capture spends the session with viewport numbers
-                          // treated as image pixels (markup at the wrong scale), and
-                          // because the save guard correctly refuses to persist it,
-                          // nothing the user draws on it is ever written.
-                          //
-                          // Gated on [wasActive] so deleting a *background* capture
-                          // does not schedule a redundant second conversion for the
-                          // unchanged active one — two in-flight runs could both pass
-                          // the flag check across the decode await and double-scale.
-                          if (wasActive &&
-                              (_activeCapture?.annotationsNeedConversion ??
-                                  false)) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (!mounted) return;
-                              _convertActiveCaptureAnnotations();
-                            });
-                          }
-                          try {
-                            final file = File(item.filePath);
-                            if (file.existsSync()) {
-                              await file.delete();
-                            }
-                          } catch (_) {}
-                          // The row and its annotations, not just the file.
-                          // `saveHistory` below only rewrites the captures still in
-                          // the list; it never deletes, so without this the deleted
-                          // capture's rows lived on forever — and if the file delete
-                          // above failed (it is deliberately swallowed) the whole
-                          // capture reappeared, annotations and all, on next launch.
-                          //
-                          // Let the sync above finish first: its write is two
-                          // steps, and the delete landing between them left the
-                          // annotation rows behind without their capture.
-                          await _flushPersist();
-                          await StorageService.deleteCaptureItem(item.id);
-                          unawaited(StorageService.saveHistory(_captures));
-                        },
-                        onOpenLibraryLocation: () async {
-                          final opened =
-                              await StorageService.openLibraryFolder();
-                          if (!opened) {
-                            _showToast('Could not open screenshots folder');
-                          }
-                        },
-                        onRevealItemInFolder: (item) async {
-                          final revealed =
-                              await StorageService.revealFileInFolder(
-                                item.filePath,
-                              );
-                          if (!revealed) {
-                            _showToast('Could not reveal file in folder');
-                          }
-                        },
-                        onClose: () => setState(() => _isSidebarOpen = false),
-                      ),
+                        if (!revealed) {
+                          _showToast('Could not reveal file in folder');
+                        }
+                      },
+                      onClose: () => setState(() => _isSidebarOpen = false),
+                    ),
                   ],
                 ),
               ),
