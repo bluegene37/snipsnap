@@ -88,11 +88,27 @@ void main() {
   }
 
   group('manual capture hotkeys match the real defaults', () {
+    // Gene - Nov, 03, 2026: Updated test expectation to match the new interactiveSnip default (Ctrl+Shift+X).
+    // Old implementation:
+    // test(
+    //   'Area Snip is the interactiveSnip default, not a macOS system chord',
+    //   () {
+    //     expect(
+    //       _parseChord('Cmd+Shift+1'),
+    //       expectedFor(AppShortcutAction.interactiveSnip),
+    //     );
+    //     // The bug: Cmd+Shift+4 is Apple's own area-screenshot chord.
+    //     expect(
+    //       _parseChord('Cmd+Shift+4'),
+    //       isNot(expectedFor(AppShortcutAction.interactiveSnip)),
+    //     );
+    //   },
+    // );
     test(
       'Area Snip is the interactiveSnip default, not a macOS system chord',
       () {
         expect(
-          _parseChord('Cmd+Shift+1'),
+          _parseChord('Ctrl+Shift+X'),
           expectedFor(AppShortcutAction.interactiveSnip),
         );
         // The bug: Cmd+Shift+4 is Apple's own area-screenshot chord.

@@ -34,11 +34,17 @@ class UserManualData {
           description:
               'SnipSnap makes capturing and sharing annotated visuals effortless in three simple steps:',
           steps: [
-            'Capture or Import: Press Cmd+Shift+1 (or click Area Snip) or open an existing image file from your disk.',
+            // Gene - Nov, 03, 2026: Updated Area Snip shortcut reference from Cmd+Shift+1 to Ctrl+Shift+X.
+            // Old implementation:
+            // 'Capture or Import: Press Cmd+Shift+1 (or click Area Snip) or open an existing image file from your disk.',
+            'Capture or Import: Press Ctrl+Shift+X (or click Area Snip) or open an existing image file from your disk.',
             'Annotate & Frame: Apply arrows, step markers, text callouts, shapes, blur sensitive data, or add gradient framing.',
             'Copy or Export: Press Cmd+C to copy the annotated composite directly to your clipboard, or Cmd+S to save as PNG/JPEG.',
           ],
-          shortcuts: ['Cmd+Shift+1', 'Cmd+C', 'Cmd+S'],
+          // Gene - Nov, 03, 2026: Updated Area Snip shortcut token to Ctrl+Shift+X.
+          // Old implementation:
+          // shortcuts: ['Cmd+Shift+1', 'Cmd+C', 'Cmd+S'],
+          shortcuts: ['Ctrl+Shift+X', 'Cmd+C', 'Cmd+S'],
         ),
         ManualSection(
           title: 'Canvas Zoom & Panning',
@@ -92,7 +98,10 @@ class UserManualData {
             'Release the mouse to instantly crop and import the captured area into the SnipSnap editor.',
             'Press ESC at any time to cancel the capture.',
           ],
-          shortcuts: ['Cmd+Shift+1', 'ESC'],
+          // Gene - Nov, 03, 2026: Updated Area Snip shortcut token to Ctrl+Shift+X.
+          // Old implementation:
+          // shortcuts: ['Cmd+Shift+1', 'ESC'],
+          shortcuts: ['Ctrl+Shift+X', 'ESC'],
         ),
         ManualSection(
           title: 'Full Screen Snip',
@@ -344,11 +353,17 @@ class UserManualData {
           description:
               'Trigger captures system-wide even when SnipSnap is running in the background:',
           steps: [
-            'Area Snip: Cmd + Shift + 1 (macOS) / Ctrl + Shift + 1 (Windows)',
+            // Gene - Nov, 03, 2026: Updated Area Snip global capture hotkey documentation to Ctrl + Shift + X.
+            // Old implementation:
+            // 'Area Snip: Cmd + Shift + 1 (macOS) / Ctrl + Shift + 1 (Windows)',
+            'Area Snip: Ctrl + Shift + X',
             'Full Screen Snip: Cmd + Shift + 2 (macOS) / Ctrl + Shift + 2 (Windows)',
             '3s Timer Snip: Cmd + Shift + 6 (macOS) / Ctrl + Shift + 6 (Windows)',
           ],
-          shortcuts: ['Cmd+Shift+1', 'Cmd+Shift+2', 'Cmd+Shift+6'],
+          // Gene - Nov, 03, 2026: Updated Area Snip shortcut token to Ctrl+Shift+X.
+          // Old implementation:
+          // shortcuts: ['Cmd+Shift+1', 'Cmd+Shift+2', 'Cmd+Shift+6'],
+          shortcuts: ['Ctrl+Shift+X', 'Cmd+Shift+2', 'Cmd+Shift+6'],
         ),
         ManualSection(
           title: 'Canvas Editing & History',

@@ -94,6 +94,23 @@ class CapturePlugin: NSObject {
       // relaunch, which is why the Dart side words its message that way.
       result(CGRequestScreenCaptureAccess())
 
+    // Gene - Nov, 03, 2026: Added accessibility checks and settings deep link for macOS global capture hotkeys.
+    case "accessibilityAuthorized":
+      result(AXIsProcessTrusted())
+
+    case "requestAccessibilityAccess":
+      let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+      let options = [promptKey: true] as CFDictionary
+      result(AXIsProcessTrustedWithOptions(options))
+
+    case "openAccessibilitySettings":
+      if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+        NSWorkspace.shared.open(url)
+        result(true)
+      } else {
+        result(false)
+      }
+
     // Gene - Oct, 27, 2026: Added captureRect and simulateScroll for panoramic scrolling capture.
     // Gene - Oct, 27, 2026: Updated captureRect to convert Retina pixel coordinates to Quartz points using backingScaleFactor.
     case "captureRect":

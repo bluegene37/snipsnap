@@ -854,7 +854,45 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  // Gene - Nov, 03, 2026: Preflight macOS Accessibility permissions when registering global hotkeys so users are alerted if macOS revoked permissions on update.
+  // Old implementation:
+  // Future<void> _registerGlobalHotKeys() async {
+  //   final failed = await ShortcutService.registerGlobalHotKeys(
+  //     shortcuts: _shortcuts,
+  //     onHotKeyTriggered: (action) {
+  //       final handler = _getHandlerForAction(action);
+  //       if (handler != null) {
+  //         handler();
+  //       }
+  //     },
+  //   );
+  //   // A hotkey the OS refuses is indistinguishable from a broken app: the user
+  //   // presses it and nothing happens, forever. Say so once, when it is set.
+  //   if (!mounted || failed.isEmpty) return;
+  //   final names = failed.map((a) => a.displayName).join(', ');
+  //   _showToast(
+  //     'The system already owns the shortcut for $names. '
+  //     'Pick another in Keyboard Shortcuts.',
+  //   );
+  // }
   Future<void> _registerGlobalHotKeys() async {
+    if (Platform.isMacOS) {
+      final isTrusted = await _captureService.hasAccessibilityPermission();
+      if (!isTrusted && mounted) {
+        _showToast(
+          'SnipSnap needs Accessibility access for global capture shortcuts. '
+          'If you just updated, remove SnipSnap with [-] in System Settings > Accessibility and re-add it.',
+          duration: const Duration(seconds: 10),
+          action: SnackBarAction(
+            label: 'Open Settings',
+            textColor: _theme.emphasis,
+            onPressed: () =>
+                unawaited(_captureService.openAccessibilitySettings()),
+          ),
+        );
+      }
+    }
+
     final failed = await ShortcutService.registerGlobalHotKeys(
       shortcuts: _shortcuts,
       onHotKeyTriggered: (action) {

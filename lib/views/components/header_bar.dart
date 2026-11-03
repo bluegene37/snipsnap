@@ -240,8 +240,12 @@ class HeaderBar extends StatelessWidget {
                     bottomLeft: Radius.circular(7),
                   ),
                   child: Tooltip(
+                    // Gene - Nov, 03, 2026: Updated default fallback shortcut for interactiveSnip to Ctrl+Shift+X.
+                    // Old implementation:
+                    // message:
+                    //     'Capture Area (${_shortcut(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1')})',
                     message:
-                        'Capture Area (${_shortcut(AppShortcutAction.interactiveSnip, 'Cmd+Shift+1')})',
+                        'Capture Area (${_shortcut(AppShortcutAction.interactiveSnip, 'Ctrl+Shift+X')})',
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       child: Row(
@@ -375,9 +379,15 @@ class HeaderBar extends StatelessWidget {
                     value: 'area',
                     icon: Icons.crop_free_rounded,
                     title: 'Capture Area',
+                    // Gene - Nov, 03, 2026: Updated default fallback shortcut for interactiveSnip to Ctrl+Shift+X.
+                    // Old implementation:
+                    // subtitle: _shortcut(
+                    //   AppShortcutAction.interactiveSnip,
+                    //   'Cmd+Shift+1',
+                    // ),
                     subtitle: _shortcut(
                       AppShortcutAction.interactiveSnip,
-                      'Cmd+Shift+1',
+                      'Ctrl+Shift+X',
                     ),
                   ),
                   // Gene - Oct, 27, 2026: Removed Scrolling Capture dropdown option from top left bar as requested; panoramic capture is initiated from the interactive selection overlay.

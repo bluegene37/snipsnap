@@ -155,6 +155,11 @@ void main() {
               case 'requestScreenCaptureAccess':
                 // The real call returns false until the app is relaunched.
                 return false;
+              // Gene - Nov, 03, 2026: Mock handlers for accessibility check and open settings.
+              case 'accessibilityAuthorized':
+                return authorized;
+              case 'openAccessibilitySettings':
+                return true;
             }
             return null;
           });
@@ -218,6 +223,22 @@ void main() {
       },
       skip: skipOffMacOS,
     );
+
+    // Gene - Nov, 03, 2026: Added unit tests verifying hasAccessibilityPermission and openAccessibilitySettings.
+    test('hasAccessibilityPermission: returns authorized flag from native plugin', () async {
+      authorized = true;
+      expect(await captureService.hasAccessibilityPermission(), isTrue);
+      authorized = false;
+      expect(await captureService.hasAccessibilityPermission(), isFalse);
+    }, skip: skipOffMacOS);
+
+    test('openAccessibilitySettings: invokes openAccessibilitySettings channel method', () async {
+      await captureService.openAccessibilitySettings();
+      expect(
+        methodCalls.where((c) => c.method == 'openAccessibilitySettings'),
+        hasLength(1),
+      );
+    }, skip: skipOffMacOS);
   });
 
   test('importImage copies external image into storage directory', () async {

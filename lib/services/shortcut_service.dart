@@ -1,18 +1,34 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_shortcut.dart';
 import 'database_service.dart';
 
 class ShortcutService {
+  // Gene - Nov, 03, 2026: Key used for secondary SharedPreferences backup of user shortcuts.
+  static const String _backupShortcutsKey = 'custom_shortcuts_backup_json';
+
   static final Map<AppShortcutAction, CustomShortcut> _defaults = {
+    // Gene - Nov, 03, 2026: Changed default hotkey for interactiveSnip (Area Snip) to Ctrl+Shift+X across all platforms so it overrides stock system chords.
+    // Old implementation:
+    // AppShortcutAction.interactiveSnip: CustomShortcut(
+    //   action: AppShortcutAction.interactiveSnip,
+    //   keyId: LogicalKeyboardKey.digit1.keyId,
+    //   keyLabel: '1',
+    //   meta: Platform.isMacOS,
+    //   ctrl: !Platform.isMacOS,
+    //   shift: true,
+    // ),
     AppShortcutAction.interactiveSnip: CustomShortcut(
       action: AppShortcutAction.interactiveSnip,
-      keyId: LogicalKeyboardKey.digit1.keyId,
-      keyLabel: '1',
-      meta: Platform.isMacOS,
-      ctrl: !Platform.isMacOS,
+      keyId: LogicalKeyboardKey.keyX.keyId,
+      keyLabel: 'X',
+      meta: false,
+      ctrl: true,
       shift: true,
     ),
     // Gene - Oct, 27, 2026: Added default hotkey for scrollingSnip (Panoramic Snip).
@@ -108,24 +124,98 @@ class ShortcutService {
     return Map.from(_defaults);
   }
 
+  // Gene - Nov, 03, 2026: Implemented dual-layer shortcut loading with SharedPreferences recovery.
+  // Old implementation:
+  // static Future<Map<AppShortcutAction, CustomShortcut>> loadShortcuts() async {
+  //   try {
+  //     final dbShortcuts = await DatabaseService.loadShortcutsFromDb();
+  //     final map = Map<AppShortcutAction, CustomShortcut>.from(_defaults);
+  //     if (dbShortcuts.isNotEmpty) {
+  //       map.addAll(dbShortcuts);
+  //     }
+  //     return map;
+  //   } catch (e) {
+  //     debugPrint('SnipSnap shortcut error: $e');
+  //   }
+  //   return getDefaultShortcuts();
+  // }
+  //
+  // static Future<void> saveShortcuts(
+  //   Map<AppShortcutAction, CustomShortcut> shortcuts,
+  // ) async {
+  //   await DatabaseService.saveShortcutsToDb(shortcuts);
+  // }
   static Future<Map<AppShortcutAction, CustomShortcut>> loadShortcuts() async {
+    final map = Map<AppShortcutAction, CustomShortcut>.from(_defaults);
+
+    // 1. Try loading from Drift SQLite DB
+    Map<AppShortcutAction, CustomShortcut> dbShortcuts = {};
     try {
-      final dbShortcuts = await DatabaseService.loadShortcutsFromDb();
-      final map = Map<AppShortcutAction, CustomShortcut>.from(_defaults);
-      if (dbShortcuts.isNotEmpty) {
-        map.addAll(dbShortcuts);
-      }
-      return map;
+      dbShortcuts = await DatabaseService.loadShortcutsFromDb();
     } catch (e) {
-      debugPrint('SnipSnap shortcut error: $e');
+      debugPrint('SnipSnap db shortcuts load error: $e');
     }
-    return getDefaultShortcuts();
+
+    if (dbShortcuts.isNotEmpty) {
+      map.addAll(dbShortcuts);
+      // Synchronize to SharedPreferences backup in the background
+      unawaited(_backupToPrefs(dbShortcuts));
+      return map;
+    }
+
+    // 2. If SQLite is empty or failed, attempt recovery from SharedPreferences backup
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final backupRaw = prefs.getString(_backupShortcutsKey);
+      if (backupRaw != null && backupRaw.isNotEmpty) {
+        final List<dynamic> decoded = jsonDecode(backupRaw) as List<dynamic>;
+        final restoredMap = <AppShortcutAction, CustomShortcut>{};
+        for (final item in decoded) {
+          if (item is Map<String, dynamic>) {
+            final shortcut = CustomShortcut.fromJson(item);
+            restoredMap[shortcut.action] = shortcut;
+          }
+        }
+        if (restoredMap.isNotEmpty) {
+          map.addAll(restoredMap);
+          // Restore back into Drift SQLite DB so future DB queries succeed
+          unawaited(DatabaseService.saveShortcutsToDb(map));
+          return map;
+        }
+      }
+    } catch (e) {
+      debugPrint('SnipSnap prefs shortcuts fallback error: $e');
+    }
+
+    return map;
   }
 
+  // Gene - Nov, 03, 2026: Implemented dual-layer persistence (Drift SQLite + SharedPreferences backup)
+  // ensuring custom shortcuts survive database migrations and app updates.
   static Future<void> saveShortcuts(
     Map<AppShortcutAction, CustomShortcut> shortcuts,
   ) async {
-    await DatabaseService.saveShortcutsToDb(shortcuts);
+    // 1. Save to primary Drift SQLite DB
+    try {
+      await DatabaseService.saveShortcutsToDb(shortcuts);
+    } catch (e) {
+      debugPrint('SnipSnap saveShortcutsToDb error: $e');
+    }
+
+    // 2. Save backup to SharedPreferences
+    await _backupToPrefs(shortcuts);
+  }
+
+  static Future<void> _backupToPrefs(
+    Map<AppShortcutAction, CustomShortcut> shortcuts,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final backupList = shortcuts.values.map((s) => s.toJson()).toList();
+      await prefs.setString(_backupShortcutsKey, jsonEncode(backupList));
+    } catch (e) {
+      debugPrint('SnipSnap backup to prefs error: $e');
+    }
   }
 
   /// Chords the OS claims for itself. Registering one of these succeeds

@@ -65,6 +65,44 @@ class CaptureService {
     }
   }
 
+  // Gene - Nov, 03, 2026: Added hasAccessibilityPermission to check whether global hotkeys can receive events on macOS.
+  Future<bool> hasAccessibilityPermission() async {
+    if (!Platform.isMacOS) return true;
+    try {
+      final granted =
+          await _channel.invokeMethod<bool>('accessibilityAuthorized') ?? true;
+      return granted;
+    } on MissingPluginException catch (_) {
+      return true;
+    } catch (e) {
+      debugPrint('SnipSnap accessibility check error: $e');
+      return true;
+    }
+  }
+
+  // Gene - Nov, 03, 2026: Added openAccessibilitySettings to deep-link users directly to Privacy & Security > Accessibility.
+  Future<void> openAccessibilitySettings() async {
+    if (!Platform.isMacOS) return;
+    try {
+      final opened =
+          await _channel.invokeMethod<bool>('openAccessibilitySettings') ??
+          false;
+      if (!opened) {
+        await Process.run('open', [
+          'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+        ]);
+      }
+    } catch (e) {
+      try {
+        await Process.run('open', [
+          'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+        ]);
+      } catch (e2) {
+        debugPrint('SnipSnap could not open Accessibility settings: $e2');
+      }
+    }
+  }
+
   /// Opens System Settings on the Screen Recording pane (macOS only).
   ///
   /// Deep link rather than the generic Privacy pane so the user lands on the

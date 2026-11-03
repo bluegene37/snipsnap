@@ -3620,11 +3620,19 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 // ),
                 // Gene - Oct, 14, 2026: Made empty state shortcut pills platform-aware
                 // (Cmd on macOS, Ctrl on Windows and Linux).
+                // Gene - Nov, 03, 2026: Updated Snip Area empty state shortcut pill to Ctrl+Shift+X across all platforms.
+                // Old implementation:
+                // _emptyStatePill(
+                //   t,
+                //   Icons.crop_free_rounded,
+                //   'Snip Area',
+                //   Platform.isMacOS ? 'Cmd+Shift+1' : 'Ctrl+Shift+X',
+                // ),
                 _emptyStatePill(
                   t,
                   Icons.crop_free_rounded,
                   'Snip Area',
-                  Platform.isMacOS ? 'Cmd+Shift+1' : 'Ctrl+Shift+X',
+                  'Ctrl+Shift+X',
                 ),
                 const SizedBox(width: 8),
                 _emptyStatePill(
