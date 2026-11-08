@@ -202,8 +202,15 @@ class ShortcutService {
         }
         if (restoredMap.isNotEmpty) {
           map.addAll(restoredMap);
-          // Restore back into Drift SQLite DB so future DB queries succeed
-          unawaited(DatabaseService.saveShortcutsToDb(map));
+          // Gene - Nov, 09, 2026: Catch errors on background DB restore so an unavailable database never triggers an unhandled async exception.
+          // Old implementation:
+          // // Restore back into Drift SQLite DB so future DB queries succeed
+          // unawaited(DatabaseService.saveShortcutsToDb(map));
+          unawaited(
+            DatabaseService.saveShortcutsToDb(map).catchError((Object e) {
+              debugPrint('SnipSnap restoreShortcutsToDb error: $e');
+            }),
+          );
           return map;
         }
       }

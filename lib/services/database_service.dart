@@ -211,14 +211,34 @@ class DatabaseService {
     await db.saveAllShortcuts(companions);
   }
 
+  // Gene - Nov, 09, 2026: Guarded setSetting and getSetting with try/catch so fire-and-forget preference reads/writes never throw unhandled async exceptions.
+  // Old implementation:
+  // /// Save app setting to Drift SQLite DB
+  // static Future<void> setSetting(String key, String value) async {
+  //   await db.setSetting(key, value);
+  // }
+  //
+  // /// Get app setting from Drift SQLite DB
+  // static Future<String?> getSetting(String key) async {
+  //   return await db.getSetting(key);
+  // }
   /// Save app setting to Drift SQLite DB
   static Future<void> setSetting(String key, String value) async {
-    await db.setSetting(key, value);
+    try {
+      await db.setSetting(key, value);
+    } catch (e) {
+      debugPrint('SnipSnap DB setSetting($key) error: $e');
+    }
   }
 
   /// Get app setting from Drift SQLite DB
   static Future<String?> getSetting(String key) async {
-    return await db.getSetting(key);
+    try {
+      return await db.getSetting(key);
+    } catch (e) {
+      debugPrint('SnipSnap DB getSetting($key) error: $e');
+      return null;
+    }
   }
 
   /// Tool names written by older builds, before the separate rectangle and

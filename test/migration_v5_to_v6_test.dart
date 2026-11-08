@@ -1,10 +1,12 @@
 // Gene - Oct, 27, 2026: Migration test verifying upgrading SQLite schema from v5 to v6 adds video recording columns to captures.
 
+import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/database/app_database.dart';
 import 'package:snipsnap/models/capture_item.dart';
 import 'package:snipsnap/services/database_service.dart';
+import 'package:sqlite3/sqlite3.dart' as sql;
 
 const _v5Captures = '''
 CREATE TABLE captures (
@@ -141,6 +143,105 @@ void main() {
       expect(savedVideo.durationMs, 42000);
       expect(savedVideo.hasAudio, isTrue);
       expect(savedVideo.thumbnailPath, '/tmp/rec_100_thumb.png');
+    },
+  );
+
+  // Gene - Nov, 09, 2026: Regression test verifying idempotent v5->v6 migration when columns already exist at user_version 5.
+  test(
+    'v5 to v6 migration is idempotent when captures already has v6 columns at user_version 5',
+    () async {
+      await db.close();
+      db = AppDatabase(
+        NativeDatabase.memory(
+          setup: (raw) {
+            raw.execute('''
+CREATE TABLE captures (
+  id TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  title TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  width INTEGER NOT NULL DEFAULT 0,
+  height INTEGER NOT NULL DEFAULT 0,
+  tags TEXT NULL,
+  media_type TEXT NOT NULL DEFAULT 'image',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  has_audio INTEGER NOT NULL DEFAULT 0 CHECK ("has_audio" IN (0, 1)),
+  thumbnail_path TEXT NULL,
+  PRIMARY KEY (id)
+);
+''');
+            raw.execute(_v5Annotations);
+            raw.execute(_v5Shortcuts);
+            raw.execute(_v5AppSettings);
+            raw.execute('''
+INSERT INTO captures (id, file_path, title, created_at, width, height, media_type, duration_ms, has_audio)
+VALUES ('existing_snap', '/tmp/existing.png', 'Existing Snap', 1700000000, 1920, 1080, 'image', 0, 0);
+''');
+            raw.execute('PRAGMA user_version = 5;');
+          },
+        ),
+      );
+
+      DatabaseService.db = db;
+      final items = await DatabaseService.loadCapturesFromDb();
+      expect(items.length, 1);
+      expect(items.single.id, 'existing_snap');
+      expect(items.single.mediaType, CaptureMediaType.image);
+    },
+  );
+
+  // Gene - Nov, 09, 2026: Verify idempotent migration over NativeDatabase.createInBackground (background isolate).
+  test(
+    'v5 to v6 migration succeeds over NativeDatabase.createInBackground when columns already exist',
+    () async {
+      await db.close();
+      final tempDir = await Directory.systemTemp.createTemp('snipsnap_mig_v6_');
+      addTearDown(() async {
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+        }
+      });
+      final dbFile = File('${tempDir.path}/snipsnap_local.sqlite');
+      final raw = sql.sqlite3.open(dbFile.path);
+      raw.execute('''
+CREATE TABLE captures (
+  id TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  title TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  width INTEGER NOT NULL DEFAULT 0,
+  height INTEGER NOT NULL DEFAULT 0,
+  tags TEXT NULL,
+  media_type TEXT NOT NULL DEFAULT 'image',
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  has_audio INTEGER NOT NULL DEFAULT 0 CHECK ("has_audio" IN (0, 1)),
+  thumbnail_path TEXT NULL,
+  PRIMARY KEY (id)
+);
+''');
+      raw.execute(_v5Annotations);
+      raw.execute(_v5Shortcuts);
+      raw.execute(_v5AppSettings);
+      raw.execute('''
+INSERT INTO captures (id, file_path, title, created_at, width, height, media_type, duration_ms, has_audio)
+VALUES ('bg_snap', '/tmp/bg.png', 'Background Snap', 1700000000, 1920, 1080, 'image', 0, 0);
+''');
+      raw.execute('PRAGMA user_version = 5;');
+      raw.close();
+
+      db = AppDatabase(NativeDatabase.createInBackground(dbFile));
+      DatabaseService.db = db;
+
+      // Fire concurrent queries like MainScreen.initState does on startup
+      final results = await Future.wait([
+        DatabaseService.loadShortcutsFromDb(),
+        DatabaseService.loadCapturesFromDb(),
+        DatabaseService.getSetting('theme_mode'),
+      ]);
+
+      final captures = results[1] as List<CaptureItem>;
+      expect(captures.length, 1);
+      expect(captures.single.id, 'bg_snap');
     },
   );
 }

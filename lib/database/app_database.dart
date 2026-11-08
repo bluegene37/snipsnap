@@ -105,33 +105,80 @@ class AppDatabase extends _$AppDatabase {
   @override
   int get schemaVersion => 6;
 
+  // Gene - Nov, 09, 2026: Made schema migrations idempotent by checking PRAGMA table_info before calling m.addColumn, preventing "duplicate column name" crashes when a column already exists prior to user_version bump.
+  // Old implementation:
+  // @override
+  // MigrationStrategy get migration {
+  //   return MigrationStrategy(
+  //     onUpgrade: (m, from, to) async {
+  //       if (from < 2) {
+  //         await m.addColumn(annotations, annotations.startX);
+  //         await m.addColumn(annotations, annotations.startY);
+  //         await m.addColumn(annotations, annotations.endX);
+  //         await m.addColumn(annotations, annotations.endY);
+  //         await m.addColumn(annotations, annotations.opacity);
+  //       }
+  //       if (from < 3) {
+  //         await m.addColumn(annotations, annotations.propsJson);
+  //         await m.addColumn(annotations, annotations.zIndex);
+  //       }
+  //       if (from < 4) {
+  //         await m.addColumn(annotations, annotations.coordSpace);
+  //       }
+  //       if (from < 5) {
+  //         await m.addColumn(annotations, annotations.patchBytes);
+  //       }
+  //       // Gene - Oct, 27, 2026: Added migration for v6 schema adding mediaType, durationMs, hasAudio, and thumbnailPath to captures.
+  //       if (from < 6) {
+  //         await m.addColumn(captures, captures.mediaType);
+  //         await m.addColumn(captures, captures.durationMs);
+  //         await m.addColumn(captures, captures.hasAudio);
+  //         await m.addColumn(captures, captures.thumbnailPath);
+  //       }
+  //     },
+  //   );
+  // }
+  Future<void> _addColumnIfNotExists(
+    Migrator m,
+    TableInfo<Table, Object?> table,
+    GeneratedColumn<Object> column,
+  ) async {
+    final rows = await customSelect(
+      'PRAGMA table_info("${table.actualTableName}");',
+    ).get();
+    final exists = rows.any((row) => row.read<String>('name') == column.name);
+    if (!exists) {
+      await m.addColumn(table, column);
+    }
+  }
+
   @override
   MigrationStrategy get migration {
     return MigrationStrategy(
       onUpgrade: (m, from, to) async {
         if (from < 2) {
-          await m.addColumn(annotations, annotations.startX);
-          await m.addColumn(annotations, annotations.startY);
-          await m.addColumn(annotations, annotations.endX);
-          await m.addColumn(annotations, annotations.endY);
-          await m.addColumn(annotations, annotations.opacity);
+          await _addColumnIfNotExists(m, annotations, annotations.startX);
+          await _addColumnIfNotExists(m, annotations, annotations.startY);
+          await _addColumnIfNotExists(m, annotations, annotations.endX);
+          await _addColumnIfNotExists(m, annotations, annotations.endY);
+          await _addColumnIfNotExists(m, annotations, annotations.opacity);
         }
         if (from < 3) {
-          await m.addColumn(annotations, annotations.propsJson);
-          await m.addColumn(annotations, annotations.zIndex);
+          await _addColumnIfNotExists(m, annotations, annotations.propsJson);
+          await _addColumnIfNotExists(m, annotations, annotations.zIndex);
         }
         if (from < 4) {
-          await m.addColumn(annotations, annotations.coordSpace);
+          await _addColumnIfNotExists(m, annotations, annotations.coordSpace);
         }
         if (from < 5) {
-          await m.addColumn(annotations, annotations.patchBytes);
+          await _addColumnIfNotExists(m, annotations, annotations.patchBytes);
         }
         // Gene - Oct, 27, 2026: Added migration for v6 schema adding mediaType, durationMs, hasAudio, and thumbnailPath to captures.
         if (from < 6) {
-          await m.addColumn(captures, captures.mediaType);
-          await m.addColumn(captures, captures.durationMs);
-          await m.addColumn(captures, captures.hasAudio);
-          await m.addColumn(captures, captures.thumbnailPath);
+          await _addColumnIfNotExists(m, captures, captures.mediaType);
+          await _addColumnIfNotExists(m, captures, captures.durationMs);
+          await _addColumnIfNotExists(m, captures, captures.hasAudio);
+          await _addColumnIfNotExists(m, captures, captures.thumbnailPath);
         }
       },
     );
