@@ -30,9 +30,12 @@ import '../services/pdf_export_service.dart';
 // import '../services/scrolling/scrolling_capture_controller.dart';
 // import 'capture/scrolling_capture_hud.dart';
 import '../services/update/update_controller.dart';
+// Gene - Nov, 08, 2026: Added ScreenRecordingController, ImageHeaderParser, and VideoCapturePlayerView imports.
+import '../services/screen_recording_controller.dart';
 import '../utils/canvas_projection.dart';
 import '../utils/constants.dart';
 import '../utils/image_eviction.dart';
+import '../utils/image_header_parser.dart';
 import '../utils/image_operations.dart';
 import '../utils/snip_theme.dart';
 import 'components/canvas_busy_overlay.dart';
@@ -47,6 +50,7 @@ import 'dialogs/shortcut_settings_dialog.dart';
 import 'dialogs/user_manual_dialog.dart';
 import 'editor_canvas.dart';
 import 'gallery_sidebar.dart';
+import 'video_capture_player_view.dart';
 
 /// Builds the root [ColorScheme] entirely from [t]'s tokens, filling every
 /// M3 colour role explicitly rather than deriving one from a seed colour.
@@ -527,9 +531,22 @@ class _MainScreenState extends State<MainScreen> {
   /// Scaffold (startup check + dialog) and the header's check button.
   final UpdateController _updateController = UpdateController();
 
+  // Gene - Nov, 08, 2026: Added ScreenRecordingController and auto-copy after capture preference.
+  late final ScreenRecordingController _recordingController;
+  bool _autoCopyAfterCapture = false;
+
   @override
   void initState() {
     super.initState();
+    _recordingController = ScreenRecordingController(
+      captureService: _captureService,
+      onRecordingCompleted: _handleRecordingCompleted,
+      onRecordingCancelled: () {
+        if (mounted) _showToast('Screen recording cancelled');
+      },
+    )..addListener(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _lifecycleListener = AppLifecycleListener(
@@ -543,6 +560,7 @@ class _MainScreenState extends State<MainScreen> {
     _loadShortcuts();
     _loadHistory();
     _loadThemePreference();
+    _loadAutoCopyPreference();
     _loadSavedColors();
     // Gene - Oct, 30, 2026: Disabled native panoramic HUD callbacks for beta testing.
     // Old implementation:
@@ -600,6 +618,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    _recordingController.dispose();
     _updateController.dispose();
     // Gene - Oct, 30, 2026: Commented out scrolling controller disposal while switched off for beta testing.
     // Old implementation:
@@ -629,6 +648,31 @@ class _MainScreenState extends State<MainScreen> {
         _darkMode = pref == 'dark';
       });
     }
+  }
+
+  // Gene - Nov, 08, 2026: Load and toggle auto-copy after capture preference.
+  Future<void> _loadAutoCopyPreference() async {
+    final pref = await DatabaseService.getSetting('auto_copy_after_capture');
+    if (pref != null && mounted) {
+      setState(() {
+        _autoCopyAfterCapture = pref == 'true';
+      });
+    }
+  }
+
+  void _toggleAutoCopyAfterCapture() {
+    setState(() {
+      _autoCopyAfterCapture = !_autoCopyAfterCapture;
+    });
+    DatabaseService.setSetting(
+      'auto_copy_after_capture',
+      _autoCopyAfterCapture ? 'true' : 'false',
+    );
+    _showToast(
+      _autoCopyAfterCapture
+          ? 'Auto-copy after capture enabled'
+          : 'Auto-copy after capture disabled',
+    );
   }
 
   void _toggleThemeMode() {
@@ -793,14 +837,22 @@ class _MainScreenState extends State<MainScreen> {
     // common case for existing installs. Decode once to recover them.
     if (!capture.hasDimensions) {
       try {
-        final decoded = await compute(
-          img.decodeImage,
-          await File(capture.filePath).readAsBytes(),
-        );
-        if (decoded == null) return;
+        // Gene - Nov, 08, 2026: Use fast header parser instead of full image decode.
+        // Old implementation:
+        // final decoded = await compute(
+        //   img.decodeImage,
+        //   await File(capture.filePath).readAsBytes(),
+        // );
+        // if (decoded == null) return;
+        // capture = capture.copyWith(
+        //   width: decoded.width,
+        //   height: decoded.height,
+        // );
+        final dims = await ImageHeaderParser.readDimensions(capture.filePath);
+        if (dims == null) return;
         capture = capture.copyWith(
-          width: decoded.width,
-          height: decoded.height,
+          width: dims.width,
+          height: dims.height,
         );
       } catch (e) {
         debugPrint('SnipSnap legacy dimension read error: $e');
@@ -1004,6 +1056,37 @@ class _MainScreenState extends State<MainScreen> {
   //       return _annotations.isNotEmpty ? _handleFlattenCanvas : null;
   //   }
   // }
+  // Gene - Nov, 08, 2026: Added handlers for recordArea, recordFullScreen, and pasteImage shortcuts.
+  // Old implementation:
+  // VoidCallback? _getHandlerForAction(AppShortcutAction action) {
+  //   switch (action) {
+  //     case AppShortcutAction.interactiveSnip:
+  //       return _handleInteractiveCapture;
+  //     case AppShortcutAction.scrollingSnip:
+  //       // Panoramic capture switched off for beta testing.
+  //       return null;
+  //     case AppShortcutAction.fullScreenSnip:
+  //       return _handleFullScreenCapture;
+  //     case AppShortcutAction.timerSnip:
+  //       return _handleTimerCapture;
+  //     case AppShortcutAction.openImage:
+  //       return _handleImportImage;
+  //     case AppShortcutAction.copyToClipboard:
+  //       return _handleCopyToClipboard;
+  //     case AppShortcutAction.saveAs:
+  //       return _handleSaveAs;
+  //     case AppShortcutAction.undo:
+  //       return _undoStack.isNotEmpty ? _undo : null;
+  //     case AppShortcutAction.redo:
+  //       return _redoStack.isNotEmpty ? _redo : null;
+  //     case AppShortcutAction.clearAnnotations:
+  //       return _annotations.isNotEmpty ? _clearAnnotations : null;
+  //     case AppShortcutAction.toggleHistory:
+  //       return () => setState(() => _isSidebarOpen = !_isSidebarOpen);
+  //     case AppShortcutAction.flattenCanvas:
+  //       return _annotations.isNotEmpty ? _handleFlattenCanvas : null;
+  //   }
+  // }
   VoidCallback? _getHandlerForAction(AppShortcutAction action) {
     switch (action) {
       case AppShortcutAction.interactiveSnip:
@@ -1015,8 +1098,14 @@ class _MainScreenState extends State<MainScreen> {
         return _handleFullScreenCapture;
       case AppShortcutAction.timerSnip:
         return _handleTimerCapture;
+      case AppShortcutAction.recordArea:
+        return _handleRecordArea;
+      case AppShortcutAction.recordFullScreen:
+        return _handleRecordFullScreen;
       case AppShortcutAction.openImage:
         return _handleImportImage;
+      case AppShortcutAction.pasteImage:
+        return _handlePasteFromClipboard;
       case AppShortcutAction.copyToClipboard:
         return _handleCopyToClipboard;
       case AppShortcutAction.saveAs:
@@ -1590,6 +1679,21 @@ class _MainScreenState extends State<MainScreen> {
   //     await _addCaptureFromPath(path);
   //   }
   // }
+  // Gene - Nov, 08, 2026: Support interactive overlay returning "record:x:y:w:h" when Record button is clicked.
+  // Old implementation:
+  // Future<void> _handleInteractiveCapture() async {
+  //   if (!await _ensureCapturePermission()) return;
+  //   setState(() => _isCapturing = true);
+  //   final path = await _captureService.captureInteractive();
+  //   setState(() => _isCapturing = false);
+  //   if (path != null) {
+  //     if (path.startsWith('scrolling:')) {
+  //       // Panoramic capture switched off for beta testing.
+  //       return;
+  //     }
+  //     await _addCaptureFromPath(path);
+  //   }
+  // }
   Future<void> _handleInteractiveCapture() async {
     if (!await _ensureCapturePermission()) return;
     setState(() => _isCapturing = true);
@@ -1600,8 +1704,225 @@ class _MainScreenState extends State<MainScreen> {
         // Panoramic capture switched off for beta testing.
         return;
       }
+      if (path.startsWith('record:')) {
+        await _startRecordingFromOverlayString(path);
+        return;
+      }
       await _addCaptureFromPath(path);
     }
+  }
+
+  // Gene - Nov, 08, 2026: Added whole-screen & selected-area screen recording handlers, clipboard paste, video frame extraction, video trimming, and gallery rename.
+  Future<void> _startRecordingFromOverlayString(String recordSpec) async {
+    final parts = recordSpec.substring('record:'.length).split(':');
+    if (parts.length == 4) {
+      final x = double.tryParse(parts[0]) ?? 0.0;
+      final y = double.tryParse(parts[1]) ?? 0.0;
+      final w = double.tryParse(parts[2]) ?? 0.0;
+      final h = double.tryParse(parts[3]) ?? 0.0;
+      if (w <= 4 || h <= 4) {
+        final started = await _recordingController.startFullScreenRecording();
+        if (!started && mounted) {
+          _showToast('Could not start full screen recording');
+        }
+      } else {
+        final started = await _recordingController.startAreaRecording(
+          Rect.fromLTWH(x, y, w, h),
+        );
+        if (!started && mounted) {
+          _showToast('Could not start area screen recording');
+        }
+      }
+    }
+  }
+
+  Future<void> _handleRecordArea() async {
+    if (_recordingController.isRecording) {
+      await _recordingController.stopRecording();
+      return;
+    }
+    if (!await _ensureCapturePermission()) return;
+    setState(() => _isCapturing = true);
+    final path = await _captureService.captureInteractive(
+      initialMode: 'record',
+    );
+    setState(() => _isCapturing = false);
+    if (path != null) {
+      if (path.startsWith('record:')) {
+        await _startRecordingFromOverlayString(path);
+      } else if (!path.startsWith('scrolling:')) {
+        await _addCaptureFromPath(path);
+      }
+    }
+  }
+
+  Future<void> _handleRecordFullScreen() async {
+    if (_recordingController.isRecording) {
+      await _recordingController.stopRecording();
+      return;
+    }
+    if (!await _ensureCapturePermission()) return;
+    final started = await _recordingController.startFullScreenRecording();
+    if (!started && mounted) {
+      _showToast('Could not start full screen recording');
+    }
+  }
+
+  void _handleRecordingCompleted(ScreenRecordingResult result) {
+    if (!mounted) return;
+    _syncCurrentCaptureAnnotations();
+    final now = DateTime.now();
+    final newItem = result.toCaptureItem(
+      customTitle:
+          'Rec ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}',
+    );
+    setState(() {
+      _resetOcr();
+      _captures.insert(0, newItem);
+      _activeCapture = newItem;
+      _annotations = [];
+      _undoStack.clear();
+      _redoStack.clear();
+      _stepCounter = 1;
+    });
+    unawaited(StorageService.saveHistory(_captures));
+    unawaited(DatabaseService.setSetting('active_capture_id', newItem.id));
+    final secs = (result.durationMs / 1000).toStringAsFixed(1);
+    _showToast('Saved screen recording (${secs}s)');
+    if (_autoCopyAfterCapture) {
+      unawaited(ClipboardService.copyFileToClipboard(newItem.filePath));
+    }
+  }
+
+  Future<void> _handlePasteFromClipboard() async {
+    final targetPath = await _captureService.generateNewMediaPath(
+      prefix: 'paste',
+      extension: 'png',
+    );
+    final savedPath = await ClipboardService.pasteImageFromClipboard(
+      targetPath,
+    );
+    if (savedPath == null || !File(savedPath).existsSync()) {
+      _showToast('No image found on clipboard');
+      return;
+    }
+    await _addCaptureFromPath(savedPath);
+    _showToast('Pasted image from clipboard');
+  }
+
+  Future<void> _handleGrabVideoFrame(int timestampMs) async {
+    final capture = _activeCapture;
+    if (capture == null || !capture.isVideo) return;
+    await _runBusy('Extracting video frame\u2026', () async {
+      final targetPath = await _captureService.generateNewMediaPath(
+        prefix: 'frame',
+        extension: 'png',
+      );
+      final savedPath = await _captureService.extractVideoFrame(
+        videoPath: capture.filePath,
+        targetPath: targetPath,
+        timestampMs: timestampMs,
+      );
+      if (savedPath != null && File(savedPath).existsSync()) {
+        await _addCaptureFromPath(savedPath);
+        _showToast('Extracted frame as screenshot! Ready for markup.');
+      } else if (mounted &&
+          capture.thumbnailPath != null &&
+          File(capture.thumbnailPath!).existsSync()) {
+        // Fallback to copying thumbnail if native frame grab at arbitrary timestamp is unavailable
+        await File(capture.thumbnailPath!).copy(targetPath);
+        await _addCaptureFromPath(targetPath);
+        _showToast('Extracted frame as screenshot!');
+      } else {
+        _showToast('Could not extract frame from video');
+      }
+    });
+  }
+
+  Future<void> _handleTrimVideo(int startMs, int endMs) async {
+    final capture = _activeCapture;
+    if (capture == null || !capture.isVideo) return;
+    if (endMs <= startMs + 200) {
+      _showToast('Trimmed range must be at least 0.2 seconds');
+      return;
+    }
+    await _runBusy('Trimming video\u2026', () async {
+      final targetPath = await _captureService.generateNewMediaPath(
+        prefix: 'rec_trim',
+        extension: 'mp4',
+      );
+      final thumbPath = await _captureService.generateNewMediaPath(
+        prefix: 'rec_thumb',
+        extension: 'png',
+      );
+      final savedPath = await _captureService.trimVideo(
+        videoPath: capture.filePath,
+        targetPath: targetPath,
+        startMs: startMs,
+        endMs: endMs,
+      );
+      if (savedPath != null && File(savedPath).existsSync()) {
+        await _captureService.extractVideoFrame(
+          videoPath: savedPath,
+          targetPath: thumbPath,
+          timestampMs: 0,
+        );
+        final durationMs = endMs - startMs;
+        final result = ScreenRecordingResult(
+          filePath: savedPath,
+          thumbnailPath: File(thumbPath).existsSync()
+              ? thumbPath
+              : capture.thumbnailPath,
+          durationMs: durationMs,
+          width: capture.width,
+          height: capture.height,
+          hasAudio: capture.hasAudio,
+        );
+        _handleRecordingCompleted(result);
+      } else {
+        _showToast('Failed to trim video clip');
+      }
+    });
+  }
+
+  Future<void> _handleSaveVideoAs() async {
+    final capture = _activeCapture;
+    if (capture == null || !capture.isVideo) return;
+    try {
+      final sanitized = capture.title
+          .replaceAll(RegExp(r'[^\w\s\-]'), '_')
+          .trim();
+      final videoBytes = await File(capture.filePath).readAsBytes();
+      final savedUri = await FilePicker.saveFile(
+        dialogTitle: 'Save Video Recording As',
+        fileName: '${sanitized.isEmpty ? 'recording' : sanitized}.mp4',
+        bytes: videoBytes,
+      );
+      if (savedUri != null) {
+        final finalPath = savedUri.toFilePath();
+        _showToast('Saved video to: ${p.basename(finalPath)}');
+      }
+    } catch (e) {
+      debugPrint('SnipSnap save video error: $e');
+      _showToast('Failed to save video file');
+    }
+  }
+
+  void _handleRenameCaptureItem(CaptureItem item, String newTitle) {
+    final trimmed = newTitle.trim();
+    if (trimmed.isEmpty || trimmed == item.title) return;
+    final updated = item.copyWith(title: trimmed);
+    setState(() {
+      final idx = _captures.indexWhere((c) => c.id == item.id);
+      if (idx != -1) {
+        _captures[idx] = updated;
+      }
+      if (_activeCapture?.id == item.id) {
+        _activeCapture = updated;
+      }
+    });
+    unawaited(StorageService.saveCaptureItem(updated));
+    _showToast('Renamed to "$trimmed"');
   }
 
   Future<void> _handleFullScreenCapture() async {
@@ -1788,13 +2109,20 @@ class _MainScreenState extends State<MainScreen> {
     int width = 0;
     int height = 0;
     try {
-      final decoded = await compute(
-        img.decodeImage,
-        await File(path).readAsBytes(),
-      );
-      if (decoded != null) {
-        width = decoded.width;
-        height = decoded.height;
+      // Gene - Nov, 08, 2026: Use fast ImageHeaderParser instead of full image decode on capture addition.
+      // Old implementation:
+      // final decoded = await compute(
+      //   img.decodeImage,
+      //   await File(path).readAsBytes(),
+      // );
+      // if (decoded != null) {
+      //   width = decoded.width;
+      //   height = decoded.height;
+      // }
+      final dims = await ImageHeaderParser.readDimensions(path);
+      if (dims != null) {
+        width = dims.width;
+        height = dims.height;
       }
     } catch (e) {
       debugPrint('SnipSnap dimension read error: $e');
@@ -1824,6 +2152,9 @@ class _MainScreenState extends State<MainScreen> {
     // and blocking on SQLite here would stall the frame that shows it.
     unawaited(StorageService.saveHistory(_captures));
     unawaited(DatabaseService.setSetting('active_capture_id', newItem.id));
+    if (_autoCopyAfterCapture) {
+      unawaited(ClipboardService.copyImageToClipboard(path));
+    }
   }
 
   /// Size of the editor canvas the annotations were laid out against, or
@@ -1949,17 +2280,61 @@ class _MainScreenState extends State<MainScreen> {
     return null;
   }
 
+  // Gene - Nov, 08, 2026: Fast clipboard copy supporting video files, un-annotated image fast path, and direct byte copy.
+  // Old implementation:
+  // Future<void> _handleCopyToClipboard() async {
+  //   if (_activeCapture == null) {
+  //     _showToast('No screenshot to copy!');
+  //     return;
+  //   }
+  //
+  //   await _runBusy('Copying\u2026', () async {
+  //     final bytes = await _renderAnnotatedBytes();
+  //     if (bytes != null) {
+  //       final tempPath = await StorageService.saveTempImage(bytes);
+  //       final success = await ClipboardService.copyImageToClipboard(tempPath);
+  //       if (success) {
+  //         _showToast('Copied screenshot to clipboard!');
+  //       } else {
+  //         _showToast('Failed to copy image');
+  //       }
+  //     }
+  //   });
+  // }
   Future<void> _handleCopyToClipboard() async {
-    if (_activeCapture == null) {
-      _showToast('No screenshot to copy!');
+    final capture = _activeCapture;
+    if (capture == null) {
+      _showToast('No capture to copy!');
+      return;
+    }
+
+    if (capture.isVideo) {
+      final success = await ClipboardService.copyFileToClipboard(
+        capture.filePath,
+      );
+      _showToast(
+        success
+            ? 'Copied MP4 video file to clipboard!'
+            : 'Failed to copy video file',
+      );
+      return;
+    }
+
+    // Fast path: when there are no annotations, copy directly from the existing PNG file without re-rendering or temp file I/O.
+    if (_annotations.isEmpty && File(capture.filePath).existsSync()) {
+      final success = await ClipboardService.copyImageToClipboard(
+        capture.filePath,
+      );
+      _showToast(
+        success ? 'Copied screenshot to clipboard!' : 'Failed to copy image',
+      );
       return;
     }
 
     await _runBusy('Copying\u2026', () async {
       final bytes = await _renderAnnotatedBytes();
       if (bytes != null) {
-        final tempPath = await StorageService.saveTempImage(bytes);
-        final success = await ClipboardService.copyImageToClipboard(tempPath);
+        final success = await ClipboardService.copyImageBytesToClipboard(bytes);
         if (success) {
           _showToast('Copied screenshot to clipboard!');
         } else {
@@ -1978,6 +2353,11 @@ class _MainScreenState extends State<MainScreen> {
     final capture = _activeCapture;
     if (capture == null) {
       _showToast('No screenshot to save!');
+      return;
+    }
+    // Gene - Nov, 08, 2026: Delegate video recordings to _handleSaveVideoAs().
+    if (capture.isVideo) {
+      await _handleSaveVideoAs();
       return;
     }
 
@@ -2189,14 +2569,83 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  // Gene - Nov, 08, 2026: Accelerated _handleApplyCrop using single-pass GPU RenderService.renderCroppedOrExpandedPng with fallback.
+  // Old implementation:
+  // Future<void> _handleApplyCrop(Rect cropRect) async {
+  //   final capture = _activeCapture;
+  //   if (capture == null || !File(capture.filePath).existsSync()) return;
+  //   if (_blockedByPendingConversion('crop')) return;
+  //
+  //   await _runBusy('Cropping\u2026', () async {
+  //     try {
+  //       final canvasSize = _canvasSize;
+  //       final originalBytes = await File(capture.filePath).readAsBytes();
+  //       await _pushUndoState(imageBytes: originalBytes);
+  //       final sourceBytes = _annotations.isEmpty
+  //           ? originalBytes
+  //           : (await _renderAnnotatedBytes() ?? originalBytes);
+  //       final decoded = await compute(img.decodeImage, sourceBytes);
+  //       if (decoded == null) return;
+  //       final imageRect = RenderService.imageRectInCanvas(
+  //         imageSize: Size(decoded.width.toDouble(), decoded.height.toDouble()),
+  //         canvasSize: canvasSize,
+  //       );
+  //       if (imageRect.isEmpty) {
+  //         _showToast('Could not crop: the editor is not ready. Try again.');
+  //         return;
+  //       }
+  //       final scaleX = decoded.width / imageRect.width;
+  //       final scaleY = decoded.height / imageRect.height;
+  //       final relLeft = cropRect.left - imageRect.left;
+  //       final relTop = cropRect.top - imageRect.top;
+  //       final relRight = cropRect.right - imageRect.left;
+  //       final relBottom = cropRect.bottom - imageRect.top;
+  //       if (relRight - relLeft <= 5 || relBottom - relTop <= 5) return;
+  //       final targetLeft = (relLeft * scaleX).round();
+  //       final targetTop = (relTop * scaleY).round();
+  //       final targetWidth = ((relRight - relLeft) * scaleX).round();
+  //       final targetHeight = ((relBottom - relTop) * scaleY).round();
+  //       final result = ImageOperations.expandOrCropCanvas(
+  //         sourceImage: decoded,
+  //         targetLeft: targetLeft,
+  //         targetTop: targetTop,
+  //         targetWidth: targetWidth,
+  //         targetHeight: targetHeight,
+  //       );
+  //       final encoded = await compute(img.encodePng, result);
+  //       if (!mounted || _activeCapture?.id != capture.id) return;
+  //       await _replaceActiveImageBytes(encoded, targetPath: capture.filePath);
+  //       if (!mounted || _activeCapture?.id != capture.id) return;
+  //       setState(() {
+  //         _bumpImageRevision();
+  //         _annotations = [];
+  //         _selectedAnnotationId = null;
+  //         _activeTool = CanvasTool.select;
+  //         _activeCapture = capture.copyWith(
+  //           width: result.width,
+  //           height: result.height,
+  //         );
+  //       });
+  //       _syncCurrentCaptureAnnotations();
+  //       final isExpanded =
+  //           targetLeft < 0 ||
+  //           targetTop < 0 ||
+  //           targetLeft + targetWidth > decoded.width ||
+  //           targetTop + targetHeight > decoded.height;
+  //       _showToast(
+  //         isExpanded
+  //             ? 'Canvas expanded to ${result.width} × ${result.height} px (Cmd+Z to undo)'
+  //             : 'Cropped to ${result.width} × ${result.height} px (Cmd+Z to undo)',
+  //       );
+  //     } catch (e) {
+  //       debugPrint('SnipSnap crop error: $e');
+  //       _showToast('Failed to crop image');
+  //     }
+  //   });
+  // }
   Future<void> _handleApplyCrop(Rect cropRect) async {
     final capture = _activeCapture;
     if (capture == null || !File(capture.filePath).existsSync()) return;
-    // Crop bakes the markup in before cutting, and rewrites the file. Checked
-    // here rather than relying on _renderAnnotatedBytes returning null, because
-    // this path falls back to the un-annotated original on a null render — so
-    // without this the crop would silently proceed and drop the markup
-    // entirely instead of refusing.
     if (_blockedByPendingConversion('crop')) return;
 
     await _runBusy('Cropping\u2026', () async {
@@ -2204,34 +2653,29 @@ class _MainScreenState extends State<MainScreen> {
         final canvasSize = _canvasSize;
         final originalBytes = await File(capture.filePath).readAsBytes();
 
-        // Push the pre-crop image *and* annotations so a single undo restores
-        // both.
+        // Push the pre-crop image *and* annotations so a single undo restores both.
         await _pushUndoState(imageBytes: originalBytes);
 
-        // Bake annotations in before cropping so markup survives the operation
-        // instead of being discarded.
-        final sourceBytes = _annotations.isEmpty
-            ? originalBytes
-            : (await _renderAnnotatedBytes() ?? originalBytes);
-
-        final decoded = await compute(img.decodeImage, sourceBytes);
-        if (decoded == null) return;
+        // Read dimensions rapidly from header or active decoded size.
+        final dims = _decodedImage?.path == capture.filePath
+            ? (
+                width: _decodedImage!.size.width.round(),
+                height: _decodedImage!.size.height.round(),
+              )
+            : await ImageHeaderParser.readDimensions(capture.filePath);
+        if (dims == null || dims.width <= 0 || dims.height <= 0) return;
 
         final imageRect = RenderService.imageRectInCanvas(
-          imageSize: Size(decoded.width.toDouble(), decoded.height.toDouble()),
+          imageSize: Size(dims.width.toDouble(), dims.height.toDouble()),
           canvasSize: canvasSize,
         );
         if (imageRect.isEmpty) {
-          // Same reasoning as the export path: without a laid-out canvas the crop
-          // rectangle cannot be placed on the image at all, and silently doing
-          // nothing reads to the user as a broken button.
           _showToast('Could not crop: the editor is not ready. Try again.');
           return;
         }
 
-        // Canvas coordinates -> native image pixels.
-        final scaleX = decoded.width / imageRect.width;
-        final scaleY = decoded.height / imageRect.height;
+        final scaleX = dims.width / imageRect.width;
+        final scaleY = dims.height / imageRect.height;
 
         final relLeft = cropRect.left - imageRect.left;
         final relTop = cropRect.top - imageRect.top;
@@ -2244,19 +2688,44 @@ class _MainScreenState extends State<MainScreen> {
         final targetWidth = ((relRight - relLeft) * scaleX).round();
         final targetHeight = ((relBottom - relTop) * scaleY).round();
 
-        final result = ImageOperations.expandOrCropCanvas(
-          sourceImage: decoded,
-          targetLeft: targetLeft,
-          targetTop: targetTop,
-          targetWidth: targetWidth,
-          targetHeight: targetHeight,
+        // Single-pass GPU crop/expand + annotation bake via RenderService:
+        final gpuCropped = await RenderService.renderCroppedOrExpandedPng(
+          imagePath: capture.filePath,
+          annotations: _annotations,
+          canvasSize: canvasSize,
+          cropRectInCanvas: cropRect,
         );
 
-        final encoded = await compute(img.encodePng, result);
+        Uint8List encoded;
+        int finalWidth = targetWidth;
+        int finalHeight = targetHeight;
 
-        // The render, decode and encode above are seconds of work on a large
-        // capture. Writing the result now, without re-checking, would crop
-        // whichever capture the user has since selected.
+        if (gpuCropped != null) {
+          encoded = gpuCropped.bytes;
+          finalWidth = gpuCropped.width;
+          finalHeight = gpuCropped.height;
+        } else {
+          // Fallback to CPU path if GPU pass returned null:
+          final sourceBytes = _annotations.isEmpty
+              ? originalBytes
+              : (await _renderAnnotatedBytes() ?? originalBytes);
+          final decoded = await compute(img.decodeImage, sourceBytes);
+          if (decoded == null) return;
+          final result = ImageOperations.expandOrCropCanvas(
+            sourceImage: decoded,
+            targetLeft: targetLeft,
+            targetTop: targetTop,
+            targetWidth: targetWidth,
+            targetHeight: targetHeight,
+          );
+          finalWidth = result.width;
+          finalHeight = result.height;
+          encoded = await compute(
+            (img.Image im) => Uint8List.fromList(img.encodePng(im, level: 1)),
+            result,
+          );
+        }
+
         if (!mounted || _activeCapture?.id != capture.id) return;
         await _replaceActiveImageBytes(encoded, targetPath: capture.filePath);
         if (!mounted || _activeCapture?.id != capture.id) return;
@@ -2266,13 +2735,9 @@ class _MainScreenState extends State<MainScreen> {
           _annotations = [];
           _selectedAnnotationId = null;
           _activeTool = CanvasTool.select;
-          // The file on disk is a different size now. The recorded dimensions
-          // feed every projection built from this capture — the toolbar's
-          // canvas -> image conversion and the legacy annotation migration — so
-          // leaving them stale silently rescales everything drawn after a crop.
           _activeCapture = capture.copyWith(
-            width: result.width,
-            height: result.height,
+            width: finalWidth,
+            height: finalHeight,
           );
         });
         _syncCurrentCaptureAnnotations();
@@ -2280,12 +2745,12 @@ class _MainScreenState extends State<MainScreen> {
         final isExpanded =
             targetLeft < 0 ||
             targetTop < 0 ||
-            targetLeft + targetWidth > decoded.width ||
-            targetTop + targetHeight > decoded.height;
+            targetLeft + targetWidth > dims.width ||
+            targetTop + targetHeight > dims.height;
         _showToast(
           isExpanded
-              ? 'Canvas expanded to ${result.width} × ${result.height} px (Cmd+Z to undo)'
-              : 'Cropped to ${result.width} × ${result.height} px (Cmd+Z to undo)',
+              ? 'Canvas expanded to $finalWidth × $finalHeight px (Cmd+Z to undo)'
+              : 'Cropped to $finalWidth × $finalHeight px (Cmd+Z to undo)',
         );
       } catch (e) {
         debugPrint('SnipSnap crop error: $e');
@@ -2365,6 +2830,103 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  // Gene - Nov, 08, 2026: Extracted _buildEditorCanvas so EditorCanvas arguments stay on single lines and main build() stays readable.
+  Widget _buildEditorCanvas() {
+    return EditorCanvas(
+      imagePath: _activeCapture?.filePath,
+      annotations: _annotations,
+      activeTool: _activeTool,
+      onToolSelected: _setActiveTool,
+      onSelectAnnotation: (ann) {
+        setState(() {
+          _selectedAnnotationId = ann?.id;
+          if (ann != null) {
+            _isPropertiesOpen = true;
+          }
+        });
+        if (ann != null) {
+          // Adopt the item's style into the tool defaults
+          // without rewriting the item or logging undo.
+          _updateActiveToolProperty(
+            syncOnly: true,
+            activeColor: ann.color,
+            textBackgroundColor: ann.backgroundColor,
+            fillColor: ann.fillColor,
+            strokeWidth: ann.strokeWidth,
+            fontSize: ann.fontSize,
+            opacity: ann.opacity,
+            isFilled: ann.fill,
+            borderRadius: ann.borderRadius,
+            shapeKind: ann.shapeKind,
+            lineStyle: ann.lineStyle,
+            blurType: ann.blurType,
+            blurStrength: ann.blurStrength,
+            hasShadow: ann.hasShadow,
+            isDoubleArrow: ann.isDoubleArrow,
+          );
+        }
+      },
+      activeColor: _currentToolProperties.activeColor,
+      textBackgroundColor: _currentToolProperties.textBackgroundColor,
+      fillColor: _currentToolProperties.fillColor,
+      strokeWidth: _currentToolProperties.strokeWidth,
+      opacity: _currentToolProperties.opacity,
+      fontSize: _currentToolProperties.fontSize,
+      isFilled: _currentToolProperties.isFilled,
+      borderRadius: _currentToolProperties.borderRadius,
+      shapeKind: _currentToolProperties.shapeKind,
+      lineStyle: _currentToolProperties.lineStyle,
+      blurType: _currentToolProperties.blurType,
+      blurStrength: _currentToolProperties.blurStrength,
+      hasShadow: _currentToolProperties.hasShadow,
+      isDoubleArrow: _currentToolProperties.isDoubleArrow,
+      fillTolerance: _currentToolProperties.fillTolerance,
+      isGlobalFill: _currentToolProperties.isGlobalFill,
+      stepCounter: _stepCounter,
+      onAnnotationAdded: _onAnnotationAdded,
+      onAnnotationsUpdated: _onAnnotationsUpdated,
+      onAnnotationsLiveUpdated: _onAnnotationsLiveUpdated,
+      onStepCounterIncremented: (nextVal) =>
+          setState(() => _stepCounter = nextVal),
+      onApplyCrop: _handleApplyCrop,
+      onSampleColor: _handleSampleColor,
+      // Snapshot the bitmap *before* the flood fill
+      // overwrites the file, otherwise undo would restore
+      // the already-filled image.
+      onBeforeCanvasFill: () => _pushUndoState(captureImage: true),
+      onImageSizeResolved: _handleImageSizeResolved,
+      onExtractText: _handleExtractText,
+      onPerformCanvasFill: (pos) {
+        setState(_bumpImageRevision);
+      },
+      // Cut, move and delete rewrite the file in place
+      // from inside the canvas, at the same path and the
+      // same size, so nothing else here would notice.
+      onImageBytesChanged: () {
+        setState(_bumpImageRevision);
+      },
+      // The canvas drops writes it cannot map into image
+      // pixels. Silently losing a stroke is its own bug,
+      // so say it out loud; the canvas throttles this so
+      // a drag cannot flood the toast.
+      onEditUnplaceable: () => _showToast(
+        'Could not apply that edit: the image has not '
+        'loaded. Try reselecting this capture.',
+      ),
+      repaintBoundaryKey: _repaintKey,
+      zoomScale: _zoomScale,
+      onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
+      imageRevision: _imageRevision,
+      historyRevision: _historyRevision,
+      onQuickSnipArea: _handleInteractiveCapture,
+      onQuickSnipFull: _handleFullScreenCapture,
+      onQuickRecordArea: _handleRecordArea,
+      onQuickRecordFull: _handleRecordFullScreen,
+      onQuickOpenFile: _handleImportImage,
+      onQuickPasteClipboard: _handlePasteFromClipboard,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // This State's own `context` sits above the SnipThemeScope built below,
@@ -2411,12 +2973,27 @@ class _MainScreenState extends State<MainScreen> {
                     //   onSnipFullScreen: _handleFullScreenCapture,
                     //   onSnipTimer: _handleTimerCapture,
                     //   onImportImage: _handleImportImage,
+                    // Gene - Nov, 08, 2026: Wired screen recording controls, microphone toggle, clipboard paste, and auto-copy into HeaderBar.
                     HeaderBar(
                       onSnipInteractive: _handleInteractiveCapture,
                       onSnipScrolling: null,
                       onSnipFullScreen: _handleFullScreenCapture,
                       onSnipTimer: _handleTimerCapture,
+                      onRecordArea: _handleRecordArea,
+                      onRecordFullScreen: _handleRecordFullScreen,
                       onImportImage: _handleImportImage,
+                      onPasteFromClipboard: _handlePasteFromClipboard,
+                      isRecording: _recordingController.isRecording,
+                      isRecordingPaused: _recordingController.isPaused,
+                      recordingElapsedText:
+                          _recordingController.formattedElapsed,
+                      onTogglePauseRecording: _recordingController.togglePause,
+                      onStopRecording: _recordingController.stopRecording,
+                      recordMicrophone: _recordingController.recordMicrophone,
+                      onToggleRecordMicrophone: (val) =>
+                          _recordingController.setRecordMicrophone(val),
+                      autoCopyAfterCapture: _autoCopyAfterCapture,
+                      onToggleAutoCopy: (_) => _toggleAutoCopyAfterCapture(),
                       onUndo: _undo,
                       onRedo: _redo,
                       onClear: _clearAnnotations,
@@ -2459,122 +3036,51 @@ class _MainScreenState extends State<MainScreen> {
                         children: [
                           Row(
                             children: [
-                              // Slim Left Sidebar Tools
-                              ToolSidebar(
-                                activeTool: _activeTool,
-                                onToolSelected: _setActiveTool,
-                                shapeKind: _currentToolProperties.shapeKind,
-                                onShapeKindSelected: (kind) =>
-                                    _updateActiveToolProperty(shapeKind: kind),
-                                isSidebarOpen: _isSidebarOpen,
-                                // Gene - Oct, 27, 2026: Removed onToggleSidebar from ToolSidebar so the tool rail
-                                // doesn't show a redundant screen icon button; the gallery is toggled from its own header bar.
-                                // onToggleSidebar: () => setState(
-                                //   () => _isSidebarOpen = !_isSidebarOpen,
-                                // ),
-                              ),
-
-                              // Editor Canvas
-                              Expanded(
-                                child: EditorCanvas(
-                                  imagePath: _activeCapture?.filePath,
-                                  annotations: _annotations,
+                              // Slim Left Sidebar Tools (shown for image captures and empty state)
+                              if (_activeCapture == null ||
+                                  !_activeCapture!.isVideo)
+                                ToolSidebar(
                                   activeTool: _activeTool,
                                   onToolSelected: _setActiveTool,
-                                  onSelectAnnotation: (ann) {
-                                    setState(() {
-                                      _selectedAnnotationId = ann?.id;
-                                      if (ann != null) {
-                                        _isPropertiesOpen = true;
-                                      }
-                                    });
-                                    if (ann != null) {
-                                      // Adopt the item's style into the tool defaults
-                                      // without rewriting the item or logging undo.
-                                      _updateActiveToolProperty(
-                                        syncOnly: true,
-                                        activeColor: ann.color,
-                                        textBackgroundColor:
-                                            ann.backgroundColor,
-                                        fillColor: ann.fillColor,
-                                        strokeWidth: ann.strokeWidth,
-                                        fontSize: ann.fontSize,
-                                        opacity: ann.opacity,
-                                        isFilled: ann.fill,
-                                        borderRadius: ann.borderRadius,
-                                        shapeKind: ann.shapeKind,
-                                        lineStyle: ann.lineStyle,
-                                        blurType: ann.blurType,
-                                        blurStrength: ann.blurStrength,
-                                        hasShadow: ann.hasShadow,
-                                        isDoubleArrow: ann.isDoubleArrow,
-                                      );
-                                    }
-                                  },
-                                  activeColor:
-                                      _currentToolProperties.activeColor,
-                                  textBackgroundColor: _currentToolProperties
-                                      .textBackgroundColor,
-                                  fillColor: _currentToolProperties.fillColor,
-                                  strokeWidth:
-                                      _currentToolProperties.strokeWidth,
-                                  opacity: _currentToolProperties.opacity,
-                                  fontSize: _currentToolProperties.fontSize,
-                                  isFilled: _currentToolProperties.isFilled,
-                                  borderRadius:
-                                      _currentToolProperties.borderRadius,
                                   shapeKind: _currentToolProperties.shapeKind,
-                                  lineStyle: _currentToolProperties.lineStyle,
-                                  blurType: _currentToolProperties.blurType,
-                                  blurStrength:
-                                      _currentToolProperties.blurStrength,
-                                  hasShadow: _currentToolProperties.hasShadow,
-                                  isDoubleArrow:
-                                      _currentToolProperties.isDoubleArrow,
-                                  fillTolerance:
-                                      _currentToolProperties.fillTolerance,
-                                  isGlobalFill:
-                                      _currentToolProperties.isGlobalFill,
-                                  stepCounter: _stepCounter,
-                                  onAnnotationAdded: _onAnnotationAdded,
-                                  onAnnotationsUpdated: _onAnnotationsUpdated,
-                                  onAnnotationsLiveUpdated:
-                                      _onAnnotationsLiveUpdated,
-                                  onStepCounterIncremented: (nextVal) =>
-                                      setState(() => _stepCounter = nextVal),
-                                  onApplyCrop: _handleApplyCrop,
-                                  onSampleColor: _handleSampleColor,
-                                  // Snapshot the bitmap *before* the flood fill
-                                  // overwrites the file, otherwise undo would restore
-                                  // the already-filled image.
-                                  onBeforeCanvasFill: () =>
-                                      _pushUndoState(captureImage: true),
-                                  onImageSizeResolved: _handleImageSizeResolved,
-                                  onExtractText: _handleExtractText,
-                                  onPerformCanvasFill: (pos) {
-                                    setState(_bumpImageRevision);
-                                  },
-                                  // Cut, move and delete rewrite the file in place
-                                  // from inside the canvas, at the same path and the
-                                  // same size, so nothing else here would notice.
-                                  onImageBytesChanged: () {
-                                    setState(_bumpImageRevision);
-                                  },
-                                  // The canvas drops writes it cannot map into image
-                                  // pixels. Silently losing a stroke is its own bug,
-                                  // so say it out loud; the canvas throttles this so
-                                  // a drag cannot flood the toast.
-                                  onEditUnplaceable: () => _showToast(
-                                    'Could not apply that edit: the image has not '
-                                    'loaded. Try reselecting this capture.',
-                                  ),
-                                  repaintBoundaryKey: _repaintKey,
-                                  zoomScale: _zoomScale,
-                                  onZoomScaleChanged: (val) =>
-                                      setState(() => _zoomScale = val),
-                                  imageRevision: _imageRevision,
-                                  historyRevision: _historyRevision,
+                                  onShapeKindSelected: (kind) =>
+                                      _updateActiveToolProperty(
+                                        shapeKind: kind,
+                                      ),
+                                  isSidebarOpen: _isSidebarOpen,
+                                  // Gene - Oct, 27, 2026: Removed onToggleSidebar from ToolSidebar so the tool rail
+                                  // doesn't show a redundant screen icon button; the gallery is toggled from its own header bar.
+                                  // onToggleSidebar: () => setState(
+                                  //   () => _isSidebarOpen = !_isSidebarOpen,
+                                  // ),
                                 ),
+
+                              // Editor Canvas or Video Capture Player View
+                              Expanded(
+                                child: (_activeCapture != null &&
+                                        _activeCapture!.isVideo)
+                                    ? VideoCapturePlayerView(
+                                        key: ValueKey(_activeCapture!.id),
+                                        capture: _activeCapture!,
+                                        captureService: _captureService,
+                                        onGrabFrameAsScreenshot:
+                                            _handleGrabVideoFrame,
+                                        onTrimVideo: _handleTrimVideo,
+                                        onCopyVideo: _handleCopyToClipboard,
+                                        onSaveVideoAs: _handleSaveVideoAs,
+                                        onRevealInFolder: () async {
+                                          final revealed =
+                                              await StorageService.revealFileInFolder(
+                                                _activeCapture!.filePath,
+                                              );
+                                          if (!revealed) {
+                                            _showToast(
+                                              'Could not reveal file in folder',
+                                            );
+                                          }
+                                        },
+                                      )
+                                    : _buildEditorCanvas(),
                               ),
 
                               // Right Properties Sidebar Panel (Full Height & Collapsible Side Drawer)
@@ -2583,6 +3089,7 @@ class _MainScreenState extends State<MainScreen> {
                                 curve: Curves.easeInOut,
                                 width:
                                     (_activeCapture != null &&
+                                        !_activeCapture!.isVideo &&
                                         _isPropertiesOpen)
                                     ? 250
                                     : 0,
@@ -2736,7 +3243,9 @@ class _MainScreenState extends State<MainScreen> {
                           ),
 
                           // Floating Properties Drawer Open Pill Button (when drawer is collapsed)
-                          if (_activeCapture != null && !_isPropertiesOpen)
+                          if (_activeCapture != null &&
+                              !_activeCapture!.isVideo &&
+                              !_isPropertiesOpen)
                             Positioned(
                               top: 12,
                               right: 12,
@@ -2972,6 +3481,12 @@ class _MainScreenState extends State<MainScreen> {
                           if (file.existsSync()) {
                             await file.delete();
                           }
+                          if (item.thumbnailPath != null) {
+                            final thumb = File(item.thumbnailPath!);
+                            if (thumb.existsSync()) {
+                              await thumb.delete();
+                            }
+                          }
                         } catch (_) {}
                         // The row and its annotations, not just the file.
                         // `saveHistory` below only rewrites the captures still in
@@ -2987,6 +3502,7 @@ class _MainScreenState extends State<MainScreen> {
                         await StorageService.deleteCaptureItem(item.id);
                         unawaited(StorageService.saveHistory(_captures));
                       },
+                      onRenameItem: _handleRenameCaptureItem,
                       onOpenLibraryLocation: () async {
                         final opened = await StorageService.openLibraryFolder();
                         if (!opened) {

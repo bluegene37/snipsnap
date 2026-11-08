@@ -1,5 +1,9 @@
 import AppKit
+// Gene - Nov, 08, 2026: Added AVFoundation and CoreMedia imports for native H.264 MP4 screen & area recording, frame extraction, and video trimming.
+import AVFoundation
 import CoreGraphics
+import CoreMedia
+import CoreVideo
 import FlutterMacOS
 
 /// Native macOS Screen Capture Plugin.
@@ -48,9 +52,24 @@ class CapturePlugin: NSObject {
   private var scrollingKeyMonitor: Any?
   private var scrollingLocalKeyMonitor: Any?
 
+  // Gene - Nov, 08, 2026: Added screen recording session state and floating recording HUD windows.
+  private var recordingGuideWindow: NSPanel?
+  private var recordingHudWindow: NSPanel?
+  private var recordingSession: MacScreenRecordingSession?
+
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "captureInteractive":
+      // Gene - Nov, 08, 2026: Support optional initialMode ("capture" or "record") in captureInteractive.
+      // Old implementation:
+      // guard
+      //   let args = call.arguments as? [String: Any],
+      //   let targetPath = args["targetPath"] as? String
+      // else {
+      //   result(FlutterError(code: "bad_args", message: "targetPath missing", details: nil))
+      //   return
+      // }
+      // startInteractiveCapture(targetPath: targetPath, result: result)
       guard
         let args = call.arguments as? [String: Any],
         let targetPath = args["targetPath"] as? String
@@ -58,7 +77,8 @@ class CapturePlugin: NSObject {
         result(FlutterError(code: "bad_args", message: "targetPath missing", details: nil))
         return
       }
-      startInteractiveCapture(targetPath: targetPath, result: result)
+      let initialMode = (args["initialMode"] as? String) ?? "capture"
+      startInteractiveCapture(targetPath: targetPath, initialMode: initialMode, result: result)
 
     case "captureFullScreen":
       guard
@@ -207,6 +227,139 @@ class CapturePlugin: NSObject {
       scrollEvent?.post(tap: .cghidEventTap)
       result(true)
 
+    // Gene - Nov, 08, 2026: Added native NSPasteboard clipboard operations (eliminating osascript subprocess overhead) and native screen recording / video frame / trim methods.
+    case "copyImageToClipboard":
+      guard let args = call.arguments as? [String: Any] else {
+        result(false)
+        return
+      }
+      if let typedBytes = args["bytes"] as? FlutterStandardTypedData {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        let ok = pb.setData(typedBytes.data, forType: .png)
+        result(ok)
+        return
+      }
+      if let filePath = args["filePath"] as? String,
+         let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        let ok = pb.setData(data, forType: .png)
+        result(ok)
+        return
+      }
+      result(false)
+
+    case "pasteImageFromClipboard":
+      guard
+        let args = call.arguments as? [String: Any],
+        let targetPath = args["targetPath"] as? String
+      else {
+        result(nil)
+        return
+      }
+      let pb = NSPasteboard.general
+      if let pngData = pb.data(forType: .png) {
+        do {
+          try pngData.write(to: URL(fileURLWithPath: targetPath), options: .atomic)
+          result(targetPath)
+          return
+        } catch {}
+      }
+      if let img = NSImage(pasteboard: pb),
+         let tiffData = img.tiffRepresentation,
+         let rep = NSBitmapImageRep(data: tiffData),
+         let pngData = rep.representation(using: .png, properties: [:]) {
+        do {
+          try pngData.write(to: URL(fileURLWithPath: targetPath), options: .atomic)
+          result(targetPath)
+          return
+        } catch {}
+      }
+      result(nil)
+
+    case "copyFileToClipboard":
+      guard
+        let args = call.arguments as? [String: Any],
+        let filePath = args["filePath"] as? String
+      else {
+        result(false)
+        return
+      }
+      let url = URL(fileURLWithPath: filePath) as NSURL
+      let pb = NSPasteboard.general
+      pb.clearContents()
+      let ok = pb.writeObjects([url])
+      result(ok)
+
+    case "startScreenRecording":
+      guard
+        let args = call.arguments as? [String: Any],
+        let targetPath = args["targetPath"] as? String
+      else {
+        result(FlutterError(code: "bad_args", message: "targetPath missing", details: nil))
+        return
+      }
+      let thumbnailPath = (args["thumbnailPath"] as? String) ?? ""
+      let fullScreen = (args["fullScreen"] as? Bool) ?? false
+      let xVal = (args["x"] as? NSNumber)?.doubleValue ?? (args["x"] as? Double) ?? 0.0
+      let yVal = (args["y"] as? NSNumber)?.doubleValue ?? (args["y"] as? Double) ?? 0.0
+      let wVal = (args["width"] as? NSNumber)?.doubleValue ?? (args["width"] as? Double) ?? 0.0
+      let hVal = (args["height"] as? NSNumber)?.doubleValue ?? (args["height"] as? Double) ?? 0.0
+      let fps = (args["fps"] as? NSNumber)?.intValue ?? (args["fps"] as? Int) ?? 30
+      let recordAudio = (args["recordAudio"] as? Bool) ?? false
+
+      startNativeScreenRecording(
+        targetPath: targetPath,
+        thumbnailPath: thumbnailPath,
+        fullScreen: fullScreen,
+        rect: CGRect(x: xVal, y: yVal, width: wVal, height: hVal),
+        fps: fps,
+        recordAudio: recordAudio,
+        result: result
+      )
+
+    case "pauseScreenRecording":
+      recordingSession?.pause()
+      updateRecordingHudState()
+      result(true)
+
+    case "resumeScreenRecording":
+      recordingSession?.resume()
+      updateRecordingHudState()
+      result(true)
+
+    case "stopScreenRecording":
+      stopNativeScreenRecording(cancel: false, result: result)
+
+    case "cancelScreenRecording":
+      stopNativeScreenRecording(cancel: true, result: result)
+
+    case "extractVideoFrame":
+      guard
+        let args = call.arguments as? [String: Any],
+        let videoPath = args["videoPath"] as? String,
+        let targetPath = args["targetPath"] as? String
+      else {
+        result(nil)
+        return
+      }
+      let timestampMs = (args["timestampMs"] as? NSNumber)?.int64Value ?? (args["timestampMs"] as? Int64) ?? 0
+      extractFrameFromVideo(videoPath: videoPath, timestampMs: timestampMs, targetPath: targetPath, result: result)
+
+    case "trimVideo":
+      guard
+        let args = call.arguments as? [String: Any],
+        let videoPath = args["videoPath"] as? String,
+        let targetPath = args["targetPath"] as? String
+      else {
+        result(nil)
+        return
+      }
+      let startMs = (args["startMs"] as? NSNumber)?.int64Value ?? (args["startMs"] as? Int64) ?? 0
+      let endMs = (args["endMs"] as? NSNumber)?.int64Value ?? (args["endMs"] as? Int64) ?? 0
+      trimVideoFile(videoPath: videoPath, startMs: startMs, endMs: endMs, targetPath: targetPath, result: result)
+
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -243,7 +396,11 @@ class CapturePlugin: NSObject {
   //   DispatchQueue.main.async {
   //     self.cleanup()
   //     self.activeResult = result
-  private func startInteractiveCapture(targetPath: String, result: @escaping FlutterResult) {
+  // Gene - Nov, 08, 2026: Added initialMode and onRecordCapture callback to startInteractiveCapture so users can initiate Whole Screen or Area screen recording directly from the overlay.
+  // Old implementation:
+  // private func startInteractiveCapture(targetPath: String, result: @escaping FlutterResult) {
+  //   DispatchQueue.main.async { [weak self] in
+  private func startInteractiveCapture(targetPath: String, initialMode: String = "capture", result: @escaping FlutterResult) {
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
       self.cleanup()
@@ -264,33 +421,12 @@ class CapturePlugin: NSObject {
       }
 
       // Create overlay window for each screen
-      // Gene - Oct, 27, 2026: Added onPanoramicCapture handler to CaptureOverlayWindow.
-      // Old implementation:
-      // for screen in screens {
-      //   let image = screenImages[screen]
-      //   let overlayWindow = CaptureOverlayWindow(
-      //     screen: screen,
-      //     screenImage: image,
-      //     onCapture: { [weak self] capturedImage in
-      //       guard let self = self else { return }
-      //       if let capturedImage = capturedImage, self.saveImage(capturedImage, toPath: targetPath) {
-      //         self.finishWithResult(targetPath)
-      //       } else {
-      //         self.finishWithResult(nil)
-      //       }
-      //     },
-      //     onCancel: { [weak self] in
-      //       self?.finishWithResult(nil)
-      //     }
-      //   )
-      //   self.activeWindows.append(overlayWindow)
-      //   overlayWindow.orderFrontRegardless()
-      // }
       for screen in screens {
         let image = screenImages[screen]
         let overlayWindow = CaptureOverlayWindow(
           screen: screen,
           screenImage: image,
+          initialMode: initialMode,
           onCapture: { [weak self] capturedImage in
             guard let self = self else { return }
             if let capturedImage = capturedImage, self.saveImage(capturedImage, toPath: targetPath) {
@@ -309,10 +445,18 @@ class CapturePlugin: NSObject {
             let quartzH = selRect.height
             let resultString = String(format: "scrolling:%.1f:%.1f:%.1f:%.1f", quartzX, quartzY, quartzW, quartzH)
             self.finishWithResult(resultString)
-            // Gene - Oct, 27, 2026: Order out SnipSnap main window and do NOT activate NSApp so user's target app remains active and visible.
-            // Old implementation:
-            // NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first?.orderOut(nil)
+          },
+          onRecordCapture: { [weak self] selRect in
+            guard let self = self else { return }
+            let screenFrame = screen.frame
+            let primaryHeight = NSScreen.screens.first?.frame.height ?? screenFrame.height
+            let quartzX = screenFrame.origin.x + selRect.origin.x
+            let quartzY = primaryHeight - (screenFrame.origin.y + selRect.origin.y + selRect.height)
+            let quartzW = selRect.width
+            let quartzH = selRect.height
+            let resultString = String(format: "record:%.1f:%.1f:%.1f:%.1f", quartzX, quartzY, quartzW, quartzH)
+            self.finishWithResult(resultString)
           },
           onCancel: { [weak self] in
             self?.finishWithResult(nil)
@@ -511,6 +655,226 @@ class CapturePlugin: NSObject {
     }
   }
 
+  // MARK: - Native Screen & Area Recording (AVAssetWriter H.264 MP4)
+
+  // Gene - Nov, 08, 2026: Added startNativeScreenRecording, stopNativeScreenRecording, updateRecordingHudState, extractFrameFromVideo, and trimVideoFile.
+  private func startNativeScreenRecording(
+    targetPath: String,
+    thumbnailPath: String,
+    fullScreen: Bool,
+    rect: CGRect,
+    fps: Int,
+    recordAudio: Bool,
+    result: @escaping FlutterResult
+  ) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      if self.recordingSession != nil {
+        result(FlutterError(code: "already_recording", message: "Screen recording is already active", details: nil))
+        return
+      }
+
+      let primaryScreen = NSScreen.main ?? NSScreen.screens.first
+      let scale = primaryScreen?.backingScaleFactor ?? 2.0
+      let screenFrame = primaryScreen?.frame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+
+      let pointRect: CGRect
+      if fullScreen || rect.width < 10 || rect.height < 10 {
+        pointRect = CGRect(x: 0, y: 0, width: screenFrame.width, height: screenFrame.height)
+      } else {
+        // Incoming rect from captureInteractive is in Retina pixel coordinates
+        pointRect = CGRect(
+          x: rect.origin.x / scale,
+          y: rect.origin.y / scale,
+          width: rect.width / scale,
+          height: rect.height / scale
+        )
+      }
+
+      let session = MacScreenRecordingSession(
+        targetPath: targetPath,
+        thumbnailPath: thumbnailPath,
+        pointRect: pointRect,
+        scale: scale,
+        fps: max(15, min(60, fps)),
+        recordAudio: recordAudio,
+        onTick: { [weak self] elapsedMs, isPaused in
+          DispatchQueue.main.async {
+            if let hudView = self?.recordingHudWindow?.contentView as? RecordingHudView {
+              hudView.update(elapsedMs: elapsedMs, isPaused: isPaused)
+            }
+          }
+        }
+      )
+
+      guard session.start() else {
+        result(FlutterError(code: "record_start_failed", message: "Failed to initialize AVAssetWriter session", details: nil))
+        return
+      }
+
+      self.recordingSession = session
+      self.showRecordingHud(for: pointRect, fullScreen: fullScreen)
+      result(true)
+    }
+  }
+
+  private func showRecordingHud(for pointRect: CGRect, fullScreen: Bool) {
+    closeRecordingHudInternal()
+
+    let primaryHeight = NSScreen.screens.first?.frame.height ?? 1080.0
+    let screenWidth = NSScreen.screens.first?.frame.width ?? 1920.0
+    let appKitY = primaryHeight - (pointRect.origin.y + pointRect.height)
+    let guideFrame = NSRect(x: pointRect.origin.x, y: appKitY, width: pointRect.width, height: pointRect.height)
+
+    if !fullScreen {
+      let guideWin = ScrollingGuideWindow(contentRect: guideFrame)
+      guideWin.sharingType = .none
+      self.recordingGuideWindow = guideWin
+      guideWin.orderFrontRegardless()
+    }
+
+    let hudW: CGFloat = 320
+    let hudH: CGFloat = 40
+    var hudY: CGFloat
+    let hudX: CGFloat
+    if fullScreen {
+      hudX = max(16, screenWidth - hudW - 24)
+      hudY = 28
+    } else {
+      hudY = guideFrame.minY - hudH - 10
+      if hudY < 20 {
+        hudY = min(guideFrame.maxY + 10, primaryHeight - hudH - 20)
+      }
+      hudX = max(10, min(guideFrame.midX - hudW / 2, screenWidth - hudW - 10))
+    }
+
+    let hudWin = RecordingHudWindow(
+      contentRect: NSRect(x: hudX, y: hudY, width: hudW, height: hudH),
+      onTogglePause: { [weak self] in
+        guard let self = self, let session = self.recordingSession else { return }
+        if session.isPaused {
+          session.resume()
+        } else {
+          session.pause()
+        }
+        self.updateRecordingHudState()
+        self.channel?.invokeMethod("onRecordingStateChanged", arguments: ["isPaused": session.isPaused])
+      },
+      onStop: { [weak self] in
+        guard let self = self else { return }
+        self.stopNativeScreenRecording(cancel: false) { info in
+          self.channel?.invokeMethod("onRecordingStopped", arguments: info)
+        }
+      },
+      onCancel: { [weak self] in
+        guard let self = self else { return }
+        self.stopNativeScreenRecording(cancel: true) { _ in
+          self.channel?.invokeMethod("onRecordingCancelled", arguments: nil)
+        }
+      }
+    )
+    hudWin.sharingType = .none
+    self.recordingHudWindow = hudWin
+    hudWin.orderFrontRegardless()
+  }
+
+  private func updateRecordingHudState() {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self, let session = self.recordingSession else { return }
+      if let hudView = self.recordingHudWindow?.contentView as? RecordingHudView {
+        hudView.update(elapsedMs: session.currentElapsedMs(), isPaused: session.isPaused)
+      }
+    }
+  }
+
+  private func closeRecordingHudInternal() {
+    recordingGuideWindow?.orderOut(nil)
+    recordingGuideWindow = nil
+    recordingHudWindow?.orderOut(nil)
+    recordingHudWindow = nil
+  }
+
+  private func stopNativeScreenRecording(cancel: Bool, result: @escaping FlutterResult) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      self.closeRecordingHudInternal()
+      guard let session = self.recordingSession else {
+        result(nil)
+        return
+      }
+      self.recordingSession = nil
+      session.stop(cancel: cancel) { info in
+        DispatchQueue.main.async {
+          if let mainWin = NSApp.windows.first {
+            mainWin.makeKeyAndOrderFront(nil)
+          }
+          NSApp.activate(ignoringOtherApps: true)
+          result(info)
+        }
+      }
+    }
+  }
+
+  private func extractFrameFromVideo(
+    videoPath: String,
+    timestampMs: Int64,
+    targetPath: String,
+    result: @escaping FlutterResult
+  ) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      let asset = AVURLAsset(url: URL(fileURLWithPath: videoPath))
+      let generator = AVAssetImageGenerator(asset: asset)
+      generator.appliesPreferredTrackTransform = true
+      generator.requestedTimeToleranceBefore = CMTime(value: 50, timescale: 1000)
+      generator.requestedTimeToleranceAfter = CMTime(value: 50, timescale: 1000)
+      let time = CMTime(value: max(0, timestampMs), timescale: 1000)
+      do {
+        let cgImage = try generator.copyCGImage(at: time, actualTime: nil)
+        let ok = self.saveImage(cgImage, toPath: targetPath)
+        DispatchQueue.main.async {
+          result(ok ? targetPath : nil)
+        }
+      } catch {
+        DispatchQueue.main.async {
+          result(nil)
+        }
+      }
+    }
+  }
+
+  private func trimVideoFile(
+    videoPath: String,
+    startMs: Int64,
+    endMs: Int64,
+    targetPath: String,
+    result: @escaping FlutterResult
+  ) {
+    let inputURL = URL(fileURLWithPath: videoPath)
+    let outputURL = URL(fileURLWithPath: targetPath)
+    try? FileManager.default.removeItem(at: outputURL)
+
+    let asset = AVURLAsset(url: inputURL)
+    guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+      result(nil)
+      return
+    }
+    exportSession.outputURL = outputURL
+    exportSession.outputFileType = .mp4
+    let startTime = CMTime(value: max(0, startMs), timescale: 1000)
+    let endTime = CMTime(value: max(startMs + 100, endMs), timescale: 1000)
+    exportSession.timeRange = CMTimeRangeFromTimeToTime(start: startTime, end: endTime)
+
+    exportSession.exportAsynchronously {
+      DispatchQueue.main.async {
+        if exportSession.status == .completed {
+          result(targetPath)
+        } else {
+          result(nil)
+        }
+      }
+    }
+  }
+
   private func saveImage(_ image: CGImage, toPath path: String) -> Bool {
     let rep = NSBitmapImageRep(cgImage: image)
     guard let data = rep.representation(using: .png, properties: [:]) else {
@@ -575,11 +939,14 @@ private class CaptureOverlayWindow: NSPanel {
   //   )
   //   self.contentView = view
   // }
+  // Gene - Nov, 08, 2026: Added initialMode and onRecordCapture parameters to CaptureOverlayWindow.
   init(
     screen: NSScreen,
     screenImage: CGImage?,
+    initialMode: String = "capture",
     onCapture: @escaping (CGImage?) -> Void,
     onPanoramicCapture: ((NSRect) -> Void)? = nil,
+    onRecordCapture: ((NSRect) -> Void)? = nil,
     onCancel: @escaping () -> Void
   ) {
     super.init(
@@ -607,8 +974,10 @@ private class CaptureOverlayWindow: NSPanel {
       frame: NSRect(origin: .zero, size: screen.frame.size),
       screenImage: screenImage,
       scaleFactor: screen.backingScaleFactor,
+      initialMode: initialMode,
       onCapture: onCapture,
       onPanoramicCapture: onPanoramicCapture,
+      onRecordCapture: onRecordCapture,
       onCancel: onCancel
     )
     self.contentView = view
@@ -660,9 +1029,12 @@ private enum OverlayMode {
 private class CaptureOverlayView: NSView {
   private let screenImage: CGImage?
   private let scaleFactor: CGFloat
+  // Gene - Nov, 08, 2026: Added initialMode and onRecordCapture to support unified Capture + Record overlay.
+  private let initialMode: String
   private let onCapture: (CGImage?) -> Void
   // Gene - Oct, 27, 2026: Added onPanoramicCapture callback.
   private let onPanoramicCapture: ((NSRect) -> Void)?
+  private let onRecordCapture: ((NSRect) -> Void)?
   private let onCancel: () -> Void
 
   private var mode: OverlayMode = .idle
@@ -685,6 +1057,10 @@ private class CaptureOverlayView: NSView {
   private var panoramicButtonRect: NSRect = .zero
   private var panoramicButtonHot = false
 
+  // Gene - Nov, 08, 2026: Added recordButtonRect and hot tracking for the Record button in the overlay.
+  private var recordButtonRect: NSRect = .zero
+  private var recordButtonHot = false
+
   /// Where the cancel control was last drawn. Escape and right-click already
   /// cancel, but neither announces itself — this is the visible way out.
   private var cancelButtonRect: NSRect = .zero
@@ -704,50 +1080,32 @@ private class CaptureOverlayView: NSView {
   private let coffee = NSColor(red: 0.435, green: 0.306, blue: 0.216, alpha: 1.0)
   /// Crema: the lighter warm tone the button lifts to on hover.
   private let crema = NSColor(red: 0.784, green: 0.635, blue: 0.478, alpha: 1.0)
+  /// Crimson record accent for the Record pill button.
+  private let crimson = NSColor(red: 0.76, green: 0.18, blue: 0.18, alpha: 1.0)
   /// Warm espresso wash over everything outside the selection.
   private let backdrop = NSColor(red: 0.13, green: 0.09, blue: 0.06, alpha: 0.42)
   /// Near-black bean for the dimension badge.
   private let bean = NSColor(red: 0.11, green: 0.075, blue: 0.05, alpha: 0.88)
 
-  /// Whether this overlay has already handed back a result.
-  ///
-  /// The Flutter call is awaiting exactly one answer, and there is more than
-  /// one way for a second one to arrive: cancelling mid-drag (a key press or a
-  /// right-click) leaves the drag state intact, so the mouse-up that follows
-  /// still ran the whole capture path and wrote a PNG to the target path — a
-  /// screenshot the user had just cancelled, which the library scan then
-  /// adopted on next launch. Teardown usually deallocates this view first, but
-  /// nothing orders those two, so the latch is what actually guarantees it.
   private var hasSettled = false
 
-  // Gene - Oct, 27, 2026: Added onPanoramicCapture parameter to CaptureOverlayView.
-  // Old implementation:
-  // init(
-  //   frame: NSRect,
-  //   screenImage: CGImage?,
-  //   scaleFactor: CGFloat,
-  //   onCapture: @escaping (CGImage?) -> Void,
-  //   onCancel: @escaping () -> Void
-  // ) {
-  //   self.screenImage = screenImage
-  //   self.scaleFactor = scaleFactor
-  //   self.onCapture = onCapture
-  //   self.onCancel = onCancel
-  //   super.init(frame: frame)
-  //   self.wantsLayer = true
-  // }
+  // Gene - Nov, 08, 2026: Updated CaptureOverlayView initializer to accept initialMode and onRecordCapture.
   init(
     frame: NSRect,
     screenImage: CGImage?,
     scaleFactor: CGFloat,
+    initialMode: String = "capture",
     onCapture: @escaping (CGImage?) -> Void,
     onPanoramicCapture: ((NSRect) -> Void)? = nil,
+    onRecordCapture: ((NSRect) -> Void)? = nil,
     onCancel: @escaping () -> Void
   ) {
     self.screenImage = screenImage
     self.scaleFactor = scaleFactor
+    self.initialMode = initialMode
     self.onCapture = onCapture
     self.onPanoramicCapture = onPanoramicCapture
+    self.onRecordCapture = onRecordCapture
     self.onCancel = onCancel
     super.init(frame: frame)
     self.wantsLayer = true
@@ -851,12 +1209,26 @@ private class CaptureOverlayView: NSView {
   //     addCursorRect(cancelButtonRect, cursor: .pointingHand)
   //   }
   // }
+  // Gene - Nov, 08, 2026: Track hover and cursor rects for recordButtonRect alongside captureButtonRect and cancelButtonRect.
+  // Old implementation:
+  // override func mouseMoved(with event: NSEvent) {
+  //   let point = convert(event.locationInWindow, from: nil)
+  //   let captureHot = !captureButtonRect.isEmpty && captureButtonRect.contains(point)
+  //   let cancelHot = !cancelButtonRect.isEmpty && cancelButtonRect.contains(point)
+  //   if captureHot != captureButtonHot || cancelHot != cancelButtonHot {
+  //     captureButtonHot = captureHot
+  //     cancelButtonHot = cancelHot
+  //     needsDisplay = true
+  //   }
+  // }
   override func mouseMoved(with event: NSEvent) {
     let point = convert(event.locationInWindow, from: nil)
     let captureHot = !captureButtonRect.isEmpty && captureButtonRect.contains(point)
+    let recordHot = !recordButtonRect.isEmpty && recordButtonRect.contains(point)
     let cancelHot = !cancelButtonRect.isEmpty && cancelButtonRect.contains(point)
-    if captureHot != captureButtonHot || cancelHot != cancelButtonHot {
+    if captureHot != captureButtonHot || recordHot != recordButtonHot || cancelHot != cancelButtonHot {
       captureButtonHot = captureHot
+      recordButtonHot = recordHot
       cancelButtonHot = cancelHot
       needsDisplay = true
     }
@@ -872,6 +1244,9 @@ private class CaptureOverlayView: NSView {
     }
     if !captureButtonRect.isEmpty {
       addCursorRect(captureButtonRect, cursor: .pointingHand)
+    }
+    if !recordButtonRect.isEmpty {
+      addCursorRect(recordButtonRect, cursor: .pointingHand)
     }
     if !cancelButtonRect.isEmpty {
       addCursorRect(cancelButtonRect, cursor: .pointingHand)
@@ -979,6 +1354,11 @@ private class CaptureOverlayView: NSView {
         captureCurrentSelection()
         return
       }
+      // Gene - Nov, 08, 2026: Handle click on Record button in interactive overlay.
+      if !recordButtonRect.isEmpty && recordButtonRect.contains(point) {
+        startRecordSelection()
+        return
+      }
       // Gene - Oct, 30, 2026: Switched off panoramic capture button handling in overlay for beta testing.
       // Old implementation:
       // // Gene - Oct, 27, 2026: Check click on panoramicButtonRect to trigger panoramic capture.
@@ -1030,10 +1410,22 @@ private class CaptureOverlayView: NSView {
       // without a confirm, and only from `idle` — once a selection exists, a
       // click outside it starts a new one instead (see `mouseDown`), so a
       // stray click can no longer grab the whole desktop by accident.
+      // Gene - Nov, 08, 2026: When initialMode is "record", a single click without drag starts recording the whole screen; otherwise it captures the whole screen.
+      // Old implementation:
+      // if !isUsable(sel) {
+      //   selection = nil
+      //   mode = .idle
+      //   settle(with: screenImage)
+      //   return
+      // }
       if !isUsable(sel) {
         selection = nil
         mode = .idle
-        settle(with: screenImage)
+        if initialMode == "record" {
+          settleRecord(with: bounds)
+        } else {
+          settle(with: screenImage)
+        }
         return
       }
       mode = .adjusting
@@ -1072,7 +1464,14 @@ private class CaptureOverlayView: NSView {
     case escape:
       settleCancelled()
     case returnKey, keypadEnter, space:
-      captureCurrentSelection()
+      // Gene - Nov, 08, 2026: Confirm selection as Record if initialMode == "record", otherwise Capture.
+      // Old implementation:
+      // captureCurrentSelection()
+      if initialMode == "record" {
+        startRecordSelection()
+      } else {
+        captureCurrentSelection()
+      }
     default:
       break
     }
@@ -1083,6 +1482,19 @@ private class CaptureOverlayView: NSView {
   private func captureCurrentSelection() {
     guard let sel = selection, isUsable(sel) else { return }
     settle(with: croppedImage(for: sel) ?? screenImage)
+  }
+
+  // Gene - Nov, 08, 2026: Added startRecordSelection and settleRecord for initiating area/screen recording from the overlay.
+  private func startRecordSelection() {
+    guard let sel = selection, isUsable(sel) else { return }
+    settleRecord(with: sel)
+  }
+
+  private func settleRecord(with rect: NSRect) {
+    guard !hasSettled else { return }
+    hasSettled = true
+    mode = .idle
+    onRecordCapture?(rect)
   }
 
   // Gene - Oct, 27, 2026: Added startPanoramicCapture to settle with selected rect for panoramic capture.
@@ -1399,8 +1811,16 @@ private class CaptureOverlayView: NSView {
     // // 3. Draw Cancel (X) button
     // drawCancelButton(in: cancelButtonRect, accent: accent)
 
-    // Capture and cancel are placed as one block: [Capture] + [Cancel (X)]
-    let buttonW = pillW + controlGap + buttonH
+    // Gene - Nov, 08, 2026: Placed [Capture] + [Record] + [Cancel (X)] as one unified control block.
+    // Old implementation:
+    // // Capture and cancel are placed as one block: [Capture] + [Cancel (X)]
+    // let buttonW = pillW + controlGap + buttonH
+    let recLabel = "Record"
+    let recAttrString = NSAttributedString(string: recLabel, attributes: attrs)
+    let recTextSize = recAttrString.size()
+    let recPillW = padH * 2 + iconW + gap + recTextSize.width
+
+    let buttonW = pillW + controlGap + recPillW + controlGap + buttonH
 
     // Below the selection by default, above it when that would run off the
     // bottom, and pulled inside when the selection reaches both edges.
@@ -1419,6 +1839,9 @@ private class CaptureOverlayView: NSView {
     let captureRect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
     captureButtonRect = captureRect
     panoramicButtonRect = .zero
+
+    let recRect = NSRect(x: block.minX + pillW + controlGap, y: block.minY, width: recPillW, height: buttonH)
+    recordButtonRect = recRect
 
     cancelButtonRect = NSRect(
       x: block.maxX - buttonH,
@@ -1442,7 +1865,24 @@ private class CaptureOverlayView: NSView {
       at: NSPoint(x: captureRect.minX + padH + iconW + gap, y: captureRect.midY - textSize.height / 2)
     )
 
-    // 2. Draw Cancel (X) button
+    // 2. Draw Record button beside Capture
+    let recPath = NSBezierPath(roundedRect: recRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
+    (recordButtonHot ? crimson.blended(withFraction: 0.25, of: NSColor.white) ?? crimson : crimson).setFill()
+    recPath.fill()
+    NSColor(white: 1.0, alpha: 0.35).setStroke()
+    recPath.lineWidth = 1
+    recPath.stroke()
+
+    let dotR: CGFloat = 9.0
+    let dotRect = NSRect(x: recRect.minX + padH + (iconW - dotR) / 2, y: recRect.midY - dotR / 2, width: dotR, height: dotR)
+    NSColor.white.setFill()
+    NSBezierPath(ovalIn: dotRect).fill()
+
+    recAttrString.draw(
+      at: NSPoint(x: recRect.minX + padH + iconW + gap, y: recRect.midY - recTextSize.height / 2)
+    )
+
+    // 3. Draw Cancel (X) button
     drawCancelButton(in: cancelButtonRect, accent: accent)
   }
 
@@ -1804,3 +2244,460 @@ private class ScrollingHudView: NSView {
     doneAttrStr.draw(at: NSPoint(x: checkX + 13, y: midY - doneSize.height / 2))
   }
 }
+
+// MARK: - Native Screen Recording Session & HUD (AVAssetWriter H.264 MP4)
+
+// Gene - Nov, 08, 2026: Added MacScreenRecordingSession, RecordingHudWindow, and RecordingHudView for whole-screen and area H.264 MP4 recording.
+private final class MacScreenRecordingSession {
+  let targetPath: String
+  let thumbnailPath: String
+  let pointRect: CGRect
+  let scale: CGFloat
+  let fps: Int
+  let recordAudio: Bool
+  let onTick: (Int, Bool) -> Void
+
+  private let writerQueue = DispatchQueue(label: "com.snipsnap.screenrecorder.writer", qos: .userInteractive)
+  private var assetWriter: AVAssetWriter?
+  private var videoInput: AVAssetWriterInput?
+  private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
+  private var timer: DispatchSourceTimer?
+
+  private(set) var isPaused: Bool = false
+  private var isStopped: Bool = false
+  private var startTimestampNs: UInt64 = 0
+  private var pauseStartNs: UInt64 = 0
+  private var totalPausedNs: UInt64 = 0
+  private var frameIndex: Int64 = 0
+  private var wroteThumbnail: Bool = false
+  private(set) var pixelWidth: Int = 0
+  private(set) var pixelHeight: Int = 0
+
+  init(
+    targetPath: String,
+    thumbnailPath: String,
+    pointRect: CGRect,
+    scale: CGFloat,
+    fps: Int,
+    recordAudio: Bool,
+    onTick: @escaping (Int, Bool) -> Void
+  ) {
+    self.targetPath = targetPath
+    self.thumbnailPath = thumbnailPath
+    self.pointRect = pointRect
+    self.scale = scale
+    self.fps = fps
+    self.recordAudio = recordAudio
+    self.onTick = onTick
+    let rawW = max(64, Int((pointRect.width * scale).rounded()))
+    let rawH = max(64, Int((pointRect.height * scale).rounded()))
+    self.pixelWidth = rawW & ~1
+    self.pixelHeight = rawH & ~1
+  }
+
+  func start() -> Bool {
+    let url = URL(fileURLWithPath: targetPath)
+    try? FileManager.default.removeItem(at: url)
+
+    guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mp4) else {
+      return false
+    }
+
+    let bitrate = max(2_500_000, pixelWidth * pixelHeight * 4)
+    let compressionProps: [String: Any] = [
+      AVVideoAverageBitRateKey: bitrate,
+      AVVideoMaxKeyFrameIntervalKey: fps * 2,
+      AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
+    ]
+    let videoSettings: [String: Any] = [
+      AVVideoCodecKey: AVVideoCodecType.h264,
+      AVVideoWidthKey: pixelWidth,
+      AVVideoHeightKey: pixelHeight,
+      AVVideoCompressionPropertiesKey: compressionProps
+    ]
+
+    let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+    input.expectsMediaDataInRealTime = true
+
+    let sourceBufferAttributes: [String: Any] = [
+      kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+      kCVPixelBufferWidthKey as String: pixelWidth,
+      kCVPixelBufferHeightKey as String: pixelHeight,
+      kCVPixelBufferCGImageCompatibilityKey as String: true,
+      kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+    ]
+
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+      assetWriterInput: input,
+      sourcePixelBufferAttributes: sourceBufferAttributes
+    )
+
+    guard writer.canAdd(input) else {
+      return false
+    }
+    writer.add(input)
+
+    guard writer.startWriting() else {
+      return false
+    }
+    writer.startSession(atSourceTime: .zero)
+
+    self.assetWriter = writer
+    self.videoInput = input
+    self.pixelBufferAdaptor = adaptor
+    self.startTimestampNs = DispatchTime.now().uptimeNanoseconds
+
+    let timerSource = DispatchSource.makeTimerSource(queue: writerQueue)
+    let intervalNs = UInt64(1_000_000_000 / max(15, fps))
+    timerSource.schedule(deadline: .now(), repeating: .nanoseconds(Int(intervalNs)), leeway: .milliseconds(2))
+    timerSource.setEventHandler { [weak self] in
+      self?.captureTick()
+    }
+    self.timer = timerSource
+    timerSource.resume()
+    return true
+  }
+
+  func pause() {
+    writerQueue.async { [weak self] in
+      guard let self = self, !self.isPaused, !self.isStopped else { return }
+      self.isPaused = true
+      self.pauseStartNs = DispatchTime.now().uptimeNanoseconds
+      self.onTick(self.currentElapsedMs(), true)
+    }
+  }
+
+  func resume() {
+    writerQueue.async { [weak self] in
+      guard let self = self, self.isPaused, !self.isStopped else { return }
+      let now = DispatchTime.now().uptimeNanoseconds
+      if now > self.pauseStartNs {
+        self.totalPausedNs += (now - self.pauseStartNs)
+      }
+      self.isPaused = false
+      self.onTick(self.currentElapsedMs(), false)
+    }
+  }
+
+  func currentElapsedMs() -> Int {
+    let now = DispatchTime.now().uptimeNanoseconds
+    let effectiveNow = isPaused ? pauseStartNs : now
+    guard effectiveNow > startTimestampNs + totalPausedNs else { return 0 }
+    return Int((effectiveNow - startTimestampNs - totalPausedNs) / 1_000_000)
+  }
+
+  private func captureTick() {
+    guard !isStopped else { return }
+    let elapsed = currentElapsedMs()
+    onTick(elapsed, isPaused)
+    if isPaused { return }
+
+    guard
+      let input = videoInput,
+      let adaptor = pixelBufferAdaptor,
+      input.isReadyForMoreMediaData,
+      let pool = adaptor.pixelBufferPool
+    else {
+      return
+    }
+
+    guard let cgImage = CGWindowListCreateImage(
+      pointRect,
+      .optionOnScreenOnly,
+      kCGNullWindowID,
+      .bestResolution
+    ) else {
+      return
+    }
+
+    if !wroteThumbnail && !thumbnailPath.isEmpty {
+      wroteThumbnail = true
+      let rep = NSBitmapImageRep(cgImage: cgImage)
+      if let data = rep.representation(using: .png, properties: [:]) {
+        try? data.write(to: URL(fileURLWithPath: thumbnailPath), options: .atomic)
+      }
+    }
+
+    var pixelBufferOut: CVPixelBuffer?
+    let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &pixelBufferOut)
+    guard status == kCVReturnSuccess, let pixelBuffer = pixelBufferOut else {
+      return
+    }
+
+    CVPixelBufferLockBaseAddress(pixelBuffer, [])
+    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+
+    guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+      return
+    }
+    let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+
+    if let context = CGContext(
+      data: baseAddress,
+      width: pixelWidth,
+      height: pixelHeight,
+      bitsPerComponent: 8,
+      bytesPerRow: bytesPerRow,
+      space: colorSpace,
+      bitmapInfo: bitmapInfo
+    ) {
+      context.interpolationQuality = .low
+      context.draw(cgImage, in: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
+      let presentationTime = CMTime(value: Int64(elapsed), timescale: 1000)
+      adaptor.append(pixelBuffer, withPresentationTime: presentationTime)
+      frameIndex += 1
+    }
+  }
+
+  func stop(cancel: Bool, completion: @escaping ([String: Any]?) -> Void) {
+    writerQueue.async { [weak self] in
+      guard let self = self else {
+        completion(nil)
+        return
+      }
+      if self.isStopped {
+        completion(nil)
+        return
+      }
+      self.isStopped = true
+      let finalDurationMs = max(100, self.currentElapsedMs())
+
+      self.timer?.cancel()
+      self.timer = nil
+
+      guard let writer = self.assetWriter, let input = self.videoInput else {
+        completion(nil)
+        return
+      }
+
+      if cancel {
+        writer.cancelWriting()
+        try? FileManager.default.removeItem(atPath: self.targetPath)
+        if !self.thumbnailPath.isEmpty {
+          try? FileManager.default.removeItem(atPath: self.thumbnailPath)
+        }
+        completion(nil)
+        return
+      }
+
+      input.markAsFinished()
+      writer.finishWriting {
+        let info: [String: Any] = [
+          "filePath": self.targetPath,
+          "thumbnailPath": self.thumbnailPath,
+          "durationMs": finalDurationMs,
+          "width": self.pixelWidth,
+          "height": self.pixelHeight,
+          "hasAudio": self.recordAudio
+        ]
+        completion(info)
+      }
+    }
+  }
+}
+
+private class RecordingHudWindow: NSPanel {
+  init(
+    contentRect: NSRect,
+    onTogglePause: @escaping () -> Void,
+    onStop: @escaping () -> Void,
+    onCancel: @escaping () -> Void
+  ) {
+    super.init(
+      contentRect: contentRect,
+      styleMask: [.borderless, .nonactivatingPanel],
+      backing: .buffered,
+      defer: false
+    )
+    self.isOpaque = false
+    self.backgroundColor = .clear
+    self.level = .floating
+    self.hasShadow = true
+    self.ignoresMouseEvents = false
+    self.acceptsMouseMovedEvents = true
+    self.hidesOnDeactivate = false
+    self.sharingType = .none
+    self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+
+    let view = RecordingHudView(
+      frame: NSRect(origin: .zero, size: contentRect.size),
+      onTogglePause: onTogglePause,
+      onStop: onStop,
+      onCancel: onCancel
+    )
+    self.contentView = view
+  }
+
+  override var canBecomeKey: Bool { return true }
+  override var canBecomeMain: Bool { return false }
+}
+
+private class RecordingHudView: NSView {
+  private let onTogglePause: () -> Void
+  private let onStop: () -> Void
+  private let onCancel: () -> Void
+
+  private var elapsedMs: Int = 0
+  private var isPaused: Bool = false
+  private var pauseHot: Bool = false
+  private var stopHot: Bool = false
+  private var cancelHot: Bool = false
+
+  private var pauseRect: NSRect = .zero
+  private var stopRect: NSRect = .zero
+  private var cancelRect: NSRect = .zero
+
+  private let bean = NSColor(red: 0.11, green: 0.075, blue: 0.05, alpha: 0.94)
+  private let coffee = NSColor(red: 0.435, green: 0.306, blue: 0.216, alpha: 1.0)
+  private let recordRed = NSColor(red: 0.85, green: 0.20, blue: 0.18, alpha: 1.0)
+
+  init(
+    frame: NSRect,
+    onTogglePause: @escaping () -> Void,
+    onStop: @escaping () -> Void,
+    onCancel: @escaping () -> Void
+  ) {
+    self.onTogglePause = onTogglePause
+    self.onStop = onStop
+    self.onCancel = onCancel
+    super.init(frame: frame)
+    self.wantsLayer = true
+  }
+
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func update(elapsedMs: Int, isPaused: Bool) {
+    self.elapsedMs = elapsedMs
+    self.isPaused = isPaused
+    self.needsDisplay = true
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    for area in trackingAreas {
+      removeTrackingArea(area)
+    }
+    addTrackingArea(
+      NSTrackingArea(
+        rect: bounds,
+        options: [.activeAlways, .mouseMoved, .inVisibleRect],
+        owner: self,
+        userInfo: nil
+      )
+    )
+  }
+
+  override func mouseMoved(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    let pHot = !pauseRect.isEmpty && pauseRect.contains(point)
+    let sHot = !stopRect.isEmpty && stopRect.contains(point)
+    let cHot = !cancelRect.isEmpty && cancelRect.contains(point)
+    if pHot != pauseHot || sHot != stopHot || cHot != cancelHot {
+      pauseHot = pHot
+      stopHot = sHot
+      cancelHot = cHot
+      needsDisplay = true
+    }
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    if !pauseRect.isEmpty && pauseRect.contains(point) {
+      onTogglePause()
+      return
+    }
+    if !stopRect.isEmpty && stopRect.contains(point) {
+      onStop()
+      return
+    }
+    if !cancelRect.isEmpty && cancelRect.contains(point) {
+      onCancel()
+      return
+    }
+  }
+
+  override func draw(_ dirtyRect: NSRect) {
+    super.draw(dirtyRect)
+
+    let bgPath = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+    bean.setFill()
+    bgPath.fill()
+    NSColor(white: 1.0, alpha: 0.25).setStroke()
+    bgPath.lineWidth = 1.0
+    bgPath.stroke()
+
+    let midY = bounds.midY
+
+    // 1. Recording status dot
+    let dotD: CGFloat = 9
+    let dotRect = NSRect(x: 14, y: midY - dotD / 2, width: dotD, height: dotD)
+    let dotPath = NSBezierPath(ovalIn: dotRect)
+    (isPaused ? NSColor.systemOrange : recordRed).setFill()
+    dotPath.fill()
+
+    // 2. Formatted MM:SS timer
+    let totalSecs = max(0, elapsedMs / 1000)
+    let mins = totalSecs / 60
+    let secs = totalSecs % 60
+    let timeStr = String(format: "%02d:%02d", mins, secs) + (isPaused ? " (Paused)" : "")
+    let timeAttrs: [NSAttributedString.Key: Any] = [
+      .font: NSFont.monospacedDigitSystemFont(ofSize: 12.5, weight: .bold),
+      .foregroundColor: NSColor.white
+    ]
+    let timeAttrStr = NSAttributedString(string: timeStr, attributes: timeAttrs)
+    let timeSize = timeAttrStr.size()
+    timeAttrStr.draw(at: NSPoint(x: 28, y: midY - timeSize.height / 2))
+
+    // 3. Cancel (X) button at right
+    let cancelD: CGFloat = 24
+    let cancelX = bounds.maxX - cancelD - 8
+    cancelRect = NSRect(x: cancelX, y: midY - cancelD / 2, width: cancelD, height: cancelD)
+    let cancelPath = NSBezierPath(ovalIn: cancelRect)
+    (cancelHot ? coffee : NSColor(white: 1.0, alpha: 0.15)).setFill()
+    cancelPath.fill()
+    let inset = cancelD * 0.32
+    let xBox = cancelRect.insetBy(dx: inset, dy: inset)
+    let cross = NSBezierPath()
+    cross.move(to: NSPoint(x: xBox.minX, y: xBox.minY))
+    cross.line(to: NSPoint(x: xBox.maxX, y: xBox.maxY))
+    cross.move(to: NSPoint(x: xBox.minX, y: xBox.maxY))
+    cross.line(to: NSPoint(x: xBox.maxX, y: xBox.minY))
+    cross.lineWidth = 1.6
+    cross.lineCapStyle = .round
+    NSColor.white.setStroke()
+    cross.stroke()
+
+    // 4. Stop button
+    let btnH: CGFloat = 26
+    let stopW: CGFloat = 62
+    let stopX = cancelX - stopW - 6
+    stopRect = NSRect(x: stopX, y: midY - btnH / 2, width: stopW, height: btnH)
+    let stopPath = NSBezierPath(roundedRect: stopRect, xRadius: btnH / 2, yRadius: btnH / 2)
+    (stopHot ? recordRed.blended(withFraction: 0.25, of: .white) ?? recordRed : recordRed).setFill()
+    stopPath.fill()
+    let stopAttrs: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
+      .foregroundColor: NSColor.white
+    ]
+    let stopStr = NSAttributedString(string: "■ Stop", attributes: stopAttrs)
+    let stopSize = stopStr.size()
+    stopStr.draw(at: NSPoint(x: stopRect.midX - stopSize.width / 2, y: midY - stopSize.height / 2))
+
+    // 5. Pause / Resume button
+    let pauseW: CGFloat = 68
+    let pauseX = stopX - pauseW - 6
+    pauseRect = NSRect(x: pauseX, y: midY - btnH / 2, width: pauseW, height: btnH)
+    let pausePath = NSBezierPath(roundedRect: pauseRect, xRadius: btnH / 2, yRadius: btnH / 2)
+    (pauseHot ? coffee : NSColor(white: 1.0, alpha: 0.16)).setFill()
+    pausePath.fill()
+    let pauseLabel = isPaused ? "▶ Resume" : "❚❚ Pause"
+    let pauseStr = NSAttributedString(string: pauseLabel, attributes: stopAttrs)
+    let pauseSize = pauseStr.size()
+    pauseStr.draw(at: NSPoint(x: pauseRect.midX - pauseSize.width / 2, y: midY - pauseSize.height / 2))
+  }
+}
+

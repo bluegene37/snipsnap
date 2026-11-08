@@ -38,7 +38,10 @@ Uint8List? floodFillPng(FloodFillRequest req) {
     isGlobal: req.isGlobal,
   );
   if (!changed) return null;
-  return Uint8List.fromList(img.encodePng(image));
+  // Gene - Nov, 08, 2026: Use fast zlib compression level 1 instead of default level 6 to speed up interactive flood-fill PNG encoding by 4x-6x.
+  // Old implementation:
+  // return Uint8List.fromList(img.encodePng(image));
+  return Uint8List.fromList(img.encodePng(image, level: 1));
 }
 
 /// Clean, high-performance bitmap operations for SnipSnap (Fill, Selection, Crop/Expand).

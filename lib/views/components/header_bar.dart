@@ -28,6 +28,20 @@ class HeaderBar extends StatelessWidget {
   final VoidCallback? onSnipFullScreen;
   final VoidCallback? onSnipTimer;
   final VoidCallback? onSnipScrolling;
+  // Gene - Nov, 08, 2026: Added screen recording, clipboard paste, and auto-copy callbacks & state to HeaderBar.
+  final VoidCallback? onRecordArea;
+  final VoidCallback? onRecordFullScreen;
+  final VoidCallback? onPasteFromClipboard;
+  final bool recordMicrophone;
+  final ValueChanged<bool>? onToggleRecordMicrophone;
+  final bool autoCopyAfterCapture;
+  final ValueChanged<bool>? onToggleAutoCopy;
+  final bool isRecording;
+  final bool isRecordingPaused;
+  final String recordingElapsedText;
+  final VoidCallback? onTogglePauseRecording;
+  final VoidCallback? onStopRecording;
+  final VoidCallback? onCancelRecording;
   final VoidCallback onImportImage;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
@@ -69,6 +83,20 @@ class HeaderBar extends StatelessWidget {
     this.onSnipFullScreen,
     this.onSnipTimer,
     this.onSnipScrolling,
+    // Gene - Nov, 08, 2026: Added screen recording, clipboard paste, and auto-copy parameters to HeaderBar constructor.
+    this.onRecordArea,
+    this.onRecordFullScreen,
+    this.onPasteFromClipboard,
+    this.recordMicrophone = false,
+    this.onToggleRecordMicrophone,
+    this.autoCopyAfterCapture = false,
+    this.onToggleAutoCopy,
+    this.isRecording = false,
+    this.isRecordingPaused = false,
+    this.recordingElapsedText = '00:00',
+    this.onTogglePauseRecording,
+    this.onStopRecording,
+    this.onCancelRecording,
     required this.onImportImage,
     required this.onUndo,
     required this.onRedo,
@@ -366,11 +394,25 @@ class HeaderBar extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                   side: BorderSide(color: t.border),
                 ),
+                // Gene - Nov, 08, 2026: Added Record Area, Record Full Screen, Microphone Audio toggle, and Paste from Clipboard to the Capture Modes dropdown.
+                // Old implementation:
+                // onSelected: (val) => switch (val) {
+                //   'area' => onSnipInteractive(),
+                //   'scroll' => onSnipScrolling?.call(),
+                //   'full' => onSnipFullScreen?.call(),
+                //   'timer' => onSnipTimer?.call(),
+                //   _ => null,
+                // },
                 onSelected: (val) => switch (val) {
                   'area' => onSnipInteractive(),
                   'scroll' => onSnipScrolling?.call(),
                   'full' => onSnipFullScreen?.call(),
                   'timer' => onSnipTimer?.call(),
+                  'record_area' => onRecordArea?.call(),
+                  'record_full' => onRecordFullScreen?.call(),
+                  'toggle_mic' =>
+                    onToggleRecordMicrophone?.call(!recordMicrophone),
+                  'paste' => onPasteFromClipboard?.call(),
                   _ => null,
                 },
                 itemBuilder: (ctx) => [
@@ -420,6 +462,52 @@ class HeaderBar extends StatelessWidget {
                       'Cmd+Shift+6',
                     ),
                   ),
+                  const PopupMenuDivider(height: 8),
+                  _captureMenuItem(
+                    t,
+                    value: 'record_area',
+                    icon: Icons.videocam_rounded,
+                    title: 'Record Area Video',
+                    subtitle: _shortcut(
+                      AppShortcutAction.recordArea,
+                      'Cmd+Shift+R',
+                    ),
+                  ),
+                  _captureMenuItem(
+                    t,
+                    value: 'record_full',
+                    icon: Icons.fiber_manual_record_rounded,
+                    title: 'Record Full Screen',
+                    subtitle: _shortcut(
+                      AppShortcutAction.recordFullScreen,
+                      'Cmd+Shift+7',
+                    ),
+                  ),
+                  if (onToggleRecordMicrophone != null)
+                    _captureMenuItem(
+                      t,
+                      value: 'toggle_mic',
+                      icon: recordMicrophone
+                          ? Icons.mic_rounded
+                          : Icons.mic_off_rounded,
+                      title: recordMicrophone
+                          ? 'Microphone Audio: ON'
+                          : 'Microphone Audio: OFF',
+                      subtitle: 'Include voice narration in recordings',
+                    ),
+                  if (onPasteFromClipboard != null) ...[
+                    const PopupMenuDivider(height: 8),
+                    _captureMenuItem(
+                      t,
+                      value: 'paste',
+                      icon: Icons.content_paste_rounded,
+                      title: 'Paste from Clipboard',
+                      subtitle: _shortcut(
+                        AppShortcutAction.pasteImage,
+                        'Cmd+V',
+                      ),
+                    ),
+                  ],
                 ],
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -442,6 +530,67 @@ class HeaderBar extends StatelessWidget {
               'Open Image File (${_shortcut(AppShortcutAction.openImage, 'Cmd+O')})',
           onPressed: onImportImage,
         ),
+        // Gene - Nov, 08, 2026: Show active recording timer + Pause/Resume + Stop pill in HeaderBar when screen recording is running.
+        if (isRecording) ...[
+          const SizedBox(width: 6),
+          Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: t.selectedFill,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: t.danger, width: 1.4),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.fiber_manual_record_rounded,
+                  size: 13,
+                  color: t.danger,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  recordingElapsedText,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    color: t.ink,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: onTogglePauseRecording,
+                  child: Tooltip(
+                    message: isRecordingPaused
+                        ? 'Resume Recording'
+                        : 'Pause Recording',
+                    child: Icon(
+                      isRecordingPaused
+                          ? Icons.play_arrow_rounded
+                          : Icons.pause_rounded,
+                      size: 16,
+                      color: t.ink,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: onStopRecording,
+                  child: Tooltip(
+                    message: 'Stop & Save Recording',
+                    child: Icon(
+                      Icons.stop_circle_rounded,
+                      size: 17,
+                      color: t.danger,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -640,9 +789,19 @@ class HeaderBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         side: BorderSide(color: t.border),
       ),
+      // Gene - Nov, 08, 2026: Added Auto-copy to clipboard after capture toggle to overflow menu.
+      // Old implementation:
+      // onSelected: (val) => switch (val) {
+      //   'manual' => onOpenUserManual?.call(),
+      //   'shortcuts' => onOpenShortcutSettings(),
+      //   'theme' => onToggleThemeMode(),
+      //   'about' => onOpenAboutDialog(),
+      //   _ => null,
+      // },
       onSelected: (val) => switch (val) {
         'manual' => onOpenUserManual?.call(),
         'shortcuts' => onOpenShortcutSettings(),
+        'auto_copy' => onToggleAutoCopy?.call(!autoCopyAfterCapture),
         'theme' => onToggleThemeMode(),
         'about' => onOpenAboutDialog(),
         _ => null,
@@ -661,6 +820,17 @@ class HeaderBar extends StatelessWidget {
           Icons.keyboard_rounded,
           'Keyboard Shortcuts…',
         ),
+        if (onToggleAutoCopy != null)
+          _overflowItem(
+            t,
+            'auto_copy',
+            autoCopyAfterCapture
+                ? Icons.check_box_rounded
+                : Icons.check_box_outline_blank_rounded,
+            autoCopyAfterCapture
+                ? 'Auto-Copy After Capture: ON'
+                : 'Auto-Copy After Capture: OFF',
+          ),
         _overflowItem(
           t,
           'theme',

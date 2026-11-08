@@ -6,7 +6,12 @@ import '../services/storage_service.dart';
 import '../utils/image_eviction.dart';
 import '../utils/snip_theme.dart';
 
-class GallerySidebar extends StatelessWidget {
+// Gene - Nov, 08, 2026: Added GalleryMediaFilter enum and upgraded GallerySidebar to StatefulWidget for All/Images/Videos filtering, video badges, and inline title rename.
+enum GalleryMediaFilter { all, images, videos }
+
+// Old implementation:
+// class GallerySidebar extends StatelessWidget {
+class GallerySidebar extends StatefulWidget {
   final List<CaptureItem> items;
   final CaptureItem? activeItem;
   final ValueChanged<CaptureItem> onSelectItem;
@@ -14,6 +19,8 @@ class GallerySidebar extends StatelessWidget {
   final VoidCallback onClose;
   final VoidCallback? onOpenLibraryLocation;
   final ValueChanged<CaptureItem>? onRevealItemInFolder;
+  // Gene - Nov, 08, 2026: Added optional onRenameItem callback for inline capture/recording title editing.
+  final void Function(CaptureItem item, String newTitle)? onRenameItem;
 
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
@@ -51,12 +58,63 @@ class GallerySidebar extends StatelessWidget {
     required this.onClose,
     this.onOpenLibraryLocation,
     this.onRevealItemInFolder,
+    this.onRenameItem,
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
     this.imageRevision = 0,
     this.isOpen = true,
     this.onToggleCollapse,
   });
+
+  @override
+  State<GallerySidebar> createState() => _GallerySidebarState();
+}
+
+class _GallerySidebarState extends State<GallerySidebar> {
+  GalleryMediaFilter _filter = GalleryMediaFilter.all;
+  String? _editingItemId;
+  final TextEditingController _renameController = TextEditingController();
+
+  @override
+  void dispose() {
+    _renameController.dispose();
+    super.dispose();
+  }
+
+  List<CaptureItem> get _filteredItems {
+    return switch (_filter) {
+      GalleryMediaFilter.all => widget.items,
+      GalleryMediaFilter.images =>
+        widget.items.where((i) => !i.isVideo).toList(),
+      GalleryMediaFilter.videos =>
+        widget.items.where((i) => i.isVideo).toList(),
+    };
+  }
+
+  String _formatDurationBadge(int? durationMs) {
+    final secs = ((durationMs ?? 0) / 1000).round().clamp(0, 359999);
+    final mins = secs ~/ 60;
+    final rem = (secs % 60).toString().padLeft(2, '0');
+    return '$mins:$rem';
+  }
+
+  void _startInlineRename(CaptureItem item) {
+    if (widget.onRenameItem == null) return;
+    setState(() {
+      _editingItemId = item.id;
+      _renameController.text = item.title;
+    });
+  }
+
+  void _commitInlineRename(CaptureItem item) {
+    final trimmed = _renameController.text.trim();
+    setState(() {
+      _editingItemId = null;
+    });
+    if (trimmed.isNotEmpty && trimmed != item.title) {
+      widget.onRenameItem?.call(item, trimmed);
+    }
+  }
 
   String _formatTime(DateTime date) {
     final hour = date.hour.toString().padLeft(2, '0');
@@ -86,10 +144,12 @@ class GallerySidebar extends StatelessWidget {
     //   ),
     //   child: Column(
     //     children: [
+    // Gene - Nov, 08, 2026: Updated build to use widget.* in _GallerySidebarState, added All/Images/Videos filter pills, video thumbnail/play/duration badges, and inline title rename.
+    final filtered = _filteredItems;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeInOut,
-      height: isOpen ? 145 : 33,
+      height: widget.isOpen ? 145 : 33,
       decoration: BoxDecoration(
         color: t.surface,
         border: Border(top: BorderSide(color: t.border)),
@@ -121,7 +181,7 @@ class GallerySidebar extends StatelessWidget {
                   //   ),
                   // ),
                   Tooltip(
-                    message: isOpen
+                    message: widget.isOpen
                         ? 'Hide Screenshots Tray (Cmd+H)'
                         : 'Show Screenshots Tray (Cmd+H)',
                     child: Material(
@@ -129,7 +189,7 @@ class GallerySidebar extends StatelessWidget {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(6),
                         hoverColor: t.hoverFill,
-                        onTap: onToggleCollapse ?? onClose,
+                        onTap: widget.onToggleCollapse ?? widget.onClose,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 4,
@@ -139,7 +199,7 @@ class GallerySidebar extends StatelessWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
-                                isOpen
+                                widget.isOpen
                                     ? Icons.keyboard_arrow_down_rounded
                                     : Icons.keyboard_arrow_up_rounded,
                                 color: t.ink,
@@ -178,8 +238,8 @@ class GallerySidebar extends StatelessWidget {
                         borderRadius: BorderRadius.circular(6),
                         hoverColor: t.hoverFill,
                         onTap: () {
-                          if (onOpenLibraryLocation != null) {
-                            onOpenLibraryLocation!();
+                          if (widget.onOpenLibraryLocation != null) {
+                            widget.onOpenLibraryLocation!();
                           } else {
                             StorageService.openLibraryFolder();
                           }
@@ -217,11 +277,58 @@ class GallerySidebar extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(width: 8),
+
+                  // Gene - Nov, 08, 2026: Media filter pills (All / Images / Videos) in tray sub-header.
+                  for (final entry in const [
+                    (GalleryMediaFilter.all, 'All'),
+                    (GalleryMediaFilter.images, 'Images'),
+                    (GalleryMediaFilter.videos, 'Videos'),
+                  ]) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          key: ValueKey('gallery-filter-${entry.$1.name}'),
+                          borderRadius: BorderRadius.circular(5),
+                          hoverColor: t.hoverFill,
+                          onTap: () => setState(() => _filter = entry.$1),
+                          child: DecoratedBox(
+                            decoration: t.controlDecoration(
+                              active: _filter == entry.$1,
+                              exclusive: false,
+                              radius: 5,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 2,
+                              ),
+                              child: Text(
+                                entry.$2,
+                                style: TextStyle(
+                                  color: t.controlForeground(
+                                    active: _filter == entry.$1,
+                                    exclusive: false,
+                                  ),
+                                  fontSize: 10.5,
+                                  fontWeight: _filter == entry.$1
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
 
                   const Spacer(),
 
                   // Middle: Zoom Slider Controls in the Sub-Header Bar of Screenshot History Tray
-                  if (onZoomScaleChanged != null) ...[
+                  if (widget.onZoomScaleChanged != null) ...[
                     IconButton(
                       icon: const Icon(Icons.remove_rounded, size: 14),
                       // inkFaint, not inkMuted, for the *disabled* edge — the
@@ -229,11 +336,11 @@ class GallerySidebar extends StatelessWidget {
                       // text, and header_bar.dart's identical zoom stepper
                       // already uses it. inkMuted is the secondary-but-enabled
                       // tone and stays that way at the reset button below.
-                      color: zoomScale > 0.2 ? t.ink : t.inkFaint,
+                      color: widget.zoomScale > 0.2 ? t.ink : t.inkFaint,
                       tooltip: 'Zoom Out',
-                      onPressed: zoomScale > 0.2
-                          ? () => onZoomScaleChanged!(
-                              (zoomScale - 0.25).clamp(0.2, 4.0),
+                      onPressed: widget.zoomScale > 0.2
+                          ? () => widget.onZoomScaleChanged!(
+                              (widget.zoomScale - 0.25).clamp(0.2, 4.0),
                             )
                           : null,
                       constraints: const BoxConstraints(
@@ -243,24 +350,24 @@ class GallerySidebar extends StatelessWidget {
                       padding: EdgeInsets.zero,
                     ),
                     SizedBox(
-                      width: 240,
+                      width: 200,
                       child: SliderTheme(
                         data: sliderThemeData,
                         child: Slider(
-                          value: zoomScale.clamp(0.2, 4.0),
+                          value: widget.zoomScale.clamp(0.2, 4.0),
                           min: 0.2,
                           max: 4.0,
-                          onChanged: onZoomScaleChanged,
+                          onChanged: widget.onZoomScaleChanged,
                         ),
                       ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.add_rounded, size: 14),
-                      color: zoomScale < 4.0 ? t.ink : t.inkFaint,
+                      color: widget.zoomScale < 4.0 ? t.ink : t.inkFaint,
                       tooltip: 'Zoom In',
-                      onPressed: zoomScale < 4.0
-                          ? () => onZoomScaleChanged!(
-                              (zoomScale + 0.25).clamp(0.2, 4.0),
+                      onPressed: widget.zoomScale < 4.0
+                          ? () => widget.onZoomScaleChanged!(
+                              (widget.zoomScale + 0.25).clamp(0.2, 4.0),
                             )
                           : null,
                       constraints: const BoxConstraints(
@@ -274,7 +381,7 @@ class GallerySidebar extends StatelessWidget {
                       message: 'Reset Zoom to 100%',
                       child: InkWell(
                         borderRadius: BorderRadius.circular(6),
-                        onTap: () => onZoomScaleChanged!(1.0),
+                        onTap: () => widget.onZoomScaleChanged!(1.0),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 6,
@@ -285,15 +392,15 @@ class GallerySidebar extends StatelessWidget {
                           // non-exclusive shape (selectedFill highlight, not
                           // an activeFill knockout plate).
                           decoration: t.controlDecoration(
-                            active: zoomScale == 1.0,
+                            active: widget.zoomScale == 1.0,
                             exclusive: false,
                             radius: 6,
                           ),
                           child: Text(
-                            '${(zoomScale * 100).round()}%',
+                            '${(widget.zoomScale * 100).round()}%',
                             style: TextStyle(
                               color: t.controlForeground(
-                                active: zoomScale == 1.0,
+                                active: widget.zoomScale == 1.0,
                                 exclusive: false,
                               ),
                               fontSize: 11,
@@ -315,9 +422,9 @@ class GallerySidebar extends StatelessWidget {
                       // unconditional). The dimmer tone says "you are not at
                       // 100%", an enabled secondary state — inkFaint would both
                       // lie about interactivity and drop to 2.72:1 in light.
-                      color: zoomScale == 1.0 ? t.ink : t.inkMuted,
+                      color: widget.zoomScale == 1.0 ? t.ink : t.inkMuted,
                       tooltip: 'Reset Zoom (100%)',
-                      onPressed: () => onZoomScaleChanged!(1.0),
+                      onPressed: () => widget.onZoomScaleChanged!(1.0),
                       constraints: const BoxConstraints(
                         minWidth: 24,
                         minHeight: 24,
@@ -329,9 +436,9 @@ class GallerySidebar extends StatelessWidget {
                   const Spacer(),
 
                   // Right: Resolution & Close Button
-                  if (activeItem != null &&
-                      activeItem!.width > 0 &&
-                      activeItem!.height > 0)
+                  if (widget.activeItem != null &&
+                      widget.activeItem!.width > 0 &&
+                      widget.activeItem!.height > 0)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
@@ -343,7 +450,7 @@ class GallerySidebar extends StatelessWidget {
                         border: Border.all(color: t.border),
                       ),
                       child: Text(
-                        '${activeItem!.width} x ${activeItem!.height}',
+                        '${widget.activeItem!.width} x ${widget.activeItem!.height}',
                         style: TextStyle(
                           color: t.inkMuted,
                           fontSize: 11,
@@ -368,7 +475,7 @@ class GallerySidebar extends StatelessWidget {
                   // ),
                   IconButton(
                     icon: Icon(
-                      isOpen
+                      widget.isOpen
                           ? Icons.keyboard_arrow_down_rounded
                           : Icons.keyboard_arrow_up_rounded,
                       color: t.inkMuted,
@@ -379,10 +486,10 @@ class GallerySidebar extends StatelessWidget {
                       minWidth: 24,
                       minHeight: 24,
                     ),
-                    tooltip: isOpen
+                    tooltip: widget.isOpen
                         ? 'Hide Screenshots Tray'
                         : 'Show Screenshots Tray',
-                    onPressed: onToggleCollapse ?? onClose,
+                    onPressed: widget.onToggleCollapse ?? widget.onClose,
                   ),
                 ],
               ),
@@ -393,12 +500,14 @@ class GallerySidebar extends StatelessWidget {
             // Old implementation:
             // Expanded(
             //   child: items.isEmpty
-            if (isOpen)
+            if (widget.isOpen)
               Expanded(
-                child: items.isEmpty
+                child: filtered.isEmpty
                     ? Center(
                         child: Text(
-                          'No captures yet. Click "Snip" to start!',
+                          widget.items.isEmpty
+                              ? 'No captures yet. Click "Snip" to start!'
+                              : 'No matching items in this filter.',
                           textAlign: TextAlign.center,
                           // Was a fixed Colors.white38 regardless of mode — same
                           // pre-existing light-mode legibility bug as the close
@@ -412,11 +521,21 @@ class GallerySidebar extends StatelessWidget {
                           horizontal: 10,
                           vertical: 8,
                         ),
-                        itemCount: items.length,
+                        itemCount: filtered.length,
                         itemBuilder: (context, index) {
-                          final item = items[index];
-                          final isSelected = activeItem?.id == item.id;
-                          final fileExists = File(item.filePath).existsSync();
+                          final item = filtered[index];
+                          final isSelected = widget.activeItem?.id == item.id;
+                          final displayPath =
+                              (item.isVideo &&
+                                  item.thumbnailPath != null &&
+                                  item.thumbnailPath!.isNotEmpty)
+                              ? item.thumbnailPath!
+                              : item.filePath;
+                          final fileExists =
+                              !item.isVideo
+                              ? File(displayPath).existsSync()
+                              : (item.thumbnailPath != null &&
+                                    File(item.thumbnailPath!).existsSync());
 
                           /*
                       // The selected capture is a non-exclusive highlight
@@ -470,7 +589,7 @@ class GallerySidebar extends StatelessWidget {
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(6),
                                 hoverColor: t.hoverFill,
-                                onTap: () => onSelectItem(item),
+                                onTap: () => widget.onSelectItem(item),
                                 child: Padding(
                                   padding: const EdgeInsets.all(5),
                                   child: Column(
@@ -489,7 +608,7 @@ class GallerySidebar extends StatelessWidget {
                                                   color: t.canvas,
                                                   child: fileExists
                                                       ? Image.file(
-                                                          File(item.filePath),
+                                                          File(displayPath),
                                                           // Re-key only the active
                                                           // item when its file is
                                                           // rewritten in place, so
@@ -497,8 +616,8 @@ class GallerySidebar extends StatelessWidget {
                                                           // re-decodes.
                                                           key: ValueKey(
                                                             isSelected
-                                                                ? '${item.filePath}#$imageRevision'
-                                                                : item.filePath,
+                                                                ? '$displayPath#${widget.imageRevision}'
+                                                                : displayPath,
                                                           ),
                                                           fit: BoxFit.cover,
                                                           // Thumbnails are ~170px
@@ -527,8 +646,11 @@ class GallerySidebar extends StatelessWidget {
                                                         )
                                                       : Center(
                                                           child: Icon(
-                                                            Icons
-                                                                .image_not_supported_rounded,
+                                                            item.isVideo
+                                                                ? Icons
+                                                                      .videocam_rounded
+                                                                : Icons
+                                                                      .image_not_supported_rounded,
                                                             color: t.inkMuted,
                                                             size: 20,
                                                           ),
@@ -536,6 +658,57 @@ class GallerySidebar extends StatelessWidget {
                                                 ),
                                               ),
                                             ),
+                                            // Gene - Nov, 08, 2026: Center play icon and bottom-left duration badge for video items.
+                                            if (item.isVideo) ...[
+                                              Center(
+                                                child: DecoratedBox(
+                                                  decoration: BoxDecoration(
+                                                    color: t.ink,
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.all(3),
+                                                    child: Icon(
+                                                      Icons.play_arrow_rounded,
+                                                      size: 14,
+                                                      color: t.onActive,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              Positioned(
+                                                bottom: 3,
+                                                left: 3,
+                                                child: DecoratedBox(
+                                                  decoration: BoxDecoration(
+                                                    color: t.ink,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          3,
+                                                        ),
+                                                  ),
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 4,
+                                                          vertical: 1,
+                                                        ),
+                                                    child: Text(
+                                                      _formatDurationBadge(
+                                                        item.durationMs,
+                                                      ),
+                                                      style: TextStyle(
+                                                        color: t.onActive,
+                                                        fontSize: 9,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                             // Gene - Oct, 04, 2026: Added distinct checkmark indicator badge for the selected capture thumbnail.
                                             if (isSelected)
                                               Positioned(
@@ -612,31 +785,115 @@ class GallerySidebar extends StatelessWidget {
                                       Row(
                                         children: [
                                           Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  item.title,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                    color: t.ink,
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.w600,
+                                            child: _editingItemId == item.id
+                                                ? SizedBox(
+                                                    height: 22,
+                                                    child: TextField(
+                                                      controller:
+                                                          _renameController,
+                                                      autofocus: true,
+                                                      style: TextStyle(
+                                                        color: t.ink,
+                                                        fontSize: 10,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                      decoration:
+                                                          InputDecoration(
+                                                            isDense: true,
+                                                            contentPadding:
+                                                                const EdgeInsets.symmetric(
+                                                                  horizontal: 4,
+                                                                  vertical: 2,
+                                                                ),
+                                                            border:
+                                                                OutlineInputBorder(
+                                                                  borderSide:
+                                                                      BorderSide(
+                                                                        color:
+                                                                            t.borderStrong,
+                                                                      ),
+                                                                ),
+                                                          ),
+                                                      onSubmitted: (_) =>
+                                                          _commitInlineRename(
+                                                            item,
+                                                          ),
+                                                      onTapOutside: (_) =>
+                                                          _commitInlineRename(
+                                                            item,
+                                                          ),
+                                                    ),
+                                                  )
+                                                : GestureDetector(
+                                                    onSecondaryTap:
+                                                        widget.onRenameItem !=
+                                                            null
+                                                        ? () =>
+                                                              _startInlineRename(
+                                                                item,
+                                                              )
+                                                        : null,
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          item.title,
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          style: TextStyle(
+                                                            color: t.ink,
+                                                            fontSize: 10,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                        Text(
+                                                          _formatTime(
+                                                            item.createdAt,
+                                                          ),
+                                                          style: TextStyle(
+                                                            color: t.inkMuted,
+                                                            fontSize: 9,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
                                                   ),
-                                                ),
-                                                Text(
-                                                  _formatTime(item.createdAt),
-                                                  style: TextStyle(
-                                                    color: t.inkMuted,
-                                                    fontSize: 9,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
                                           ),
+                                          if (widget.onRenameItem != null &&
+                                              _editingItemId != item.id)
+                                            IconButton(
+                                              key: ValueKey(
+                                                'rename-item-${item.id}',
+                                              ),
+                                              icon: const Icon(
+                                                Icons.edit_outlined,
+                                                size: 13,
+                                              ),
+                                              color: t.inkMuted,
+                                              hoverColor: t.hoverFill,
+                                              tooltip: 'Rename capture',
+                                              onPressed: () =>
+                                                  _startInlineRename(item),
+                                              padding: EdgeInsets.zero,
+                                              // Gene - Nov, 8, 2026: Added M3 shrinkWrap style so gallery card action buttons do not overflow the 138x84 card under useMaterial3: true
+                                              style: IconButton.styleFrom(
+                                                minimumSize: const Size(18, 18),
+                                                maximumSize: const Size(20, 20),
+                                                padding: EdgeInsets.zero,
+                                                tapTargetSize:
+                                                    MaterialTapTargetSize
+                                                        .shrinkWrap,
+                                              ),
+                                              constraints: const BoxConstraints(
+                                                minWidth: 18,
+                                                minHeight: 18,
+                                              ),
+                                            ),
                                           IconButton(
                                             icon: const Icon(
                                               Icons.folder_open_rounded,
@@ -647,9 +904,11 @@ class GallerySidebar extends StatelessWidget {
                                             tooltip:
                                                 'Reveal in Finder / Explorer',
                                             onPressed: () {
-                                              if (onRevealItemInFolder !=
+                                              if (widget.onRevealItemInFolder !=
                                                   null) {
-                                                onRevealItemInFolder!(item);
+                                                widget.onRevealItemInFolder!(
+                                                  item,
+                                                );
                                               } else {
                                                 StorageService.revealFileInFolder(
                                                   item.filePath,
@@ -657,6 +916,14 @@ class GallerySidebar extends StatelessWidget {
                                               }
                                             },
                                             padding: EdgeInsets.zero,
+                                            style: IconButton.styleFrom(
+                                              minimumSize: const Size(18, 18),
+                                              maximumSize: const Size(20, 20),
+                                              padding: EdgeInsets.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
                                             constraints: const BoxConstraints(
                                               minWidth: 20,
                                               minHeight: 20,
@@ -677,8 +944,17 @@ class GallerySidebar extends StatelessWidget {
                                               alpha: 0.15,
                                             ),
                                             tooltip: 'Delete Capture',
-                                            onPressed: () => onDeleteItem(item),
+                                            onPressed: () =>
+                                                widget.onDeleteItem(item),
                                             padding: EdgeInsets.zero,
+                                            style: IconButton.styleFrom(
+                                              minimumSize: const Size(18, 18),
+                                              maximumSize: const Size(20, 20),
+                                              padding: EdgeInsets.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                            ),
                                             constraints: const BoxConstraints(
                                               minWidth: 20,
                                               minHeight: 20,

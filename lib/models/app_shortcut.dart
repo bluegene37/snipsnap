@@ -34,6 +34,39 @@ import 'package:flutter/services.dart';
 //
 //   const AppShortcutAction(this.displayName, this.description);
 // }
+// Gene - Nov, 08, 2026: Added recordArea, recordFullScreen, and pasteImage to AppShortcutAction.
+// Old implementation:
+// enum AppShortcutAction {
+//   interactiveSnip(
+//     'Interactive Area Snip',
+//     'Drag rectangle to capture portion of screen',
+//   ),
+//   scrollingSnip('Panoramic Snip', 'Capture scrolling content or full page'),
+//   fullScreenSnip('Full Screen Snip', 'Capture entire desktop display'),
+//   timerSnip('3s Timer Snip', 'Wait 3 seconds then capture'),
+//   openImage('Open Image File', 'Import external image into editor'),
+//   copyToClipboard(
+//     'Copy to Clipboard',
+//     'Copy current annotated image to system clipboard',
+//   ),
+//   saveAs('Save Image As...', 'Export annotated image to local file'),
+//   undo('Undo Annotation', 'Revert last drawing action'),
+//   redo('Redo Annotation', 'Re-apply reverted drawing action'),
+//   clearAnnotations('Clear All Annotations', 'Remove all drawings from canvas'),
+//   toggleHistory(
+//     'Toggle Screenshots Panel',
+//     'Show or hide bottom recent captures bar',
+//   ),
+//   flattenCanvas(
+//     'Flatten Annotations',
+//     'Bake all annotations into background image',
+//   );
+//
+//   final String displayName;
+//   final String description;
+//
+//   const AppShortcutAction(this.displayName, this.description);
+// }
 enum AppShortcutAction {
   interactiveSnip(
     'Interactive Area Snip',
@@ -42,7 +75,19 @@ enum AppShortcutAction {
   scrollingSnip('Panoramic Snip', 'Capture scrolling content or full page'),
   fullScreenSnip('Full Screen Snip', 'Capture entire desktop display'),
   timerSnip('3s Timer Snip', 'Wait 3 seconds then capture'),
+  recordArea(
+    'Record Area Video',
+    'Select a screen region to record as H.264 MP4',
+  ),
+  recordFullScreen(
+    'Record Full Screen',
+    'Record entire desktop display as H.264 MP4',
+  ),
   openImage('Open Image File', 'Import external image into editor'),
+  pasteImage(
+    'Paste from Clipboard',
+    'Import image from system clipboard into editor',
+  ),
   copyToClipboard(
     'Copy to Clipboard',
     'Copy current annotated image to system clipboard',

@@ -3,6 +3,8 @@
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+// Gene - Nov, 08, 2026: Included capture_handler.h to register native Windows screen capture, clipboard, and video recording handler.
+#include "capture_handler.h"
 #include "ocr_handler.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -14,6 +16,9 @@ FlutterWindow::~FlutterWindow() {
   // teardown that reaches the destructor without going through OnDestroy would
   // otherwise leave workers holding a live pointer to a dead engine.
   // ShutdownOcrHandler is idempotent.
+  // Gene - Nov, 08, 2026: Tear down capture handler alongside OCR handler before engine destruction.
+  // ShutdownOcrHandler();
+  ShutdownCaptureHandler();
   ShutdownOcrHandler();
 }
 
@@ -32,7 +37,11 @@ bool FlutterWindow::OnCreate() {
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     return false;
   }
+  // Gene - Nov, 08, 2026: Register native Windows capture handler on the FlutterEngine.
+  // RegisterPlugins(flutter_controller_->engine());
+  // RegisterOcrHandler(flutter_controller_->engine());
   RegisterPlugins(flutter_controller_->engine());
+  RegisterCaptureHandler(flutter_controller_->engine());
   RegisterOcrHandler(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
@@ -53,6 +62,9 @@ void FlutterWindow::OnDestroy() {
   // workers on other threads post their replies back through that engine.
   // After this returns, an in-flight worker drops its reply rather than
   // touching freed memory.
+  // Gene - Nov, 08, 2026: Shutdown capture handler before releasing flutter_controller_.
+  // ShutdownOcrHandler();
+  ShutdownCaptureHandler();
   ShutdownOcrHandler();
 
   if (flutter_controller_) {

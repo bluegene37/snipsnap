@@ -6,7 +6,19 @@ project(runner LANGUAGES CXX)
 # work.
 #
 # Any new source files that you add to the application should be added here.
+# Gene - Nov, 08, 2026: Added capture_handler.cpp to Windows runner executable sources.
+# add_executable(${BINARY_NAME} WIN32
+#   "flutter_window.cpp"
+#   "main.cpp"
+#   "ocr_handler.cpp"
+#   "utils.cpp"
+#   "win32_window.cpp"
+#   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
+#   "Runner.rc"
+#   "runner.exe.manifest"
+# )
 add_executable(${BINARY_NAME} WIN32
+  "capture_handler.cpp"
   "flutter_window.cpp"
   "main.cpp"
   "ocr_handler.cpp"
@@ -47,6 +59,8 @@ target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
 # windowsapp.lib is the umbrella import library for the WinRT API surface
 # (RoActivateInstance, WindowsCreateString and friends).
 target_link_libraries(${BINARY_NAME} PRIVATE "windowsapp.lib")
+# Gene - Nov, 08, 2026: Link Windows Imaging Component (WIC) and Media Foundation libraries for native C++ screen capture, clipboard, and H.264 screen recording.
+target_link_libraries(${BINARY_NAME} PRIVATE "windowscodecs.lib" "mfplat.lib" "mfreadwrite.lib" "mfuuid.lib" "ole32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

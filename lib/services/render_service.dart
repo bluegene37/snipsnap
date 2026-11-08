@@ -276,4 +276,121 @@ class RenderService {
       baseImage.dispose();
     }
   }
+
+  // Gene - Nov, 08, 2026: Added GPU-direct crop and canvas-expansion renderer to eliminate pure-Dart img.decodeImage + img.encodePng round-trips during crop.
+  /// Composites [annotations] onto [imagePath] and crops/expands the canvas to
+  /// `[targetLeft, targetTop, targetWidth, targetHeight]` (in native image
+  /// pixels) directly on a GPU-backed `ui.Canvas`.
+  static Future<({Uint8List bytes, int width, int height})?>
+  renderCroppedOrExpandedPng({
+    required String imagePath,
+    required List<Annotation> annotations,
+    required Size canvasSize,
+    required Rect cropRectInCanvas,
+  }) async {
+    final baseImage = await decodeImageFile(imagePath);
+    if (baseImage == null) return null;
+
+    try {
+      final imageSize = Size(
+        baseImage.width.toDouble(),
+        baseImage.height.toDouble(),
+      );
+      final imageRect = imageRectInCanvas(
+        imageSize: imageSize,
+        canvasSize: canvasSize,
+      );
+      if (imageRect.isEmpty) return null;
+
+      final scaleX = baseImage.width / imageRect.width;
+      final scaleY = baseImage.height / imageRect.height;
+
+      final relLeft = cropRectInCanvas.left - imageRect.left;
+      final relTop = cropRectInCanvas.top - imageRect.top;
+      final relRight = cropRectInCanvas.right - imageRect.left;
+      final relBottom = cropRectInCanvas.bottom - imageRect.top;
+      if (relRight - relLeft <= 5 || relBottom - relTop <= 5) return null;
+
+      final targetLeft = (relLeft * scaleX).round();
+      final targetTop = (relTop * scaleY).round();
+      final outWidth = ((relRight - relLeft) * scaleX).round().clamp(1, 16384);
+      final outHeight =
+          ((relBottom - relTop) * scaleY).round().clamp(1, 16384);
+
+      final outRect = Rect.fromLTWH(
+        0,
+        0,
+        outWidth.toDouble(),
+        outHeight.toDouble(),
+      );
+
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder, outRect);
+
+      // Translate so that native pixel (targetLeft, targetTop) lands at (0, 0)
+      canvas.save();
+      canvas.translate(-targetLeft.toDouble(), -targetTop.toDouble());
+
+      canvas.drawImage(
+        baseImage,
+        Offset.zero,
+        Paint()..filterQuality = FilterQuality.high,
+      );
+
+      final patchImages = annotations.isEmpty
+          ? const <String, ui.Image>{}
+          : await decodePatchImages(annotations);
+
+      if (annotations.isNotEmpty) {
+        final projection = CanvasProjection(
+          imageSize: imageSize,
+          canvasSize: canvasSize,
+        );
+        final scale = projection.scale;
+        canvas.save();
+        canvas.scale(scale);
+        canvas.translate(-imageRect.left, -imageRect.top);
+        canvas.clipRect(imageRect);
+        AnnotationRenderer.paintAll(
+          canvas,
+          annotations.map((a) => a.mappedToCanvasSpace(projection)).toList(),
+          baseImage: baseImage,
+          imageRect: imageRect,
+          pixelScale: scale,
+          patchImages: patchImages,
+        );
+        canvas.restore();
+      }
+
+      for (final image in patchImages.values) {
+        image.dispose();
+      }
+
+      canvas.restore();
+
+      final picture = recorder.endRecording();
+      final ui.Image rendered;
+      try {
+        rendered = await picture.toImage(outWidth, outHeight);
+      } finally {
+        picture.dispose();
+      }
+
+      try {
+        final byteData = await rendered.toByteData(
+          format: ui.ImageByteFormat.png,
+        );
+        final pngBytes = byteData?.buffer.asUint8List();
+        if (pngBytes == null) return null;
+        return (bytes: pngBytes, width: outWidth, height: outHeight);
+      } finally {
+        rendered.dispose();
+      }
+    } catch (e) {
+      debugPrint('SnipSnap GPU crop render error: $e');
+      return null;
+    } finally {
+      baseImage.dispose();
+    }
+  }
 }

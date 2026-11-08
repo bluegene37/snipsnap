@@ -143,15 +143,42 @@ class CaptureService {
     return p.join(dir.path, 'snap_$timestamp.png');
   }
 
+  // Gene - Nov, 08, 2026: Added public helper to generate capture/recording file paths with custom prefix & extension.
+  Future<String> generateNewMediaPath({
+    String prefix = 'snap',
+    String extension = 'png',
+  }) async {
+    final dir = await getStorageDirectory();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    return p.join(dir.path, '${prefix}_$timestamp.$extension');
+  }
+
   /// Perform interactive area capture across macOS, Windows, and Linux
-  Future<String?> captureInteractive() async {
+  // Gene - Nov, 08, 2026: Added optional initialMode ('capture' or 'record'), "record:x:y:w:h" handling, and native Windows C++ captureInteractive channel invocation.
+  // Old implementation:
+  // Future<String?> captureInteractive() async {
+  //   final targetPath = await _generateNewPath();
+  //   try {
+  //     if (Platform.isMacOS) {
+  //       try {
+  //         final result = await _channel.invokeMethod<String?>(
+  //           'captureInteractive',
+  //           {'targetPath': targetPath},
+  //         );
+  //         if (result != null && result.startsWith('scrolling:')) {
+  //           return result;
+  //         }
+  Future<String?> captureInteractive({String initialMode = 'capture'}) async {
     final targetPath = await _generateNewPath();
     try {
       if (Platform.isMacOS) {
         try {
           final result = await _channel.invokeMethod<String?>(
             'captureInteractive',
-            {'targetPath': targetPath},
+            {
+              'targetPath': targetPath,
+              'initialMode': initialMode,
+            },
           );
           // Gene - Oct, 27, 2026: If the user clicked Panoramic in the overlay, result is formatted as "scrolling:x:y:w:h".
           // Old implementation:
@@ -160,7 +187,9 @@ class CaptureService {
           //     (await File(result).length()) > 0) {
           //   return result;
           // }
-          if (result != null && result.startsWith('scrolling:')) {
+          if (result != null &&
+              (result.startsWith('scrolling:') ||
+                  result.startsWith('record:'))) {
             return result;
           }
           if (result != null &&
@@ -191,6 +220,27 @@ class CaptureService {
           return null;
         }
       } else if (Platform.isWindows) {
+        // Gene - Nov, 08, 2026: Use native C++ Win32 captureInteractive overlay first (<15ms GDI/WIC); fall back to PowerShell ms-screenclip only on MissingPluginException.
+        try {
+          final result = await _channel.invokeMethod<String?>(
+            'captureInteractive',
+            {
+              'targetPath': targetPath,
+              'initialMode': initialMode,
+            },
+          );
+          if (result != null &&
+              (result.startsWith('scrolling:') ||
+                  result.startsWith('record:'))) {
+            return result;
+          }
+          if (result != null &&
+              await File(result).exists() &&
+              (await File(result).length()) > 0) {
+            return result;
+          }
+          return null;
+        } on MissingPluginException catch (_) {}
         // `ms-screenclip:` is the modern overlay; `snippingtool /clip` is the
         // Windows 10 spelling and was *removed* in Windows 11, so it is the
         // fallback rather than the first choice.
@@ -285,6 +335,18 @@ while ((Get-Date) -lt \$deadline) {
           }
         }
       } else if (Platform.isWindows) {
+        // Gene - Nov, 08, 2026: Use native C++ Win32 captureFullScreen (<15ms BitBlt + WIC PNG) first; fall back to PowerShell only on MissingPluginException.
+        try {
+          final result = await _channel.invokeMethod<String?>(
+            'captureFullScreen',
+            {'targetPath': targetPath},
+          );
+          if (result != null &&
+              await File(result).exists() &&
+              (await File(result).length()) > 0) {
+            return result;
+          }
+        } on MissingPluginException catch (_) {}
         final winPath = targetPath.replaceAll('/', '\\').replaceAll('"', '\\"');
         // VirtualScreen, not PrimaryScreen: the latter silently drops every
         // secondary monitor. SetProcessDPIAware first, because powershell.exe
@@ -382,10 +444,25 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
   // Gene - Oct, 27, 2026: Added scrolling capture callbacks and native HUD methods for panoramic scrolling capture.
   VoidCallback? _onScrollingDone;
   VoidCallback? _onScrollingCancel;
+  // Gene - Nov, 08, 2026: Added native screen recording HUD callbacks and screen recording / video processing channel methods.
+  ValueChanged<Map<String, dynamic>>? _onRecordingStopped;
+  VoidCallback? _onRecordingCancelled;
+  ValueChanged<bool>? _onRecordingStateChanged;
 
   void setScrollingCallbacks({VoidCallback? onDone, VoidCallback? onCancel}) {
     _onScrollingDone = onDone;
     _onScrollingCancel = onCancel;
+    _channel.setMethodCallHandler(_handleNativeMethodCall);
+  }
+
+  void setRecordingCallbacks({
+    ValueChanged<Map<String, dynamic>>? onStopped,
+    VoidCallback? onCancelled,
+    ValueChanged<bool>? onStateChanged,
+  }) {
+    _onRecordingStopped = onStopped;
+    _onRecordingCancelled = onCancelled;
+    _onRecordingStateChanged = onStateChanged;
     _channel.setMethodCallHandler(_handleNativeMethodCall);
   }
 
@@ -395,7 +472,132 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
         _onScrollingDone?.call();
       case 'onScrollingCancel':
         _onScrollingCancel?.call();
+      case 'onRecordingStopped':
+        if (call.arguments is Map) {
+          final map = Map<String, dynamic>.from(call.arguments as Map);
+          _onRecordingStopped?.call(map);
+        }
+      case 'onRecordingCancelled':
+        _onRecordingCancelled?.call();
+      case 'onRecordingStateChanged':
+        if (call.arguments is Map) {
+          final isPaused = (call.arguments as Map)['isPaused'] == true;
+          _onRecordingStateChanged?.call(isPaused);
+        }
     }
+  }
+
+  Future<bool> startScreenRecording({
+    required String targetPath,
+    required String thumbnailPath,
+    required bool fullScreen,
+    Rect? region,
+    int fps = 30,
+    bool recordAudio = false,
+  }) async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('startScreenRecording', {
+        'targetPath': targetPath,
+        'thumbnailPath': thumbnailPath,
+        'fullScreen': fullScreen,
+        'x': region?.left ?? 0.0,
+        'y': region?.top ?? 0.0,
+        'width': region?.width ?? 0.0,
+        'height': region?.height ?? 0.0,
+        'fps': fps,
+        'recordAudio': recordAudio,
+      });
+      return ok ?? false;
+    } catch (e) {
+      debugPrint('SnipSnap startScreenRecording error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> pauseScreenRecording() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('pauseScreenRecording');
+      return ok ?? false;
+    } catch (e) {
+      debugPrint('SnipSnap pauseScreenRecording error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> resumeScreenRecording() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('resumeScreenRecording');
+      return ok ?? false;
+    } catch (e) {
+      debugPrint('SnipSnap resumeScreenRecording error: $e');
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>?> stopScreenRecording() async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('stopScreenRecording');
+      if (res is Map) {
+        return Map<String, dynamic>.from(res);
+      }
+    } catch (e) {
+      debugPrint('SnipSnap stopScreenRecording error: $e');
+    }
+    return null;
+  }
+
+  Future<void> cancelScreenRecording() async {
+    try {
+      await _channel.invokeMethod<void>('cancelScreenRecording');
+    } catch (e) {
+      debugPrint('SnipSnap cancelScreenRecording error: $e');
+    }
+  }
+
+  Future<String?> extractVideoFrame({
+    required String videoPath,
+    required int timestampMs,
+    required String targetPath,
+  }) async {
+    try {
+      final saved = await _channel.invokeMethod<String?>('extractVideoFrame', {
+        'videoPath': videoPath,
+        'timestampMs': timestampMs,
+        'targetPath': targetPath,
+      });
+      if (saved != null &&
+          await File(saved).exists() &&
+          await File(saved).length() > 0) {
+        return saved;
+      }
+    } catch (e) {
+      debugPrint('SnipSnap extractVideoFrame error: $e');
+    }
+    return null;
+  }
+
+  Future<String?> trimVideo({
+    required String videoPath,
+    required int startMs,
+    required int endMs,
+    required String targetPath,
+  }) async {
+    try {
+      final saved = await _channel.invokeMethod<String?>('trimVideo', {
+        'videoPath': videoPath,
+        'startMs': startMs,
+        'endMs': endMs,
+        'targetPath': targetPath,
+      });
+      if (saved != null &&
+          await File(saved).exists() &&
+          await File(saved).length() > 0) {
+        return saved;
+      }
+    } catch (e) {
+      debugPrint('SnipSnap trimVideo error: $e');
+    }
+    return null;
   }
 
   Future<void> showScrollingHud(Rect rect) async {

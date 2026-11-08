@@ -59,10 +59,34 @@ class ShortcutService {
       ctrl: !Platform.isMacOS,
       shift: true,
     ),
+    // Gene - Nov, 08, 2026: Added default hotkeys for recordArea, recordFullScreen, and pasteImage.
+    AppShortcutAction.recordArea: CustomShortcut(
+      action: AppShortcutAction.recordArea,
+      keyId: LogicalKeyboardKey.keyR.keyId,
+      keyLabel: 'R',
+      meta: Platform.isMacOS,
+      ctrl: !Platform.isMacOS,
+      shift: true,
+    ),
+    AppShortcutAction.recordFullScreen: CustomShortcut(
+      action: AppShortcutAction.recordFullScreen,
+      keyId: LogicalKeyboardKey.digit7.keyId,
+      keyLabel: '7',
+      meta: Platform.isMacOS,
+      ctrl: !Platform.isMacOS,
+      shift: true,
+    ),
     AppShortcutAction.openImage: CustomShortcut(
       action: AppShortcutAction.openImage,
       keyId: LogicalKeyboardKey.keyO.keyId,
       keyLabel: 'O',
+      meta: Platform.isMacOS,
+      ctrl: !Platform.isMacOS,
+    ),
+    AppShortcutAction.pasteImage: CustomShortcut(
+      action: AppShortcutAction.pasteImage,
+      keyId: LogicalKeyboardKey.keyV.keyId,
+      keyLabel: 'V',
       meta: Platform.isMacOS,
       ctrl: !Platform.isMacOS,
     ),
@@ -260,10 +284,19 @@ class ShortcutService {
         //     action != AppShortcutAction.timerSnip) {
         //   continue;
         // }
+        // Gene - Nov, 08, 2026: Include recordArea and recordFullScreen in global OS-wide capture hotkeys.
+        // Old implementation:
+        // if (action != AppShortcutAction.interactiveSnip &&
+        //     action != AppShortcutAction.fullScreenSnip &&
+        //     action != AppShortcutAction.timerSnip) {
+        //   continue;
+        // }
         // Only register global OS-wide hotkeys for active capture actions
         if (action != AppShortcutAction.interactiveSnip &&
             action != AppShortcutAction.fullScreenSnip &&
-            action != AppShortcutAction.timerSnip) {
+            action != AppShortcutAction.timerSnip &&
+            action != AppShortcutAction.recordArea &&
+            action != AppShortcutAction.recordFullScreen) {
           continue;
         }
 

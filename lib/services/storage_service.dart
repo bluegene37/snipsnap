@@ -5,6 +5,8 @@ import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../models/capture_item.dart';
+// Gene - Nov, 08, 2026: Imported ImageHeaderParser for <0.1ms header-only dimension reading during history scan.
+import '../utils/image_header_parser.dart';
 
 import 'database_service.dart';
 
@@ -225,22 +227,31 @@ class StorageService {
               final isVideo = f.path.endsWith('.mp4');
               int w = 0;
               int h = 0;
+              // Gene - Nov, 08, 2026: Replaced full-bitmap compute(img.decodeImage) with ImageHeaderParser.readDimensions (<0.1ms header read).
+              // Old implementation:
+              // if (!isVideo) {
+              //   try {
+              //     // Off the UI isolate, like every other decode in the app: this
+              //     // loop runs at startup over every file in the library folder,
+              //     // and a pure-Dart PNG decode of a Retina capture is long
+              //     // enough to be seen as a freeze once there are a few of them.
+              //     final decoded = await compute(
+              //       img.decodeImage,
+              //       await f.readAsBytes(),
+              //     );
+              //     if (decoded != null) {
+              //       w = decoded.width;
+              //       h = decoded.height;
+              //     }
+              //   } catch (e) {
+              //     debugPrint('SnipSnap dimension read error: $e');
+              //   }
+              // }
               if (!isVideo) {
-                try {
-                  // Off the UI isolate, like every other decode in the app: this
-                  // loop runs at startup over every file in the library folder,
-                  // and a pure-Dart PNG decode of a Retina capture is long
-                  // enough to be seen as a freeze once there are a few of them.
-                  final decoded = await compute(
-                    img.decodeImage,
-                    await f.readAsBytes(),
-                  );
-                  if (decoded != null) {
-                    w = decoded.width;
-                    h = decoded.height;
-                  }
-                } catch (e) {
-                  debugPrint('SnipSnap dimension read error: $e');
+                final dims = await ImageHeaderParser.readDimensions(f.path);
+                if (dims != null) {
+                  w = dims.width;
+                  h = dims.height;
                 }
               }
               final prefix = isVideo ? 'Recording' : 'Snap';
