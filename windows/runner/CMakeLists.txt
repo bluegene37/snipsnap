@@ -51,7 +51,9 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
-target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+# Gene - Nov, 13, 2026: Link flutter_wrapper_plugin alongside flutter_wrapper_app so PluginRegistrarManager and PluginRegistrarWindows symbols in capture_handler.cpp resolve at link time.
+# target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app flutter_wrapper_plugin)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 # SetCurrentProcessExplicitAppUserModelID, called from main.cpp.
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")

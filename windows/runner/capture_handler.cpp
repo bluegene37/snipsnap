@@ -1011,6 +1011,9 @@ void DrawRoundedPill(HDC hdc, const RECT& r, COLORREF fill, COLORREF border,
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 }
 
+// Gene - Nov, 13, 2026: Forward-declare PopulateOverlayMicDevices before OverlayWndProc to fix MSVC C3861 identifier not found error.
+void PopulateOverlayMicDevices();
+
 LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
                                 LPARAM lparam) {
   switch (msg) {
