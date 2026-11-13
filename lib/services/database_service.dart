@@ -11,13 +11,24 @@ import '../utils/constants.dart';
 class DatabaseService {
   static AppDatabase _db = AppDatabase();
 
+  // Gene - Nov, 13, 2026: Track capture IDs deleted while a bulk saveAllCapturesToDb pass is in flight so an older snapshot never resurrects a deleted capture.
+  static int _activeBulkSaves = 0;
+  static final Set<String> _deletedDuringBulkSave = <String>{};
+
   static AppDatabase get db => _db;
 
   /// Swaps in an in-memory database for tests. Assigning here never reads
   /// [_db], so the lazy on-disk initialiser above is not triggered and no real
   /// library file is opened.
+  // Gene - Nov, 13, 2026: Reset in-flight bulk-save tombstones when swapping test databases.
+  // @visibleForTesting
+  // static set db(AppDatabase value) => _db = value;
   @visibleForTesting
-  static set db(AppDatabase value) => _db = value;
+  static set db(AppDatabase value) {
+    _db = value;
+    _activeBulkSaves = 0;
+    _deletedDuringBulkSave.clear();
+  }
 
   /// Load all captures from Drift SQLite local DB
   static Future<List<CaptureItem>> loadCapturesFromDb() async {
@@ -119,6 +130,8 @@ class DatabaseService {
   //   );
   // }
   static Future<void> saveCaptureToDb(CaptureItem item) async {
+    // Gene - Nov, 13, 2026: Snapshot annotations synchronously before awaiting DB writes so concurrent canvas edits cannot mutate the list during iteration.
+    final annotationsSnapshot = List<Annotation>.of(item.annotations);
     await db.insertOrUpdateCapture(
       CapturesCompanion(
         id: Value(item.id),
@@ -141,9 +154,13 @@ class DatabaseService {
     if (!canPersistAnnotations(item)) return;
 
     // The list order *is* the layer order, so persist the index alongside.
+    // final companions = [
+    //   for (var i = 0; i < item.annotations.length; i++)
+    //     _convertAnnotationToCompanion(item.id, item.annotations[i], i),
+    // ];
     final companions = [
-      for (var i = 0; i < item.annotations.length; i++)
-        _convertAnnotationToCompanion(item.id, item.annotations[i], i),
+      for (var i = 0; i < annotationsSnapshot.length; i++)
+        _convertAnnotationToCompanion(item.id, annotationsSnapshot[i], i),
     ];
     await db.saveAnnotationsForCapture(item.id, companions);
   }
@@ -156,14 +173,37 @@ class DatabaseService {
   /// [saveCaptureToDb]'s guard; nothing extra is needed at this level, but the
   /// per-item filtering is the load-bearing part of this call, not an
   /// incidental detail.
+  // Gene - Nov, 13, 2026: Snapshot items synchronously before awaiting to prevent ConcurrentModificationError when _captures mutates mid-save, and skip any capture deleted while the bulk save is in flight.
+  // static Future<void> saveAllCapturesToDb(List<CaptureItem> items) async {
+  //   for (final item in items) {
+  //     await saveCaptureToDb(item);
+  //   }
+  // }
   static Future<void> saveAllCapturesToDb(List<CaptureItem> items) async {
-    for (final item in items) {
-      await saveCaptureToDb(item);
+    final snapshot = List<CaptureItem>.of(items);
+    _activeBulkSaves++;
+    try {
+      for (final item in snapshot) {
+        if (_deletedDuringBulkSave.contains(item.id)) continue;
+        await saveCaptureToDb(item);
+      }
+    } finally {
+      _activeBulkSaves--;
+      if (_activeBulkSaves == 0) {
+        _deletedDuringBulkSave.clear();
+      }
     }
   }
 
   /// Delete capture from Drift SQLite DB
+  // Gene - Nov, 13, 2026: Record tombstones during active bulk saves so an in-flight saveAllCapturesToDb cannot re-insert a deleted capture.
+  // static Future<void> deleteCaptureFromDb(String id) async {
+  //   await db.deleteCaptureItem(id);
+  // }
   static Future<void> deleteCaptureFromDb(String id) async {
+    if (_activeBulkSaves > 0) {
+      _deletedDuringBulkSave.add(id);
+    }
     await db.deleteCaptureItem(id);
   }
 

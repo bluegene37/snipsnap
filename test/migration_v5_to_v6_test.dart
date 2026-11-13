@@ -196,9 +196,23 @@ VALUES ('existing_snap', '/tmp/existing.png', 'Existing Snap', 1700000000, 1920,
     () async {
       await db.close();
       final tempDir = await Directory.systemTemp.createTemp('snipsnap_mig_v6_');
+      // Gene - Nov, 13, 2026: Close the background isolate database before deleting tempDir (addTearDown runs before tearDown in package:test, causing Windows errno=32 PathAccessException on open SQLite files).
+      // addTearDown(() async {
+      //   if (await tempDir.exists()) {
+      //     await tempDir.delete(recursive: true);
+      //   }
+      // });
       addTearDown(() async {
-        if (await tempDir.exists()) {
-          await tempDir.delete(recursive: true);
+        await db.close();
+        for (var attempt = 0; attempt < 10; attempt++) {
+          try {
+            if (await tempDir.exists()) {
+              await tempDir.delete(recursive: true);
+            }
+            return;
+          } on FileSystemException {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
         }
       });
       final dbFile = File('${tempDir.path}/snipsnap_local.sqlite');

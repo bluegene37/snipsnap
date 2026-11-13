@@ -2004,7 +2004,10 @@ class _MainScreenState extends State<MainScreen> {
       _redoStack.clear();
       _stepCounter = 1;
     });
-    unawaited(StorageService.saveHistory(_captures));
+    // Gene - Nov, 13, 2026: Persist only the newly recorded capture item instead of rewriting the entire _captures library (which caused O(N) SQLite churn and concurrent iteration races).
+    // unawaited(StorageService.saveHistory(_captures));
+    _lastPersist = StorageService.saveCaptureItem(newItem);
+    unawaited(_lastPersist);
     unawaited(DatabaseService.setSetting('active_capture_id', newItem.id));
     final secs = (result.durationMs / 1000).toStringAsFixed(1);
     _showToast('Saved screen recording (${secs}s)');
@@ -2639,7 +2642,10 @@ class _MainScreenState extends State<MainScreen> {
     });
     // Persisted in the background: the capture is already on screen and usable,
     // and blocking on SQLite here would stall the frame that shows it.
-    unawaited(StorageService.saveHistory(_captures));
+    // Gene - Nov, 13, 2026: Persist only the newly added capture item instead of rewriting the entire _captures library.
+    // unawaited(StorageService.saveHistory(_captures));
+    _lastPersist = StorageService.saveCaptureItem(newItem);
+    unawaited(_lastPersist);
     unawaited(DatabaseService.setSetting('active_capture_id', newItem.id));
     if (_autoCopyAfterCapture) {
       unawaited(ClipboardService.copyImageToClipboard(path));
@@ -4073,7 +4079,8 @@ class _MainScreenState extends State<MainScreen> {
                         // annotation rows behind without their capture.
                         await _flushPersist();
                         await StorageService.deleteCaptureItem(item.id);
-                        unawaited(StorageService.saveHistory(_captures));
+                        // Gene - Nov, 13, 2026: Removed redundant whole-library saveHistory rewrite after deleteCaptureItem; deleting one item does not modify remaining captures and rewriting all items raced rapid consecutive deletes.
+                        // unawaited(StorageService.saveHistory(_captures));
                       },
                       onRenameItem: _handleRenameCaptureItem,
                       onOpenLibraryLocation: () async {
