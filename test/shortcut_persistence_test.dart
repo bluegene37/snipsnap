@@ -38,78 +38,87 @@ void main() {
     expect(areaSnip.alt, isFalse);
   });
 
-  test('saveShortcuts persists to both Drift SQLite and SharedPreferences', () async {
-    final customShortcuts = ShortcutService.getDefaultShortcuts();
-    customShortcuts[AppShortcutAction.interactiveSnip] = CustomShortcut(
-      action: AppShortcutAction.interactiveSnip,
-      keyId: LogicalKeyboardKey.keyA.keyId,
-      keyLabel: 'A',
-      ctrl: true,
-      shift: true,
-    );
+  test(
+    'saveShortcuts persists to both Drift SQLite and SharedPreferences',
+    () async {
+      final customShortcuts = ShortcutService.getDefaultShortcuts();
+      customShortcuts[AppShortcutAction.interactiveSnip] = CustomShortcut(
+        action: AppShortcutAction.interactiveSnip,
+        keyId: LogicalKeyboardKey.keyA.keyId,
+        keyLabel: 'A',
+        ctrl: true,
+        shift: true,
+      );
 
-    await ShortcutService.saveShortcuts(customShortcuts);
+      await ShortcutService.saveShortcuts(customShortcuts);
 
-    // Verify saved to SQLite
-    final fromDb = await DatabaseService.loadShortcutsFromDb();
-    expect(fromDb[AppShortcutAction.interactiveSnip]?.keyLabel, 'A');
+      // Verify saved to SQLite
+      final fromDb = await DatabaseService.loadShortcutsFromDb();
+      expect(fromDb[AppShortcutAction.interactiveSnip]?.keyLabel, 'A');
 
-    // Verify saved to SharedPreferences
-    final prefs = await SharedPreferences.getInstance();
-    final backup = prefs.getString('custom_shortcuts_backup_json');
-    expect(backup, isNotNull);
-    expect(backup, contains('"keyLabel":"A"'));
-  });
+      // Verify saved to SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final backup = prefs.getString('custom_shortcuts_backup_json');
+      expect(backup, isNotNull);
+      expect(backup, contains('"keyLabel":"A"'));
+    },
+  );
 
-  test('loadShortcuts falls back to SharedPreferences backup and restores DB when DB is empty', () async {
-    // 1. Manually populate SharedPreferences with a custom shortcut
-    final customShortcuts = ShortcutService.getDefaultShortcuts();
-    customShortcuts[AppShortcutAction.fullScreenSnip] = CustomShortcut(
-      action: AppShortcutAction.fullScreenSnip,
-      keyId: LogicalKeyboardKey.keyF.keyId,
-      keyLabel: 'F',
-      ctrl: true,
-      shift: true,
-    );
-    await ShortcutService.saveShortcuts(customShortcuts);
+  test(
+    'loadShortcuts falls back to SharedPreferences backup and restores DB when DB is empty',
+    () async {
+      // 1. Manually populate SharedPreferences with a custom shortcut
+      final customShortcuts = ShortcutService.getDefaultShortcuts();
+      customShortcuts[AppShortcutAction.fullScreenSnip] = CustomShortcut(
+        action: AppShortcutAction.fullScreenSnip,
+        keyId: LogicalKeyboardKey.keyF.keyId,
+        keyLabel: 'F',
+        ctrl: true,
+        shift: true,
+      );
+      await ShortcutService.saveShortcuts(customShortcuts);
 
-    // 2. Wipe SQLite table to simulate DB reset / fresh update migration
-    await (db.delete(db.shortcuts)).go();
-    final emptyDb = await DatabaseService.loadShortcutsFromDb();
-    expect(emptyDb, isEmpty);
+      // 2. Wipe SQLite table to simulate DB reset / fresh update migration
+      await (db.delete(db.shortcuts)).go();
+      final emptyDb = await DatabaseService.loadShortcutsFromDb();
+      expect(emptyDb, isEmpty);
 
-    // 3. Load shortcuts - should recover from SharedPreferences and restore SQLite
-    final loaded = await ShortcutService.loadShortcuts();
-    expect(loaded[AppShortcutAction.fullScreenSnip]?.keyLabel, 'F');
+      // 3. Load shortcuts - should recover from SharedPreferences and restore SQLite
+      final loaded = await ShortcutService.loadShortcuts();
+      expect(loaded[AppShortcutAction.fullScreenSnip]?.keyLabel, 'F');
 
-    // 4. Verify SQLite has been automatically restored
-    final restoredDb = await DatabaseService.loadShortcutsFromDb();
-    expect(restoredDb[AppShortcutAction.fullScreenSnip]?.keyLabel, 'F');
-  });
+      // 4. Verify SQLite has been automatically restored
+      final restoredDb = await DatabaseService.loadShortcutsFromDb();
+      expect(restoredDb[AppShortcutAction.fullScreenSnip]?.keyLabel, 'F');
+    },
+  );
 
-  test('loadShortcuts syncs to SharedPreferences backup when loaded from DB', () async {
-    // 1. Save directly to DB without SharedPreferences
-    final customShortcuts = ShortcutService.getDefaultShortcuts();
-    customShortcuts[AppShortcutAction.timerSnip] = CustomShortcut(
-      action: AppShortcutAction.timerSnip,
-      keyId: LogicalKeyboardKey.keyT.keyId,
-      keyLabel: 'T',
-      ctrl: true,
-      shift: true,
-    );
-    await DatabaseService.saveShortcutsToDb(customShortcuts);
+  test(
+    'loadShortcuts syncs to SharedPreferences backup when loaded from DB',
+    () async {
+      // 1. Save directly to DB without SharedPreferences
+      final customShortcuts = ShortcutService.getDefaultShortcuts();
+      customShortcuts[AppShortcutAction.timerSnip] = CustomShortcut(
+        action: AppShortcutAction.timerSnip,
+        keyId: LogicalKeyboardKey.keyT.keyId,
+        keyLabel: 'T',
+        ctrl: true,
+        shift: true,
+      );
+      await DatabaseService.saveShortcutsToDb(customShortcuts);
 
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getString('custom_shortcuts_backup_json'), isNull);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('custom_shortcuts_backup_json'), isNull);
 
-    // 2. Load shortcuts - should load from DB and asynchronously sync to SharedPreferences
-    final loaded = await ShortcutService.loadShortcuts();
-    expect(loaded[AppShortcutAction.timerSnip]?.keyLabel, 'T');
+      // 2. Load shortcuts - should load from DB and asynchronously sync to SharedPreferences
+      final loaded = await ShortcutService.loadShortcuts();
+      expect(loaded[AppShortcutAction.timerSnip]?.keyLabel, 'T');
 
-    // Allow background unawaited future to complete
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-    final backup = prefs.getString('custom_shortcuts_backup_json');
-    expect(backup, isNotNull);
-    expect(backup, contains('"keyLabel":"T"'));
-  });
+      // Allow background unawaited future to complete
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      final backup = prefs.getString('custom_shortcuts_backup_json');
+      expect(backup, isNotNull);
+      expect(backup, contains('"keyLabel":"T"'));
+    },
+  );
 }

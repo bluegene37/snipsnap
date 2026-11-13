@@ -15,8 +15,11 @@ class AppInfo {
   // static const String appVersion = '1.0.5';
   // static const String appBuild = '4';
   // Gene - Oct, 31, 2026: Bumped appVersion and appBuild to 1.0.6+5 for release.
-  static const String appVersion = '1.0.6';
-  static const String appBuild = '5';
+  // static const String appVersion = '1.0.6';
+  // static const String appBuild = '5';
+  // Gene - Nov, 13, 2026: Bumped appVersion and appBuild to 1.0.7+6 in lockstep with pubspec.yaml.
+  static const String appVersion = '1.0.7';
+  static const String appBuild = '6';
 
   // Gene - Oct, 14, 2026: Added Microsoft Store build flag. Store builds are
   // compiled with `--dart-define=SNIPSNAP_STORE=true` (see msix_config in

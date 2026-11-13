@@ -26,7 +26,8 @@ class VideoCapturePlayerView extends StatefulWidget {
     required int fps,
     required int maxWidth,
     required bool copyToClipboard,
-  })? onExportGif;
+  })?
+  onExportGif;
   final VoidCallback onCopyVideo;
   final VoidCallback onSaveVideoAs;
   final VoidCallback onRevealInFolder;
@@ -200,7 +201,9 @@ class _VideoCapturePlayerViewState extends State<VideoCapturePlayerView> {
       if (startTarget != _currentMs) {
         unawaited(widget.captureService.seekVideo(_textureId!, startTarget));
       }
-      unawaited(widget.captureService.setVideoSpeed(_textureId!, _playbackSpeed));
+      unawaited(
+        widget.captureService.setVideoSpeed(_textureId!, _playbackSpeed),
+      );
       unawaited(widget.captureService.setVideoMuted(_textureId!, _isMuted));
       unawaited(widget.captureService.setVideoVolume(_textureId!, _volume));
       unawaited(widget.captureService.playVideo(_textureId!));
@@ -439,7 +442,11 @@ class _VideoCapturePlayerViewState extends State<VideoCapturePlayerView> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.videocam_rounded, size: 15, color: t.ink),
+                            Icon(
+                              Icons.videocam_rounded,
+                              size: 15,
+                              color: t.ink,
+                            ),
                             const SizedBox(width: 6),
                             Text(
                               'MP4 VIDEO • $displayW×$displayH',
@@ -758,7 +765,9 @@ class _VideoCapturePlayerViewState extends State<VideoCapturePlayerView> {
                             setState(() => _gifMaxWidth = resOpt.width),
                       ),
                     _SmallChoiceChip(
-                      label: _gifSelectionOnly ? 'Selected Range' : 'Full Video',
+                      label: _gifSelectionOnly
+                          ? 'Selected Range'
+                          : 'Full Video',
                       selected: _gifSelectionOnly,
                       onTap: () => setState(
                         () => _gifSelectionOnly = !_gifSelectionOnly,
@@ -827,11 +836,7 @@ class _VideoCapturePlayerViewState extends State<VideoCapturePlayerView> {
                       _seekTo(_currentMs + 33);
                     },
                     tooltip: 'Next Frame (→)',
-                    icon: Icon(
-                      Icons.skip_next_rounded,
-                      size: 18,
-                      color: t.ink,
-                    ),
+                    icon: Icon(Icons.skip_next_rounded, size: 18, color: t.ink),
                   ),
                   const SizedBox(width: 4),
                   Text(
@@ -847,9 +852,10 @@ class _VideoCapturePlayerViewState extends State<VideoCapturePlayerView> {
                   Expanded(
                     child: Slider(
                       key: const ValueKey('video-scrub-slider'),
-                      value: _currentMs
-                          .toDouble()
-                          .clamp(0, _totalDurationMs.toDouble()),
+                      value: _currentMs.toDouble().clamp(
+                        0,
+                        _totalDurationMs.toDouble(),
+                      ),
                       min: 0,
                       max: _totalDurationMs.toDouble(),
                       activeColor: t.ink,

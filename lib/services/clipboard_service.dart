@@ -10,10 +10,9 @@ class ClipboardService {
   static Future<bool> copyImageBytesToClipboard(Uint8List bytes) async {
     try {
       if (Platform.isMacOS || Platform.isWindows) {
-        final ok = await _channel.invokeMethod<bool>(
-          'copyImageToClipboard',
-          {'bytes': bytes},
-        );
+        final ok = await _channel.invokeMethod<bool>('copyImageToClipboard', {
+          'bytes': bytes,
+        });
         if (ok == true) return true;
       }
     } on MissingPluginException catch (_) {
@@ -49,10 +48,9 @@ class ClipboardService {
       // }
       if (Platform.isMacOS) {
         try {
-          final ok = await _channel.invokeMethod<bool>(
-            'copyImageToClipboard',
-            {'filePath': filePath},
-          );
+          final ok = await _channel.invokeMethod<bool>('copyImageToClipboard', {
+            'filePath': filePath,
+          });
           if (ok != null) return ok;
         } on MissingPluginException catch (_) {}
         final escapedPath = filePath.replaceAll('"', '\\"');
@@ -62,10 +60,9 @@ class ClipboardService {
         return result.exitCode == 0;
       } else if (Platform.isWindows) {
         try {
-          final ok = await _channel.invokeMethod<bool>(
-            'copyImageToClipboard',
-            {'filePath': filePath},
-          );
+          final ok = await _channel.invokeMethod<bool>('copyImageToClipboard', {
+            'filePath': filePath,
+          });
           if (ok != null) return ok;
         } on MissingPluginException catch (_) {}
         final winPath = filePath.replaceAll('/', '\\').replaceAll('"', '\\"');
@@ -147,10 +144,9 @@ class ClipboardService {
   static Future<bool> copyFileToClipboard(String filePath) async {
     try {
       if (Platform.isMacOS || Platform.isWindows) {
-        final ok = await _channel.invokeMethod<bool>(
-          'copyFileToClipboard',
-          {'filePath': filePath},
-        );
+        final ok = await _channel.invokeMethod<bool>('copyFileToClipboard', {
+          'filePath': filePath,
+        });
         if (ok == true) return true;
       }
       await Clipboard.setData(ClipboardData(text: filePath));

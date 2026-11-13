@@ -70,7 +70,8 @@ void main() {
     expect(
       calls.where((c) => c == 'register').length,
       5,
-      reason: 'all five active capture/recording hotkeys must still be attempted',
+      reason:
+          'all five active capture/recording hotkeys must still be attempted',
     );
     expect(failed, isNotEmpty, reason: 'and the refusal is reported back');
   });

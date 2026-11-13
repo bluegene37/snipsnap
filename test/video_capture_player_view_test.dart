@@ -174,21 +174,22 @@ void main() {
                   onRestoreOriginal: () async {
                     restoreCalls++;
                   },
-                  onExportGif: ({
-                    required int startMs,
-                    required int endMs,
-                    required int fps,
-                    required int maxWidth,
-                    required bool copyToClipboard,
-                  }) async {
-                    gifExport = (
-                      startMs: startMs,
-                      endMs: endMs,
-                      fps: fps,
-                      maxWidth: maxWidth,
-                      copy: copyToClipboard,
-                    );
-                  },
+                  onExportGif:
+                      ({
+                        required int startMs,
+                        required int endMs,
+                        required int fps,
+                        required int maxWidth,
+                        required bool copyToClipboard,
+                      }) async {
+                        gifExport = (
+                          startMs: startMs,
+                          endMs: endMs,
+                          fps: fps,
+                          maxWidth: maxWidth,
+                          copy: copyToClipboard,
+                        );
+                      },
                   onCopyVideo: () {},
                   onSaveVideoAs: () {},
                   onRevealInFolder: () {},

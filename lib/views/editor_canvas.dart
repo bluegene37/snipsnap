@@ -2887,8 +2887,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       //   await compute(img.encodePng, _cutSelectionImage!),
       // );
       final pngBytes = await compute(_encodePngFast, _cutSelectionImage!);
-      final copiedDirect =
-          await ClipboardService.copyImageBytesToClipboard(pngBytes);
+      final copiedDirect = await ClipboardService.copyImageBytesToClipboard(
+        pngBytes,
+      );
       if (!copiedDirect) {
         final tempDir = Directory.systemTemp;
         final tempFile = File(

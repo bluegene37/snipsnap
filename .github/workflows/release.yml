@@ -3,7 +3,14 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # workflow_dispatch:
+  # Gene - Nov, 13, 2026: Added optional tag input for manual workflow_dispatch runs (auto-resolves from pubspec.yaml when omitted).
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.7). Defaults to v<version> from pubspec.yaml.'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -213,7 +220,48 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # Gene - Nov, 13, 2026: Resolve tag_name explicitly so workflow_dispatch works as well as v* tag pushes.
+    # Old implementation:
+    # steps:
+    #   - name: Download release artifacts
+    #     uses: actions/download-artifact@v4
+    #     with:
+    #       path: release-artifacts
+    #       merge-multiple: true
+    #
+    #   - name: Publish GitHub Release
+    #     uses: softprops/action-gh-release@v2
+    #     with:
+    #       # files: release-artifacts/*
+    #       # Gene - Oct, 14, 2026: Only publish the installer + DMG; the
+    #       # Store MSIX is unsigned and is for Partner Center only.
+    #       files: |
+    #         release-artifacts/*.exe
+    #         release-artifacts/*.dmg
+    #       generate_release_notes: true
     steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          elif [[ -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+            [[ "$TAG" == v* ]] || TAG="v$TAG"
+          else
+            VER="$(sed -n 's/^version:[[:space:]]*\([0-9][0-9.]*\)+.*/\1/p' pubspec.yaml | head -1)"
+            if [[ -z "$VER" ]]; then
+              echo "Error: could not determine version from pubspec.yaml" >&2
+              exit 1
+            fi
+            TAG="v$VER"
+          fi
+          echo "Resolved release tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
@@ -223,7 +271,8 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # files: release-artifacts/*
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
           # Gene - Oct, 14, 2026: Only publish the installer + DMG; the
           # Store MSIX is unsigned and is for Partner Center only.
           files: |

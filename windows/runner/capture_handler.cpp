@@ -42,6 +42,9 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <mferror.h>
+// Gene - Nov, 13, 2026: Explicitly include propsys.h and mmreg.h for IPropertyStore and WAVEFORMATEXTENSIBLE across Windows SDK versions.
+#include <propsys.h>
+#include <mmreg.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <wrl/client.h>
@@ -1898,7 +1901,8 @@ void LaunchRecordingHudWindow(int countdown_seconds) {
 //   map[EncodableValue("hasAudio")] = EncodableValue(g_recorder.record_audio);
 //   if (result) result->Success(EncodableValue(map));
 // }
-WinScreenRecorder g_recorder;
+// Gene - Nov, 13, 2026: Commented out duplicate g_recorder definition (already defined above at line 1597) to fix MSVC C2086 redefinition error.
+// WinScreenRecorder g_recorder;
 
 void StopWinRecordingSession(bool cancel,
                              std::unique_ptr<CaptureMethodResult> result) {
@@ -2027,8 +2031,13 @@ bool StartWinRecordingSession(
       out_type->SetUINT32(MF_MT_AVG_BITRATE,
                           static_cast<UINT32>(std::clamp(w * h * 4, 2000000, 20000000)));
       out_type->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-      ::MFSetAttributeSize(out_type.Get(), MF_MT_FRAME_SIZE, w, h);
-      ::MFSetAttributeRatio(out_type.Get(), MF_MT_FRAME_RATE, rec_fps, 1);
+      // Gene - Nov, 13, 2026: Explicitly cast MFSetAttributeSize/Ratio arguments to UINT32 to avoid MSVC /W4 /WX signed/unsigned warnings.
+      // ::MFSetAttributeSize(out_type.Get(), MF_MT_FRAME_SIZE, w, h);
+      // ::MFSetAttributeRatio(out_type.Get(), MF_MT_FRAME_RATE, rec_fps, 1);
+      ::MFSetAttributeSize(out_type.Get(), MF_MT_FRAME_SIZE,
+                           static_cast<UINT32>(w), static_cast<UINT32>(h));
+      ::MFSetAttributeRatio(out_type.Get(), MF_MT_FRAME_RATE,
+                            static_cast<UINT32>(rec_fps), 1);
       ::MFSetAttributeRatio(out_type.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
       hr = writer->AddStream(out_type.Get(), &video_stream_index);
     }
@@ -2039,8 +2048,13 @@ bool StartWinRecordingSession(
       in_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
       in_type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
       in_type->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-      ::MFSetAttributeSize(in_type.Get(), MF_MT_FRAME_SIZE, w, h);
-      ::MFSetAttributeRatio(in_type.Get(), MF_MT_FRAME_RATE, rec_fps, 1);
+      // Gene - Nov, 13, 2026: Explicitly cast MFSetAttributeSize/Ratio arguments to UINT32 to avoid MSVC /W4 /WX signed/unsigned warnings.
+      // ::MFSetAttributeSize(in_type.Get(), MF_MT_FRAME_SIZE, w, h);
+      // ::MFSetAttributeRatio(in_type.Get(), MF_MT_FRAME_RATE, rec_fps, 1);
+      ::MFSetAttributeSize(in_type.Get(), MF_MT_FRAME_SIZE,
+                           static_cast<UINT32>(w), static_cast<UINT32>(h));
+      ::MFSetAttributeRatio(in_type.Get(), MF_MT_FRAME_RATE,
+                            static_cast<UINT32>(rec_fps), 1);
       ::MFSetAttributeRatio(in_type.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
       hr = writer->SetInputMediaType(video_stream_index, in_type.Get(), nullptr);
     }

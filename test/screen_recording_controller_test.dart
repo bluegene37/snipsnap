@@ -49,9 +49,7 @@ class _FakeRecordingCaptureService extends CaptureService {
   }
 
   @override
-  Future<String> generateNewThumbnailPath({
-    String prefix = 'rec_thumb',
-  }) async {
+  Future<String> generateNewThumbnailPath({String prefix = 'rec_thumb'}) async {
     return '/tmp/.thumbnails/${prefix}_mock.png';
   }
 
@@ -238,19 +236,24 @@ void main() {
       },
     );
 
-    test('restartRecording cancels current capture and restarts same region', () async {
-      const region = Rect.fromLTWH(50, 60, 1280, 720);
-      final started = await controller.startAreaRecording(region);
-      expect(started, isTrue);
+    test(
+      'restartRecording cancels current capture and restarts same region',
+      () async {
+        const region = Rect.fromLTWH(50, 60, 1280, 720);
+        final started = await controller.startAreaRecording(region);
+        expect(started, isTrue);
 
-      final restarted = await controller.restartRecording(countdownSeconds: 3);
-      expect(restarted, isTrue);
-      expect(fakeService.cancelCalls, 1);
-      expect(controller.isRecording, isTrue);
-      expect(fakeService.lastFullScreen, isFalse);
-      expect(fakeService.lastRegion, region);
-      expect(fakeService.lastCountdownSeconds, 3);
-    });
+        final restarted = await controller.restartRecording(
+          countdownSeconds: 3,
+        );
+        expect(restarted, isTrue);
+        expect(fakeService.cancelCalls, 1);
+        expect(controller.isRecording, isTrue);
+        expect(fakeService.lastFullScreen, isFalse);
+        expect(fakeService.lastRegion, region);
+        expect(fakeService.lastCountdownSeconds, 3);
+      },
+    );
 
     // Gene - Nov, 13, 2026: Regression tests for multi-monitor full-screen recording region preservation, restart, and negative display Quartz coordinate parsing.
     test(
@@ -267,7 +270,9 @@ void main() {
         expect(fakeService.lastFullScreen, isTrue);
         expect(fakeService.lastRegion, secondaryDisplay);
 
-        final restarted = await controller.restartRecording(countdownSeconds: 3);
+        final restarted = await controller.restartRecording(
+          countdownSeconds: 3,
+        );
         expect(restarted, isTrue);
         expect(fakeService.cancelCalls, 1);
         expect(fakeService.lastFullScreen, isTrue);
@@ -306,13 +311,16 @@ void main() {
         });
         const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMethodCallHandler(pathChannel, (call) async => tempDir.path);
+            .setMockMethodCallHandler(
+              pathChannel,
+              (call) async => tempDir.path,
+            );
         const channel = MethodChannel('snipsnap/capture');
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
             .setMockMethodCallHandler(channel, (call) async {
-          if (call.method == 'startScreenRecording') return true;
-          return null;
-        });
+              if (call.method == 'startScreenRecording') return true;
+              return null;
+            });
         addTearDown(() {
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
               .setMockMethodCallHandler(channel, null);

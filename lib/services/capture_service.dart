@@ -752,8 +752,8 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
         }
       case 'onVideoPlayerCompleted':
         if (call.arguments is Map) {
-          final textureId =
-              ((call.arguments as Map)['textureId'] as num?)?.toInt();
+          final textureId = ((call.arguments as Map)['textureId'] as num?)
+              ?.toInt();
           if (textureId != null) {
             _videoPlayerListeners[textureId]?.onCompleted?.call();
           }
@@ -818,10 +818,9 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
 
   Future<bool> setRecordingMicrophoneMuted(bool muted) async {
     try {
-      return await _channel.invokeMethod<bool>(
-            'setRecordingMicrophoneMuted',
-            {'muted': muted},
-          ) ??
+      return await _channel.invokeMethod<bool>('setRecordingMicrophoneMuted', {
+            'muted': muted,
+          }) ??
           false;
     } catch (e) {
       debugPrint('SnipSnap setRecordingMicrophoneMuted error: $e');

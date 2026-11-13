@@ -314,8 +314,7 @@ class RenderService {
       final targetLeft = (relLeft * scaleX).round();
       final targetTop = (relTop * scaleY).round();
       final outWidth = ((relRight - relLeft) * scaleX).round().clamp(1, 16384);
-      final outHeight =
-          ((relBottom - relTop) * scaleY).round().clamp(1, 16384);
+      final outHeight = ((relBottom - relTop) * scaleY).round().clamp(1, 16384);
 
       final outRect = Rect.fromLTWH(
         0,

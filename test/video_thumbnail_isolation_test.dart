@@ -63,12 +63,15 @@ void main() {
       //   ..writeAsBytesSync(pngBytes);
       // File(p.join(originalsDir.path, 'rec_100.mp4'))
       //   ..writeAsBytesSync(const [0, 0, 0, 24, 102, 116, 121, 112]);
-      File(p.join(capturesDir.path, 'rec_thumb_100.png'))
-          .writeAsBytesSync(pngBytes);
-      File(p.join(thumbsDir.path, 'rec_thumb_200.png'))
-          .writeAsBytesSync(pngBytes);
-      File(p.join(originalsDir.path, 'rec_100.mp4'))
-          .writeAsBytesSync(const [0, 0, 0, 24, 102, 116, 121, 112]);
+      File(
+        p.join(capturesDir.path, 'rec_thumb_100.png'),
+      ).writeAsBytesSync(pngBytes);
+      File(
+        p.join(thumbsDir.path, 'rec_thumb_200.png'),
+      ).writeAsBytesSync(pngBytes);
+      File(
+        p.join(originalsDir.path, 'rec_100.mp4'),
+      ).writeAsBytesSync(const [0, 0, 0, 24, 102, 116, 121, 112]);
 
       final history = await StorageService.loadHistory();
       final paths = history.map((e) => e.filePath).toSet();
@@ -116,9 +119,22 @@ void main() {
 
       // Build unfinalized MP4: 28-byte ftyp + 8-byte wide + 8-byte mdat(size=0) + 16 payload bytes, no moov
       final unfinalizedBytes = <int>[
-        0, 0, 0, 28, ...'ftyp'.codeUnits, ...List<int>.filled(20, 0),
-        0, 0, 0, 8, ...'wide'.codeUnits,
-        0, 0, 0, 0, ...'mdat'.codeUnits,
+        0,
+        0,
+        0,
+        28,
+        ...'ftyp'.codeUnits,
+        ...List<int>.filled(20, 0),
+        0,
+        0,
+        0,
+        8,
+        ...'wide'.codeUnits,
+        0,
+        0,
+        0,
+        0,
+        ...'mdat'.codeUnits,
         ...List<int>.filled(16, 0xAA),
       ];
       final unfinalizedFile = File(
@@ -127,9 +143,24 @@ void main() {
 
       // Build finalized MP4: 28-byte ftyp + 24-byte mdat + 16-byte moov
       final finalizedBytes = <int>[
-        0, 0, 0, 28, ...'ftyp'.codeUnits, ...List<int>.filled(20, 0),
-        0, 0, 0, 24, ...'mdat'.codeUnits, ...List<int>.filled(16, 0xBB),
-        0, 0, 0, 16, ...'moov'.codeUnits, ...List<int>.filled(8, 0),
+        0,
+        0,
+        0,
+        28,
+        ...'ftyp'.codeUnits,
+        ...List<int>.filled(20, 0),
+        0,
+        0,
+        0,
+        24,
+        ...'mdat'.codeUnits,
+        ...List<int>.filled(16, 0xBB),
+        0,
+        0,
+        0,
+        16,
+        ...'moov'.codeUnits,
+        ...List<int>.filled(8, 0),
       ];
       final finalizedFile = File(p.join(capturesDir.path, 'rec_finalized.mp4'))
         ..writeAsBytesSync(finalizedBytes);

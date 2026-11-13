@@ -5,12 +5,7 @@ import 'package:flutter/painting.dart';
 import '../models/capture_item.dart';
 import 'capture_service.dart';
 
-enum ScreenRecordingState {
-  idle,
-  recording,
-  paused,
-  stopping,
-}
+enum ScreenRecordingState { idle, recording, paused, stopping }
 
 class ScreenRecordingResult {
   final String filePath;
@@ -388,10 +383,7 @@ class ScreenRecordingController extends ChangeNotifier {
         displayRegion: region,
       );
     }
-    return await startAreaRecording(
-      region,
-      countdownSeconds: countdownSeconds,
-    );
+    return await startAreaRecording(region, countdownSeconds: countdownSeconds);
   }
 
   // Gene - Nov, 13, 2026: Added optional countdownDelaySeconds so timer stays at 00:00 during the 3-2-1 countdown.
@@ -415,8 +407,7 @@ class ScreenRecordingController extends ChangeNotifier {
           _segmentStartTime != null) {
         final diff = DateTime.now().difference(_segmentStartTime!);
         _elapsed =
-            _accumulatedBeforePause +
-            (diff.isNegative ? Duration.zero : diff);
+            _accumulatedBeforePause + (diff.isNegative ? Duration.zero : diff);
         notifyListeners();
       }
     });
@@ -554,8 +545,9 @@ class ScreenRecordingController extends ChangeNotifier {
     if (!isRecording) return;
     if (paused && _state == ScreenRecordingState.recording) {
       if (_segmentStartTime != null) {
-        _accumulatedBeforePause +=
-            DateTime.now().difference(_segmentStartTime!);
+        _accumulatedBeforePause += DateTime.now().difference(
+          _segmentStartTime!,
+        );
       }
       _segmentStartTime = null;
       _state = ScreenRecordingState.paused;
@@ -571,7 +563,8 @@ class ScreenRecordingController extends ChangeNotifier {
     final filePath = info['filePath'] as String?;
     if (filePath == null || filePath.isEmpty) return null;
     final thumbnailPath = info['thumbnailPath'] as String?;
-    final durationMs = (info['durationMs'] as num?)?.toInt() ??
+    final durationMs =
+        (info['durationMs'] as num?)?.toInt() ??
         _elapsed.inMilliseconds.clamp(100, 36000000);
     final width = (info['width'] as num?)?.toInt() ?? 1920;
     final height = (info['height'] as num?)?.toInt() ?? 1080;

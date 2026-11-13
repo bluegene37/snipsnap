@@ -8,7 +8,9 @@ publish_to: 'none'
 # version: 1.0.4+3
 # version: 1.0.5+4
 # Gene - Oct, 31, 2026: Bumped version to 1.0.6+5 for release.
-version: 1.0.6+5
+# version: 1.0.6+5
+# Gene - Nov, 13, 2026: Bumped version to 1.0.7+6 for screen recording overhaul & native video editor release.
+version: 1.0.7+6
 
 environment:
   sdk: ^3.12.2
@@ -119,7 +121,9 @@ msix_config:
   # msix_version: 1.0.4.0
   # msix_version: 1.0.5.0
   # Gene - Oct, 31, 2026: Bumped msix_version to 1.0.6.0 in lockstep with version 1.0.6+5.
-  msix_version: 1.0.6.0
+  # msix_version: 1.0.6.0
+  # Gene - Nov, 13, 2026: Bumped msix_version to 1.0.7.0 in lockstep with version 1.0.7+6.
+  msix_version: 1.0.7.0
   # Store requires a PNG logo; msix generates every tile/scale asset from it.
   logo_path: assets/icon/app_icon.png
   # runFullTrust (implicit) lets the Win32 runner use global hotkeys, GDI

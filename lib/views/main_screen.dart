@@ -536,7 +536,7 @@ class _MainScreenState extends State<MainScreen> {
   bool _autoCopyAfterCapture = false;
   // Gene - Nov, 13, 2026: Per-video edit undo history for non-destructive Snagit Cut/Trim with 1-click Undo / Restore Original.
   final Map<String, List<({String filePath, int durationMs})>>
-      _videoEditUndoStacks = {};
+  _videoEditUndoStacks = {};
 
   @override
   void initState() {
@@ -564,22 +564,23 @@ class _MainScreenState extends State<MainScreen> {
     // )..addListener(() {
     //   if (mounted) setState(() {});
     // });
-    _recordingController = ScreenRecordingController(
-      captureService: _captureService,
-      onRecordingCompleted: _handleRecordingCompleted,
-      onRecordingCancelled: () {
-        unawaited(_captureService.setMainWindowVisible(true));
-        if (mounted) _showToast('Screen recording cancelled');
-      },
-      onRecordingFailed: (errMsg) {
-        unawaited(_captureService.setMainWindowVisible(true));
-        if (mounted) {
-          _showToast(errMsg ?? 'Could not save screen recording');
-        }
-      },
-    )..addListener(() {
-      if (mounted) setState(() {});
-    });
+    _recordingController =
+        ScreenRecordingController(
+          captureService: _captureService,
+          onRecordingCompleted: _handleRecordingCompleted,
+          onRecordingCancelled: () {
+            unawaited(_captureService.setMainWindowVisible(true));
+            if (mounted) _showToast('Screen recording cancelled');
+          },
+          onRecordingFailed: (errMsg) {
+            unawaited(_captureService.setMainWindowVisible(true));
+            if (mounted) {
+              _showToast(errMsg ?? 'Could not save screen recording');
+            }
+          },
+        )..addListener(() {
+          if (mounted) setState(() {});
+        });
     unawaited(_recordingController.refreshAudioDevices());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -884,10 +885,7 @@ class _MainScreenState extends State<MainScreen> {
         // );
         final dims = await ImageHeaderParser.readDimensions(capture.filePath);
         if (dims == null) return;
-        capture = capture.copyWith(
-          width: dims.width,
-          height: dims.height,
-        );
+        capture = capture.copyWith(width: dims.width, height: dims.height);
       } catch (e) {
         debugPrint('SnipSnap legacy dimension read error: $e');
         return;
@@ -2172,7 +2170,10 @@ class _MainScreenState extends State<MainScreen> {
       if (res != null && File(res.filePath).existsSync()) {
         final nextDur = res.durationMs > 0
             ? res.durationMs
-            : (capture.durationMs - (cutEndMs - cutStartMs)).clamp(200, 36000000);
+            : (capture.durationMs - (cutEndMs - cutStartMs)).clamp(
+                200,
+                36000000,
+              );
         await _applyInPlaceVideoEdit(
           capture: capture,
           newFilePath: res.filePath,
@@ -2310,7 +2311,9 @@ class _MainScreenState extends State<MainScreen> {
       }
       if (copyToClipboard) {
         final ok = await ClipboardService.copyFileToClipboard(gifPath);
-        _showToast(ok ? 'Copied animated GIF to clipboard!' : 'GIF copy failed');
+        _showToast(
+          ok ? 'Copied animated GIF to clipboard!' : 'GIF copy failed',
+        );
         return;
       }
       final sanitized = capture.title
@@ -3439,12 +3442,10 @@ class _MainScreenState extends State<MainScreen> {
                       onToggleRecordMicrophone: (val) =>
                           _recordingController.setRecordMicrophone(val),
                       // Gene - Nov, 13, 2026: Wired System Audio toggle, live mic mute, and restart recording into HeaderBar.
-                      recordSystemAudio:
-                          _recordingController.recordSystemAudio,
+                      recordSystemAudio: _recordingController.recordSystemAudio,
                       onToggleRecordSystemAudio: (val) =>
                           _recordingController.setRecordSystemAudio(val),
-                      isMicrophoneMuted:
-                          _recordingController.isMicrophoneMuted,
+                      isMicrophoneMuted: _recordingController.isMicrophoneMuted,
                       onToggleMicrophoneMute:
                           _recordingController.toggleMicrophoneMute,
                       onRestartRecording: () =>
@@ -3544,7 +3545,8 @@ class _MainScreenState extends State<MainScreen> {
                               */
                               // Editor Canvas or Video Capture Player View
                               Expanded(
-                                child: (_activeCapture != null &&
+                                child:
+                                    (_activeCapture != null &&
                                         _activeCapture!.isVideo)
                                     ? VideoCapturePlayerView(
                                         key: ValueKey(_activeCapture!.id),
@@ -3554,11 +3556,13 @@ class _MainScreenState extends State<MainScreen> {
                                             _handleGrabVideoFrame,
                                         onTrimVideo: _handleTrimVideo,
                                         onCutVideo: _handleCutVideo,
-                                        onSaveTrimmedCopy: _handleSaveTrimmedCopy,
+                                        onSaveTrimmedCopy:
+                                            _handleSaveTrimmedCopy,
                                         canRestoreOriginal:
-                                            (_videoEditUndoStacks[_activeCapture!.id]
-                                                    ?.isNotEmpty ??
-                                                false),
+                                            (_videoEditUndoStacks[_activeCapture!
+                                                    .id]
+                                                ?.isNotEmpty ??
+                                            false),
                                         onRestoreOriginal:
                                             _handleUndoOrRestoreVideo,
                                         onExportGif: _handleExportVideoGif,

@@ -529,32 +529,37 @@ class _GallerySidebarState extends State<GallerySidebar> {
                                   // Was a fixed Colors.white38 regardless of mode — same
                                   // pre-existing light-mode legibility bug as the close
                                   // button above (white38 on near-white is unreadable).
-                                  style: TextStyle(color: t.inkMuted, fontSize: 13),
+                                  style: TextStyle(
+                                    color: t.inkMuted,
+                                    fontSize: 13,
+                                  ),
                                 ),
                               )
                             : ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        itemCount: filtered.length,
-                        itemBuilder: (context, index) {
-                          final item = filtered[index];
-                          final isSelected = widget.activeItem?.id == item.id;
-                          final displayPath =
-                              (item.isVideo &&
-                                  item.thumbnailPath != null &&
-                                  item.thumbnailPath!.isNotEmpty)
-                              ? item.thumbnailPath!
-                              : item.filePath;
-                          final fileExists =
-                              !item.isVideo
-                              ? File(displayPath).existsSync()
-                              : (item.thumbnailPath != null &&
-                                    File(item.thumbnailPath!).existsSync());
+                                scrollDirection: Axis.horizontal,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                itemCount: filtered.length,
+                                itemBuilder: (context, index) {
+                                  final item = filtered[index];
+                                  final isSelected =
+                                      widget.activeItem?.id == item.id;
+                                  final displayPath =
+                                      (item.isVideo &&
+                                          item.thumbnailPath != null &&
+                                          item.thumbnailPath!.isNotEmpty)
+                                      ? item.thumbnailPath!
+                                      : item.filePath;
+                                  final fileExists = !item.isVideo
+                                      ? File(displayPath).existsSync()
+                                      : (item.thumbnailPath != null &&
+                                            File(
+                                              item.thumbnailPath!,
+                                            ).existsSync());
 
-                          /*
+                                  /*
                       // The selected capture is a non-exclusive highlight
                       // (selectedFill, ink foreground) — not the exclusive
                       // ink/onActive knockout plate, which stays reserved
@@ -576,426 +581,535 @@ class _GallerySidebarState extends State<GallerySidebar> {
                           borderRadius: BorderRadius.circular(6),
                         ),
                       */
-                          // Gene - Oct, 04, 2026: Enhanced card selection highlight with high-contrast borderStrong frame and subtle resting hairline border.
-                          final cardBg = isSelected
-                              ? t.selectedFill
-                              : t.surfaceRaised;
-                          final cardBorder = isSelected
-                              ? Border.all(color: t.borderStrong, width: 2.0)
-                              : Border.all(color: t.border, width: t.hairline);
+                                  // Gene - Oct, 04, 2026: Enhanced card selection highlight with high-contrast borderStrong frame and subtle resting hairline border.
+                                  final cardBg = isSelected
+                                      ? t.selectedFill
+                                      : t.surfaceRaised;
+                                  final cardBorder = isSelected
+                                      ? Border.all(
+                                          color: t.borderStrong,
+                                          width: 2.0,
+                                        )
+                                      : Border.all(
+                                          color: t.border,
+                                          width: t.hairline,
+                                        );
 
-                          return Container(
-                            width: 150,
-                            margin: const EdgeInsets.only(right: 8),
-                            decoration: BoxDecoration(
-                              color: cardBg,
-                              borderRadius: BorderRadius.circular(6),
-                              border: cardBorder,
-                            ),
-                            // The Material is what makes `hoverColor` below
-                            // actually render. Ink paints into its nearest
-                            // ancestor Material, and without this one that is
-                            // the Scaffold's — behind both this Container's
-                            // opaque cardBg and the tray background, so the
-                            // wash was drawn and never seen. Sitting inside the
-                            // Container, this transparent Material puts the ink
-                            // on top of cardBg instead. Same shape as the "Open
-                            // Folder" button above.
-                            child: Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(6),
-                                hoverColor: t.hoverFill,
-                                onTap: () => widget.onSelectItem(item),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(5),
-                                  // Gene - Nov, 13, 2026: Guard card footer with LayoutBuilder so tight vertical constraints never cause a Column RenderFlex overflow.
-                                  child: LayoutBuilder(
-                                    builder: (context, cardConstraints) {
-                                      final showFooter =
-                                          cardConstraints.maxHeight >= 36.0;
-                                      return Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                      // Thumbnail Image + Extension Pill Badge
-                                      Expanded(
-                                        child: Stack(
-                                          children: [
-                                            Positioned.fill(
-                                              child: ClipRRect(
-                                                borderRadius:
-                                                    BorderRadius.circular(4),
-                                                child: ColoredBox(
-                                                  color: t.canvas,
-                                                  child: fileExists
-                                                      ? Image.file(
-                                                          File(displayPath),
-                                                          // Re-key only the active
-                                                          // item when its file is
-                                                          // rewritten in place, so
-                                                          // just that one thumbnail
-                                                          // re-decodes.
-                                                          key: ValueKey(
-                                                            isSelected
-                                                                ? '$displayPath#${widget.imageRevision}'
-                                                                : displayPath,
+                                  return Container(
+                                    width: 150,
+                                    margin: const EdgeInsets.only(right: 8),
+                                    decoration: BoxDecoration(
+                                      color: cardBg,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: cardBorder,
+                                    ),
+                                    // The Material is what makes `hoverColor` below
+                                    // actually render. Ink paints into its nearest
+                                    // ancestor Material, and without this one that is
+                                    // the Scaffold's — behind both this Container's
+                                    // opaque cardBg and the tray background, so the
+                                    // wash was drawn and never seen. Sitting inside the
+                                    // Container, this transparent Material puts the ink
+                                    // on top of cardBg instead. Same shape as the "Open
+                                    // Folder" button above.
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(6),
+                                        hoverColor: t.hoverFill,
+                                        onTap: () => widget.onSelectItem(item),
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(5),
+                                          // Gene - Nov, 13, 2026: Guard card footer with LayoutBuilder so tight vertical constraints never cause a Column RenderFlex overflow.
+                                          child: LayoutBuilder(
+                                            builder: (context, cardConstraints) {
+                                              final showFooter =
+                                                  cardConstraints.maxHeight >=
+                                                  36.0;
+                                              return Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  // Thumbnail Image + Extension Pill Badge
+                                                  Expanded(
+                                                    child: Stack(
+                                                      children: [
+                                                        Positioned.fill(
+                                                          child: ClipRRect(
+                                                            borderRadius:
+                                                                BorderRadius.circular(
+                                                                  4,
+                                                                ),
+                                                            child: ColoredBox(
+                                                              color: t.canvas,
+                                                              child: fileExists
+                                                                  ? Image.file(
+                                                                      File(
+                                                                        displayPath,
+                                                                      ),
+                                                                      // Re-key only the active
+                                                                      // item when its file is
+                                                                      // rewritten in place, so
+                                                                      // just that one thumbnail
+                                                                      // re-decodes.
+                                                                      key: ValueKey(
+                                                                        isSelected
+                                                                            ? '$displayPath#${widget.imageRevision}'
+                                                                            : displayPath,
+                                                                      ),
+                                                                      fit: BoxFit
+                                                                          .cover,
+                                                                      // Thumbnails are ~170px
+                                                                      // wide; decoding the full
+                                                                      // Retina capture for each
+                                                                      // one wastes memory and
+                                                                      // makes cache misses
+                                                                      // visibly janky.
+                                                                      cacheWidth:
+                                                                          kGalleryThumbnailCacheWidth,
+                                                                      gaplessPlayback:
+                                                                          true,
+                                                                      errorBuilder:
+                                                                          (
+                                                                            ctx,
+                                                                            err,
+                                                                            stack,
+                                                                          ) => Center(
+                                                                            child: Icon(
+                                                                              Icons.broken_image_rounded,
+                                                                              color: t.inkMuted,
+                                                                              size: 20,
+                                                                            ),
+                                                                          ),
+                                                                    )
+                                                                  : Center(
+                                                                      child: Icon(
+                                                                        item.isVideo
+                                                                            ? Icons.videocam_rounded
+                                                                            : Icons.image_not_supported_rounded,
+                                                                        color: t
+                                                                            .inkMuted,
+                                                                        size:
+                                                                            20,
+                                                                      ),
+                                                                    ),
+                                                            ),
                                                           ),
-                                                          fit: BoxFit.cover,
-                                                          // Thumbnails are ~170px
-                                                          // wide; decoding the full
-                                                          // Retina capture for each
-                                                          // one wastes memory and
-                                                          // makes cache misses
-                                                          // visibly janky.
-                                                          cacheWidth:
-                                                              kGalleryThumbnailCacheWidth,
-                                                          gaplessPlayback: true,
-                                                          errorBuilder:
-                                                              (
-                                                                ctx,
-                                                                err,
-                                                                stack,
-                                                              ) => Center(
+                                                        ),
+                                                        // Gene - Nov, 08, 2026: Center play icon and bottom-left duration badge for video items.
+                                                        if (item.isVideo) ...[
+                                                          Center(
+                                                            child: DecoratedBox(
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                    color:
+                                                                        t.ink,
+                                                                    shape: BoxShape
+                                                                        .circle,
+                                                                  ),
+                                                              child: Padding(
+                                                                padding:
+                                                                    const EdgeInsets.all(
+                                                                      3,
+                                                                    ),
                                                                 child: Icon(
                                                                   Icons
-                                                                      .broken_image_rounded,
+                                                                      .play_arrow_rounded,
+                                                                  size: 14,
                                                                   color: t
-                                                                      .inkMuted,
-                                                                  size: 20,
+                                                                      .onActive,
                                                                 ),
                                                               ),
-                                                        )
-                                                      : Center(
-                                                          child: Icon(
-                                                            item.isVideo
-                                                                ? Icons
-                                                                      .videocam_rounded
-                                                                : Icons
-                                                                      .image_not_supported_rounded,
-                                                            color: t.inkMuted,
-                                                            size: 20,
-                                                          ),
-                                                        ),
-                                                ),
-                                              ),
-                                            ),
-                                            // Gene - Nov, 08, 2026: Center play icon and bottom-left duration badge for video items.
-                                            if (item.isVideo) ...[
-                                              Center(
-                                                child: DecoratedBox(
-                                                  decoration: BoxDecoration(
-                                                    color: t.ink,
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                  child: Padding(
-                                                    padding:
-                                                        const EdgeInsets.all(3),
-                                                    child: Icon(
-                                                      Icons.play_arrow_rounded,
-                                                      size: 14,
-                                                      color: t.onActive,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                              Positioned(
-                                                bottom: 3,
-                                                left: 3,
-                                                child: DecoratedBox(
-                                                  decoration: BoxDecoration(
-                                                    color: t.ink,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          3,
-                                                        ),
-                                                  ),
-                                                  child: Padding(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 4,
-                                                          vertical: 1,
-                                                        ),
-                                                    child: Text(
-                                                      _formatDurationBadge(
-                                                        item.durationMs,
-                                                      ),
-                                                      style: TextStyle(
-                                                        color: t.onActive,
-                                                        fontSize: 9,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                            // Gene - Oct, 04, 2026: Added distinct checkmark indicator badge for the selected capture thumbnail.
-                                            if (isSelected)
-                                              Positioned(
-                                                top: 4,
-                                                left: 4,
-                                                child: Container(
-                                                  padding: const EdgeInsets.all(
-                                                    2,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    color: t.ink,
-                                                    shape: BoxShape.circle,
-                                                    boxShadow: [
-                                                      BoxShadow(
-                                                        color: Colors.black
-                                                            .withValues(
-                                                              alpha: 0.25,
                                                             ),
-                                                        blurRadius: 3,
-                                                        offset: const Offset(
-                                                          0,
-                                                          1,
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  child: Icon(
-                                                    Icons.check_rounded,
-                                                    size: 11,
-                                                    color: t.onActive,
-                                                  ),
-                                                ),
-                                              ),
-                                            // Snagit-style Extension Badge in bottom right
-                                            Positioned(
-                                              bottom: 3,
-                                              right: 3,
-                                              child: Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 4,
-                                                      vertical: 1,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  // This badge sits directly on top
-                                                  // of the thumbnail — arbitrary
-                                                  // screenshot content, same as
-                                                  // editor_canvas.dart's dimension
-                                                  // badges — so it uses the same
-                                                  // "ink mark plate, onActive
-                                                  // knockout text" pattern rather
-                                                  // than a fixed black/white pair.
-                                                  color: t.ink,
-                                                  borderRadius:
-                                                      BorderRadius.circular(3),
-                                                ),
-                                                child: Text(
-                                                  p
-                                                      .extension(item.filePath)
-                                                      .replaceAll('.', ''),
-                                                  style: TextStyle(
-                                                    color: t.onActive,
-                                                    fontSize: 9,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      if (showFooter) ...[
-                                        const SizedBox(height: 4),
-                                        // Title and delete button
-                                        Row(
-                                        children: [
-                                          Expanded(
-                                            child: _editingItemId == item.id
-                                                ? SizedBox(
-                                                    height: 22,
-                                                    child: TextField(
-                                                      controller:
-                                                          _renameController,
-                                                      autofocus: true,
-                                                      style: TextStyle(
-                                                        color: t.ink,
-                                                        fontSize: 10,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                      ),
-                                                      decoration:
-                                                          InputDecoration(
-                                                            isDense: true,
-                                                            contentPadding:
+                                                          ),
+                                                          Positioned(
+                                                            bottom: 3,
+                                                            left: 3,
+                                                            child: DecoratedBox(
+                                                              decoration:
+                                                                  BoxDecoration(
+                                                                    color:
+                                                                        t.ink,
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                          3,
+                                                                        ),
+                                                                  ),
+                                                              child: Padding(
+                                                                padding:
+                                                                    const EdgeInsets.symmetric(
+                                                                      horizontal:
+                                                                          4,
+                                                                      vertical:
+                                                                          1,
+                                                                    ),
+                                                                child: Text(
+                                                                  _formatDurationBadge(
+                                                                    item.durationMs,
+                                                                  ),
+                                                                  style: TextStyle(
+                                                                    color: t
+                                                                        .onActive,
+                                                                    fontSize: 9,
+                                                                    fontWeight:
+                                                                        FontWeight
+                                                                            .bold,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                        // Gene - Oct, 04, 2026: Added distinct checkmark indicator badge for the selected capture thumbnail.
+                                                        if (isSelected)
+                                                          Positioned(
+                                                            top: 4,
+                                                            left: 4,
+                                                            child: Container(
+                                                              padding:
+                                                                  const EdgeInsets.all(
+                                                                    2,
+                                                                  ),
+                                                              decoration: BoxDecoration(
+                                                                color: t.ink,
+                                                                shape: BoxShape
+                                                                    .circle,
+                                                                boxShadow: [
+                                                                  BoxShadow(
+                                                                    color: Colors
+                                                                        .black
+                                                                        .withValues(
+                                                                          alpha:
+                                                                              0.25,
+                                                                        ),
+                                                                    blurRadius:
+                                                                        3,
+                                                                    offset:
+                                                                        const Offset(
+                                                                          0,
+                                                                          1,
+                                                                        ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                              child: Icon(
+                                                                Icons
+                                                                    .check_rounded,
+                                                                size: 11,
+                                                                color:
+                                                                    t.onActive,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        // Snagit-style Extension Badge in bottom right
+                                                        Positioned(
+                                                          bottom: 3,
+                                                          right: 3,
+                                                          child: Container(
+                                                            padding:
                                                                 const EdgeInsets.symmetric(
                                                                   horizontal: 4,
-                                                                  vertical: 2,
+                                                                  vertical: 1,
                                                                 ),
-                                                            border:
-                                                                OutlineInputBorder(
-                                                                  borderSide:
-                                                                      BorderSide(
-                                                                        color:
-                                                                            t.borderStrong,
-                                                                      ),
-                                                                ),
-                                                          ),
-                                                      onSubmitted: (_) =>
-                                                          _commitInlineRename(
-                                                            item,
-                                                          ),
-                                                      onTapOutside: (_) =>
-                                                          _commitInlineRename(
-                                                            item,
-                                                          ),
-                                                    ),
-                                                  )
-                                                : GestureDetector(
-                                                    onSecondaryTap:
-                                                        widget.onRenameItem !=
-                                                            null
-                                                        ? () =>
-                                                              _startInlineRename(
-                                                                item,
-                                                              )
-                                                        : null,
-                                                    child: Column(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        Text(
-                                                          item.title,
-                                                          maxLines: 1,
-                                                          overflow: TextOverflow
-                                                              .ellipsis,
-                                                          style: TextStyle(
-                                                            color: t.ink,
-                                                            fontSize: 10,
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                          ),
-                                                        ),
-                                                        Text(
-                                                          _formatTime(
-                                                            item.createdAt,
-                                                          ),
-                                                          style: TextStyle(
-                                                            color: t.inkMuted,
-                                                            fontSize: 9,
+                                                            decoration: BoxDecoration(
+                                                              // This badge sits directly on top
+                                                              // of the thumbnail — arbitrary
+                                                              // screenshot content, same as
+                                                              // editor_canvas.dart's dimension
+                                                              // badges — so it uses the same
+                                                              // "ink mark plate, onActive
+                                                              // knockout text" pattern rather
+                                                              // than a fixed black/white pair.
+                                                              color: t.ink,
+                                                              borderRadius:
+                                                                  BorderRadius.circular(
+                                                                    3,
+                                                                  ),
+                                                            ),
+                                                            child: Text(
+                                                              p
+                                                                  .extension(
+                                                                    item.filePath,
+                                                                  )
+                                                                  .replaceAll(
+                                                                    '.',
+                                                                    '',
+                                                                  ),
+                                                              style: TextStyle(
+                                                                color:
+                                                                    t.onActive,
+                                                                fontSize: 9,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                              ),
+                                                            ),
                                                           ),
                                                         ),
                                                       ],
                                                     ),
                                                   ),
-                                          ),
-                                          if (widget.onRenameItem != null &&
-                                              _editingItemId != item.id)
-                                            IconButton(
-                                              key: ValueKey(
-                                                'rename-item-${item.id}',
-                                              ),
-                                              icon: const Icon(
-                                                Icons.edit_outlined,
-                                                size: 13,
-                                              ),
-                                              color: t.inkMuted,
-                                              hoverColor: t.hoverFill,
-                                              tooltip: 'Rename capture',
-                                              onPressed: () =>
-                                                  _startInlineRename(item),
-                                              padding: EdgeInsets.zero,
-                                              // Gene - Nov, 8, 2026: Added M3 shrinkWrap style so gallery card action buttons do not overflow the 138x84 card under useMaterial3: true
-                                              style: IconButton.styleFrom(
-                                                minimumSize: const Size(18, 18),
-                                                maximumSize: const Size(20, 20),
-                                                padding: EdgeInsets.zero,
-                                                tapTargetSize:
-                                                    MaterialTapTargetSize
-                                                        .shrinkWrap,
-                                              ),
-                                              constraints: const BoxConstraints(
-                                                minWidth: 18,
-                                                minHeight: 18,
-                                              ),
-                                            ),
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.folder_open_rounded,
-                                              size: 14,
-                                            ),
-                                            color: t.inkMuted,
-                                            hoverColor: t.hoverFill,
-                                            tooltip:
-                                                'Reveal in Finder / Explorer',
-                                            onPressed: () {
-                                              if (widget.onRevealItemInFolder !=
-                                                  null) {
-                                                widget.onRevealItemInFolder!(
-                                                  item,
-                                                );
-                                              } else {
-                                                StorageService.revealFileInFolder(
-                                                  item.filePath,
-                                                );
-                                              }
+                                                  if (showFooter) ...[
+                                                    const SizedBox(height: 4),
+                                                    // Title and delete button
+                                                    Row(
+                                                      children: [
+                                                        Expanded(
+                                                          child:
+                                                              _editingItemId ==
+                                                                  item.id
+                                                              ? SizedBox(
+                                                                  height: 22,
+                                                                  child: TextField(
+                                                                    controller:
+                                                                        _renameController,
+                                                                    autofocus:
+                                                                        true,
+                                                                    style: TextStyle(
+                                                                      color:
+                                                                          t.ink,
+                                                                      fontSize:
+                                                                          10,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w600,
+                                                                    ),
+                                                                    decoration: InputDecoration(
+                                                                      isDense:
+                                                                          true,
+                                                                      contentPadding: const EdgeInsets.symmetric(
+                                                                        horizontal:
+                                                                            4,
+                                                                        vertical:
+                                                                            2,
+                                                                      ),
+                                                                      border: OutlineInputBorder(
+                                                                        borderSide: BorderSide(
+                                                                          color:
+                                                                              t.borderStrong,
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                    onSubmitted:
+                                                                        (
+                                                                          _,
+                                                                        ) => _commitInlineRename(
+                                                                          item,
+                                                                        ),
+                                                                    onTapOutside:
+                                                                        (
+                                                                          _,
+                                                                        ) => _commitInlineRename(
+                                                                          item,
+                                                                        ),
+                                                                  ),
+                                                                )
+                                                              : GestureDetector(
+                                                                  onSecondaryTap:
+                                                                      widget.onRenameItem !=
+                                                                          null
+                                                                      ? () => _startInlineRename(
+                                                                          item,
+                                                                        )
+                                                                      : null,
+                                                                  child: Column(
+                                                                    crossAxisAlignment:
+                                                                        CrossAxisAlignment
+                                                                            .start,
+                                                                    children: [
+                                                                      Text(
+                                                                        item.title,
+                                                                        maxLines:
+                                                                            1,
+                                                                        overflow:
+                                                                            TextOverflow.ellipsis,
+                                                                        style: TextStyle(
+                                                                          color:
+                                                                              t.ink,
+                                                                          fontSize:
+                                                                              10,
+                                                                          fontWeight:
+                                                                              FontWeight.w600,
+                                                                        ),
+                                                                      ),
+                                                                      Text(
+                                                                        _formatTime(
+                                                                          item.createdAt,
+                                                                        ),
+                                                                        style: TextStyle(
+                                                                          color:
+                                                                              t.inkMuted,
+                                                                          fontSize:
+                                                                              9,
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                ),
+                                                        ),
+                                                        if (widget.onRenameItem !=
+                                                                null &&
+                                                            _editingItemId !=
+                                                                item.id)
+                                                          IconButton(
+                                                            key: ValueKey(
+                                                              'rename-item-${item.id}',
+                                                            ),
+                                                            icon: const Icon(
+                                                              Icons
+                                                                  .edit_outlined,
+                                                              size: 13,
+                                                            ),
+                                                            color: t.inkMuted,
+                                                            hoverColor:
+                                                                t.hoverFill,
+                                                            tooltip:
+                                                                'Rename capture',
+                                                            onPressed: () =>
+                                                                _startInlineRename(
+                                                                  item,
+                                                                ),
+                                                            padding:
+                                                                EdgeInsets.zero,
+                                                            // Gene - Nov, 8, 2026: Added M3 shrinkWrap style so gallery card action buttons do not overflow the 138x84 card under useMaterial3: true
+                                                            style: IconButton.styleFrom(
+                                                              minimumSize:
+                                                                  const Size(
+                                                                    18,
+                                                                    18,
+                                                                  ),
+                                                              maximumSize:
+                                                                  const Size(
+                                                                    20,
+                                                                    20,
+                                                                  ),
+                                                              padding:
+                                                                  EdgeInsets
+                                                                      .zero,
+                                                              tapTargetSize:
+                                                                  MaterialTapTargetSize
+                                                                      .shrinkWrap,
+                                                            ),
+                                                            constraints:
+                                                                const BoxConstraints(
+                                                                  minWidth: 18,
+                                                                  minHeight: 18,
+                                                                ),
+                                                          ),
+                                                        IconButton(
+                                                          icon: const Icon(
+                                                            Icons
+                                                                .folder_open_rounded,
+                                                            size: 14,
+                                                          ),
+                                                          color: t.inkMuted,
+                                                          hoverColor:
+                                                              t.hoverFill,
+                                                          tooltip:
+                                                              'Reveal in Finder / Explorer',
+                                                          onPressed: () {
+                                                            if (widget
+                                                                    .onRevealItemInFolder !=
+                                                                null) {
+                                                              widget
+                                                                  .onRevealItemInFolder!(
+                                                                item,
+                                                              );
+                                                            } else {
+                                                              StorageService.revealFileInFolder(
+                                                                item.filePath,
+                                                              );
+                                                            }
+                                                          },
+                                                          padding:
+                                                              EdgeInsets.zero,
+                                                          style: IconButton.styleFrom(
+                                                            minimumSize:
+                                                                const Size(
+                                                                  18,
+                                                                  18,
+                                                                ),
+                                                            maximumSize:
+                                                                const Size(
+                                                                  20,
+                                                                  20,
+                                                                ),
+                                                            padding:
+                                                                EdgeInsets.zero,
+                                                            tapTargetSize:
+                                                                MaterialTapTargetSize
+                                                                    .shrinkWrap,
+                                                          ),
+                                                          constraints:
+                                                              const BoxConstraints(
+                                                                minWidth: 20,
+                                                                minHeight: 20,
+                                                              ),
+                                                        ),
+                                                        IconButton(
+                                                          icon: const Icon(
+                                                            Icons
+                                                                .delete_outline_rounded,
+                                                            size: 14,
+                                                          ),
+                                                          // The one sanctioned chromatic
+                                                          // exception — never an inline red.
+                                                          color: t
+                                                              .controlForeground(
+                                                                active: false,
+                                                                tone:
+                                                                    SnipControlTone
+                                                                        .danger,
+                                                              ),
+                                                          hoverColor: t.danger
+                                                              .withValues(
+                                                                alpha: 0.15,
+                                                              ),
+                                                          tooltip:
+                                                              'Delete Capture',
+                                                          onPressed: () =>
+                                                              widget
+                                                                  .onDeleteItem(
+                                                                    item,
+                                                                  ),
+                                                          padding:
+                                                              EdgeInsets.zero,
+                                                          style: IconButton.styleFrom(
+                                                            minimumSize:
+                                                                const Size(
+                                                                  18,
+                                                                  18,
+                                                                ),
+                                                            maximumSize:
+                                                                const Size(
+                                                                  20,
+                                                                  20,
+                                                                ),
+                                                            padding:
+                                                                EdgeInsets.zero,
+                                                            tapTargetSize:
+                                                                MaterialTapTargetSize
+                                                                    .shrinkWrap,
+                                                          ),
+                                                          constraints:
+                                                              const BoxConstraints(
+                                                                minWidth: 20,
+                                                                minHeight: 20,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ],
+                                              );
                                             },
-                                            padding: EdgeInsets.zero,
-                                            style: IconButton.styleFrom(
-                                              minimumSize: const Size(18, 18),
-                                              maximumSize: const Size(20, 20),
-                                              padding: EdgeInsets.zero,
-                                              tapTargetSize:
-                                                  MaterialTapTargetSize
-                                                      .shrinkWrap,
-                                            ),
-                                            constraints: const BoxConstraints(
-                                              minWidth: 20,
-                                              minHeight: 20,
-                                            ),
                                           ),
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete_outline_rounded,
-                                              size: 14,
-                                            ),
-                                            // The one sanctioned chromatic
-                                            // exception — never an inline red.
-                                            color: t.controlForeground(
-                                              active: false,
-                                              tone: SnipControlTone.danger,
-                                            ),
-                                            hoverColor: t.danger.withValues(
-                                              alpha: 0.15,
-                                            ),
-                                            tooltip: 'Delete Capture',
-                                            onPressed: () =>
-                                                widget.onDeleteItem(item),
-                                            padding: EdgeInsets.zero,
-                                            style: IconButton.styleFrom(
-                                              minimumSize: const Size(18, 18),
-                                              maximumSize: const Size(20, 20),
-                                              padding: EdgeInsets.zero,
-                                              tapTargetSize:
-                                                  MaterialTapTargetSize
-                                                      .shrinkWrap,
-                                            ),
-                                            constraints: const BoxConstraints(
-                                              minWidth: 20,
-                                              minHeight: 20,
-                                            ),
-                                          ),
-                                        ],
+                                        ),
                                       ),
-                                      ],
-                                    ],
+                                    ),
                                   );
-                                    },
-                                  ),
-                                ),
+                                },
                               ),
-                            ),
-                          );
-                        },
-                      ),
                       );
                     },
                   ),

@@ -422,11 +422,13 @@ class HeaderBar extends StatelessWidget {
                   'timer' => onSnipTimer?.call(),
                   'record_area' => onRecordArea?.call(),
                   'record_full' => onRecordFullScreen?.call(),
-                  'toggle_mic' =>
-                    onToggleRecordMicrophone?.call(!recordMicrophone),
+                  'toggle_mic' => onToggleRecordMicrophone?.call(
+                    !recordMicrophone,
+                  ),
                   // Gene - Nov, 13, 2026: Handle System Audio toggle from Capture Modes dropdown.
-                  'toggle_sys_audio' =>
-                    onToggleRecordSystemAudio?.call(!recordSystemAudio),
+                  'toggle_sys_audio' => onToggleRecordSystemAudio?.call(
+                    !recordSystemAudio,
+                  ),
                   'paste' => onPasteFromClipboard?.call(),
                   _ => null,
                 },
@@ -628,11 +630,7 @@ class HeaderBar extends StatelessWidget {
                     onTap: onRestartRecording,
                     child: Tooltip(
                       message: 'Restart Recording',
-                      child: Icon(
-                        Icons.replay_rounded,
-                        size: 15,
-                        color: t.ink,
-                      ),
+                      child: Icon(Icons.replay_rounded, size: 15, color: t.ink),
                     ),
                   ),
                 ],
