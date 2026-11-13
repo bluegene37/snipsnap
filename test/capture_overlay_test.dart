@@ -10,14 +10,44 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/views/capture/capture_overlay.dart';
 
+// Gene - Nov, 13, 2026: Added onRecordVideo harness tracking for whole-screen Capture / Video selector tests.
+// Old implementation:
+// class _Harness {
+//   final List<Rect> captured = [];
+//   int cancels = 0;
+// }
+//
+// Future<_Harness> _pump(
+//   WidgetTester tester, {
+//   Size size = const Size(800, 600),
+// }) async {
+//   await tester.binding.setSurfaceSize(size);
+//   addTearDown(() => tester.binding.setSurfaceSize(null));
+//
+//   final h = _Harness();
+//   await tester.pumpWidget(
+//     MaterialApp(
+//       home: Scaffold(
+//         body: CaptureOverlay(
+//           onCapture: h.captured.add,
+//           onCancel: () => h.cancels++,
+//         ),
+//       ),
+//     ),
+//   );
+//   await tester.pumpAndSettle();
+//   return h;
+// }
 class _Harness {
   final List<Rect> captured = [];
+  final List<Rect> recorded = [];
   int cancels = 0;
 }
 
 Future<_Harness> _pump(
   WidgetTester tester, {
   Size size = const Size(800, 600),
+  bool enableRecordVideo = false,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -29,6 +59,7 @@ Future<_Harness> _pump(
         body: CaptureOverlay(
           onCapture: h.captured.add,
           onCancel: () => h.cancels++,
+          onRecordVideo: enableRecordVideo ? h.recorded.add : null,
         ),
       ),
     ),
@@ -95,13 +126,49 @@ void main() {
     expect(h.captured.single, const Rect.fromLTRB(100, 100, 500, 380));
   });
 
-  testWidgets('a click with no drag captures the whole screen', (tester) async {
-    final h = await _pump(tester);
-    await tester.tapAt(const Offset(400, 300));
-    await tester.pumpAndSettle();
+  // Gene - Nov, 13, 2026: Clicking without dragging now selects full display and presents Capture / Video selector before committing.
+  // Old implementation:
+  // testWidgets('a click with no drag captures the whole screen', (tester) async {
+  //   final h = await _pump(tester);
+  //   await tester.tapAt(const Offset(400, 300));
+  //   await tester.pumpAndSettle();
+  //
+  //   expect(h.captured.single, const Rect.fromLTRB(0, 0, 800, 600));
+  // });
+  testWidgets(
+    'a click with no drag selects the whole screen and shows Capture and Video selector',
+    (tester) async {
+      final h = await _pump(tester, enableRecordVideo: true);
+      await tester.tapAt(const Offset(400, 300));
+      await tester.pumpAndSettle();
 
-    expect(h.captured.single, const Rect.fromLTRB(0, 0, 800, 600));
-  });
+      expect(h.captured, isEmpty);
+      expect(h.recorded, isEmpty);
+      expect(find.text('Capture'), findsOneWidget);
+      expect(find.text('Video'), findsOneWidget);
+
+      await tester.tap(find.text('Capture'));
+      await tester.pumpAndSettle();
+
+      expect(h.captured.single, const Rect.fromLTRB(0, 0, 800, 600));
+      expect(h.recorded, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'choosing Video after clicking the whole screen triggers video recording for full display',
+    (tester) async {
+      final h = await _pump(tester, enableRecordVideo: true);
+      await tester.tapAt(const Offset(400, 300));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Video'));
+      await tester.pumpAndSettle();
+
+      expect(h.recorded.single, const Rect.fromLTRB(0, 0, 800, 600));
+      expect(h.captured, isEmpty);
+    },
+  );
 
   testWidgets('a click outside a settled region starts a new one', (
     tester,

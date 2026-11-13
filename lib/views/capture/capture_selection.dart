@@ -208,6 +208,13 @@ class CaptureSelectionModel {
     _activeGrip = null;
   }
 
+  // Gene - Nov, 13, 2026: Settle full overlay bounds into adjusting state when clicking without dragging so Capture / Video selector appears.
+  void selectFullBounds() {
+    _selection = bounds;
+    _phase = OverlayPhase.adjusting;
+    _activeGrip = null;
+  }
+
   // ---------------------------------------------------------------------------
   // Geometry
   // ---------------------------------------------------------------------------
@@ -286,9 +293,58 @@ class CaptureSelectionModel {
   /// bottom, and pulled inside when the selection reaches both edges — so the
   /// button is always reachable and never sits over the region being captured
   /// unless there is nowhere else for it to go.
+  // Gene - Nov, 13, 2026: Center selector horizontally above bottom Dock/taskbar when full overlay bounds are selected.
+  // Old implementation:
+  // Rect captureButtonRect(Size buttonSize, {double margin = 8.0}) {
+  //   final s = _selection;
+  //   if (s == null) return Rect.zero;
+  //
+  //   var top = s.bottom + margin;
+  //   if (top + buttonSize.height > bounds.bottom - 4) {
+  //     top = s.top - buttonSize.height - margin;
+  //   }
+  //   if (top < bounds.top + 4) {
+  //     top = (s.bottom - buttonSize.height - margin).clamp(
+  //       bounds.top + 4,
+  //       bounds.bottom - buttonSize.height - 4,
+  //     );
+  //   }
+  //
+  //   var left = s.right - buttonSize.width;
+  //   if (left < bounds.left + 4) left = bounds.left + 4;
+  //   if (left + buttonSize.width > bounds.right - 4) {
+  //     left = bounds.right - buttonSize.width - 4;
+  //   }
+  //
+  //   return Rect.fromLTWH(left, top, buttonSize.width, buttonSize.height);
+  // }
   Rect captureButtonRect(Size buttonSize, {double margin = 8.0}) {
     final s = _selection;
     if (s == null) return Rect.zero;
+
+    final isFullBounds =
+        (s.width - bounds.width).abs() < 4 &&
+        (s.height - bounds.height).abs() < 4;
+    if (isFullBounds) {
+      final minLeft = bounds.left + 4;
+      final maxLeft = (bounds.right - buttonSize.width - 4).clamp(
+        minLeft,
+        bounds.right,
+      );
+      final left = (bounds.left + (bounds.width - buttonSize.width) / 2).clamp(
+        minLeft,
+        maxLeft,
+      );
+      final preferredBottomOffset = (bounds.height * 0.16).clamp(12.0, 84.0);
+      final minTop = bounds.top + 4;
+      final maxTop = (bounds.bottom - buttonSize.height - 4).clamp(
+        minTop,
+        bounds.bottom,
+      );
+      final top = (bounds.bottom - buttonSize.height - preferredBottomOffset)
+          .clamp(minTop, maxTop);
+      return Rect.fromLTWH(left, top, buttonSize.width, buttonSize.height);
+    }
 
     var top = s.bottom + margin;
     if (top + buttonSize.height > bounds.bottom - 4) {

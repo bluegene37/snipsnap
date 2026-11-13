@@ -25,6 +25,9 @@ class CaptureColors {
 
   /// Near-black bean for the dimension badge.
   static const Color bean = Color(0xE01C1310);
+
+  // Gene - Nov, 13, 2026: Crimson accent for Video selector button.
+  static const Color crimson = Color(0xFFC22E2E);
 }
 
 /// Full-screen region picker.
@@ -61,12 +64,30 @@ class CaptureColors {
 //   /// Used only for the `1234 × 567 px` readout, so it reports real pixels
 //   /// rather than logical ones.
 //   final double devicePixelRatio;
+// Gene - Nov, 13, 2026: Added optional onRecordVideo callback so CaptureOverlay can offer a Capture / Video selector.
+// Old implementation:
+// class CaptureOverlay extends StatefulWidget {
+//   const CaptureOverlay({
+//     super.key,
+//     required this.onCapture,
+//     required this.onCancel,
+//     this.onScrollingCapture,
+//     this.background,
+//     this.devicePixelRatio = 1.0,
+//   });
+//
+//   final ValueChanged<Rect> onCapture;
+//   final VoidCallback onCancel;
+//   final ValueChanged<Rect>? onScrollingCapture;
+//   final ui.Image? background;
+//   final double devicePixelRatio;
 class CaptureOverlay extends StatefulWidget {
   const CaptureOverlay({
     super.key,
     required this.onCapture,
     required this.onCancel,
     this.onScrollingCapture,
+    this.onRecordVideo,
     this.background,
     this.devicePixelRatio = 1.0,
   });
@@ -79,6 +100,9 @@ class CaptureOverlay extends StatefulWidget {
 
   /// Optional callback triggered when initiating panoramic scrolling capture.
   final ValueChanged<Rect>? onScrollingCapture;
+
+  /// Optional callback triggered when switching/starting video recording.
+  final ValueChanged<Rect>? onRecordVideo;
 
   /// Pre-captured screen bitmap shown beneath the wash. Null renders the
   /// overlay transparent, for a window that already shows the live desktop.
@@ -99,15 +123,20 @@ class _CaptureOverlayState extends State<CaptureOverlay> {
 
   static const double _pillWidth = 122;
   static const double _scrollPillWidth = 108;
+  static const double _videoPillWidth = 108;
   static const double _controlHeight = 34;
   static const double _controlGap = 8;
 
   // Gene - Oct, 27, 2026: Dynamically compute button size to include Scroll button when onScrollingCapture is set.
+  // Gene - Nov, 13, 2026: Include Video pill width when onRecordVideo is set.
   // Old implementation:
-  // /// Placement is computed for the pair as one block, so the model's
-  // /// edge-flipping keeps both buttons on screen together.
-  // static const Size _buttonSize = Size(
-  //   _pillWidth + _controlGap + _controlHeight,
+  // Size get _buttonSize => Size(
+  //   _pillWidth +
+  //       (widget.onScrollingCapture != null
+  //           ? _controlGap + _scrollPillWidth
+  //           : 0) +
+  //       _controlGap +
+  //       _controlHeight,
   //   _controlHeight,
   // );
   Size get _buttonSize => Size(
@@ -115,6 +144,7 @@ class _CaptureOverlayState extends State<CaptureOverlay> {
         (widget.onScrollingCapture != null
             ? _controlGap + _scrollPillWidth
             : 0) +
+        (widget.onRecordVideo != null ? _controlGap + _videoPillWidth : 0) +
         _controlGap +
         _controlHeight,
     _controlHeight,
@@ -199,10 +229,14 @@ class _CaptureOverlayState extends State<CaptureOverlay> {
                       setState(() => model.pointerMove(e.localPosition)),
                   onPointerUp: (e) {
                     final wasClick = model.pointerUp();
-                    // A click with no drag means the whole screen, the
-                    // shortcut this overlay has always had.
+                    // Gene - Nov, 13, 2026: Select full overlay bounds and open Capture / Video selector on a click without drag.
+                    // Old implementation:
+                    // if (wasClick) {
+                    //   widget.onCapture(Offset.zero & size);
+                    //   return;
+                    // }
                     if (wasClick) {
-                      widget.onCapture(Offset.zero & size);
+                      setState(() => model.selectFullBounds());
                       return;
                     }
                     setState(() {});
@@ -275,6 +309,21 @@ class _CaptureOverlayState extends State<CaptureOverlay> {
                               final m = _model;
                               if (m == null || !m.hasUsableSelection) return;
                               widget.onScrollingCapture!(m.selection!);
+                            },
+                          ),
+                        ),
+                      ],
+                      // Gene - Nov, 13, 2026: Render Video selector button beside Capture when onRecordVideo is provided.
+                      if (widget.onRecordVideo != null) ...[
+                        const SizedBox(width: _controlGap),
+                        SizedBox(
+                          width: _videoPillWidth,
+                          height: _controlHeight,
+                          child: _VideoButton(
+                            onPressed: () {
+                              final m = _model;
+                              if (m == null || !m.hasUsableSelection) return;
+                              widget.onRecordVideo!(m.selection!);
                             },
                           ),
                         ),
@@ -425,6 +474,63 @@ class _ScrollButtonState extends State<_ScrollButton> {
               SizedBox(width: 6),
               Text(
                 'Scroll',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Gene - Nov, 13, 2026: Added _VideoButton pill for choosing video recording from the capture selection bar.
+class _VideoButton extends StatefulWidget {
+  const _VideoButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  State<_VideoButton> createState() => _VideoButtonState();
+}
+
+class _VideoButtonState extends State<_VideoButton> {
+  bool _hot = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hot = true),
+      onExit: (_) => setState(() => _hot = false),
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: _hot
+                ? Color.lerp(CaptureColors.crimson, Colors.white, 0.25)
+                : CaptureColors.crimson,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x55000000),
+                blurRadius: 10,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.videocam_rounded, size: 16, color: Colors.white),
+              SizedBox(width: 6),
+              Text(
+                'Video',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 13,

@@ -78,8 +78,23 @@ private let returnKey: UInt16 = 36
 
 /// Builds the real overlay view over an 800x600 image in a 400x300 point frame
 /// (backing scale 2.0, i.e. a Retina display).
+// Gene - Nov, 13, 2026: Support optional onRecordCapture handler in makeView harness helper.
+// Old implementation:
+// private func makeView(
+//   onCapture: @escaping (CGImage?) -> Void,
+//   onCancel: @escaping () -> Void
+// ) -> CaptureOverlayView {
+//   return CaptureOverlayView(
+//     frame: NSRect(x: 0, y: 0, width: 400, height: 300),
+//     screenImage: quadrantImage(width: 800, height: 600),
+//     scaleFactor: 2.0,
+//     onCapture: onCapture,
+//     onCancel: onCancel
+//   )
+// }
 private func makeView(
   onCapture: @escaping (CGImage?) -> Void,
+  onRecordCapture: ((NSRect, OverlayRecordOptions) -> Void)? = nil,
   onCancel: @escaping () -> Void
 ) -> CaptureOverlayView {
   return CaptureOverlayView(
@@ -87,6 +102,7 @@ private func makeView(
     screenImage: quadrantImage(width: 800, height: 600),
     scaleFactor: 2.0,
     onCapture: onCapture,
+    onRecordCapture: onRecordCapture,
     onCancel: onCancel
   )
 }
@@ -99,16 +115,54 @@ private func makeView(
 }
 
 @MainActor func runHarness() {
-  print("=== Behaviour 1: click with no drag captures the whole display ===")
+  // Gene - Nov, 13, 2026: Verify whole-screen click settles full display and offers Capture / Video selector before committing.
+  // Old implementation:
+  // print("=== Behaviour 1: click with no drag captures the whole display ===")
+  // do {
+  //   var captured: CGImage??
+  //   let v = makeView(onCapture: { captured = .some($0) }, onCancel: { captured = .some(nil) })
+  //   v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 100, y: 100)))
+  //   v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 100, y: 100)))
+  //   check("0px click returns an image", (captured ?? nil) != nil)
+  //   if let img = captured ?? nil {
+  //     check("  ...and it is the FULL display", img.width == 800 && img.height == 600,
+  //           "\(img.width)x\(img.height)")
+  //   }
+  // }
+  // do {
+  //   var captured: CGImage??
+  //   let v = makeView(onCapture: { captured = .some($0) }, onCancel: { captured = .some(nil) })
+  //   v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 100, y: 100)))
+  //   v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 104, y: 104)))
+  //   v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 104, y: 104)))
+  //   if let img = captured ?? nil {
+  //     check("4px jitter still counts as a click (full display)",
+  //           img.width == 800 && img.height == 600, "\(img.width)x\(img.height)")
+  //   } else {
+  //     check("4px jitter still counts as a click (full display)", false, "no image")
+  //   }
+  // }
+  print("=== Behaviour 1: click with no drag selects whole display and shows Capture / Video selector ===")
   do {
     var captured: CGImage??
     let v = makeView(onCapture: { captured = .some($0) }, onCancel: { captured = .some(nil) })
     v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 100, y: 100)))
     v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 100, y: 100)))
-    check("0px click returns an image", (captured ?? nil) != nil)
+    check("0px click does NOT capture immediately", captured == nil)
+    renderOverlay(v)
+    check("Capture and Video selector buttons appear inside bounds",
+          !v.captureButtonRectForTesting.isEmpty
+            && !v.recordButtonRectForTesting.isEmpty
+            && v.bounds.contains(v.captureButtonRectForTesting)
+            && v.bounds.contains(v.recordButtonRectForTesting),
+          "cap=\(v.captureButtonRectForTesting) vid=\(v.recordButtonRectForTesting)")
+    let capHit = NSPoint(x: v.captureButtonRectForTesting.midX, y: v.captureButtonRectForTesting.midY)
+    v.mouseDown(with: mouseEvent(.leftMouseDown, capHit))
     if let img = captured ?? nil {
-      check("  ...and it is the FULL display", img.width == 800 && img.height == 600,
+      check("clicking Capture captures the FULL display", img.width == 800 && img.height == 600,
             "\(img.width)x\(img.height)")
+    } else {
+      check("clicking Capture captures the FULL display", false, "no image")
     }
   }
   do {
@@ -117,12 +171,41 @@ private func makeView(
     v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 100, y: 100)))
     v.mouseDragged(with: mouseEvent(.leftMouseDragged, NSPoint(x: 104, y: 104)))
     v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 104, y: 104)))
+    check("4px jitter does NOT capture before confirming", captured == nil)
+    v.keyDown(with: keyEvent(returnKey, "\r"))
     if let img = captured ?? nil {
-      check("4px jitter still counts as a click (full display)",
+      check("4px jitter + Return captures the FULL display",
             img.width == 800 && img.height == 600, "\(img.width)x\(img.height)")
     } else {
-      check("4px jitter still counts as a click (full display)", false, "no image")
+      check("4px jitter + Return captures the FULL display", false, "no image")
     }
+  }
+  do {
+    var captured: CGImage??
+    var recordedRect: NSRect?
+    var recordedOpts: OverlayRecordOptions?
+    let v = makeView(
+      onCapture: { captured = .some($0) },
+      onRecordCapture: { rect, opts in
+        recordedRect = rect
+        recordedOpts = opts
+      },
+      onCancel: { captured = .some(nil) }
+    )
+    v.mouseDown(with: mouseEvent(.leftMouseDown, NSPoint(x: 120, y: 120)))
+    v.mouseUp(with: mouseEvent(.leftMouseUp, NSPoint(x: 120, y: 120)))
+    renderOverlay(v)
+    let vidHit = NSPoint(x: v.recordButtonRectForTesting.midX, y: v.recordButtonRectForTesting.midY)
+    v.mouseDown(with: mouseEvent(.leftMouseDown, vidHit))
+    check("clicking Video switches overlay into record mode in-place",
+          v.currentModeForTesting == "record" && captured == nil && recordedRect == nil,
+          "mode=\(v.currentModeForTesting)")
+    renderOverlay(v)
+    let recHit = NSPoint(x: v.recordButtonRectForTesting.midX, y: v.recordButtonRectForTesting.midY)
+    v.mouseDown(with: mouseEvent(.leftMouseDown, recHit))
+    check("clicking Rec after switching confirms full-display video recording",
+          recordedRect == v.bounds && (recordedOpts?.isFullScreen ?? false) && captured == nil,
+          "rect=\(String(describing: recordedRect)) full=\(String(describing: recordedOpts?.isFullScreen))")
   }
 
   // The drag no longer captures on mouse-up. It settles the selection, which

@@ -672,11 +672,24 @@ class CapturePlugin: NSObject {
       // Create overlay window for each screen
       for screenItem in screens {
         let image = screenImages[screenItem]
+        // Gene - Nov, 13, 2026: Clear sibling monitor selections when the user interacts with a specific display.
+        // Old implementation:
+        // let overlayWindow = CaptureOverlayWindow(
+        //   screen: screenItem,
+        //   screenImage: image,
+        //   initialMode: initialMode,
+        //   initialRecordOptions: initialRecordOptions,
         let overlayWindow = CaptureOverlayWindow(
           screen: screenItem,
           screenImage: image,
           initialMode: initialMode,
           initialRecordOptions: initialRecordOptions,
+          onActivateScreen: { [weak self, weak screenItem] in
+            guard let self = self else { return }
+            for win in self.activeWindows where win.screen !== screenItem {
+              win.clearOverlaySelection()
+            }
+          },
           onCapture: { [weak self] capturedImage in
             guard let self = self else { return }
             if let capturedImage = capturedImage, self.saveImage(capturedImage, toPath: targetPath) {
@@ -1967,11 +1980,54 @@ private class CaptureOverlayWindow: NSPanel {
     self.contentView = view
   }
   */
+  // Gene - Nov, 13, 2026: Forward onActivateScreen callback to CaptureOverlayView and expose clearOverlaySelection for multi-monitor coordination.
+  // Old implementation:
+  // init(
+  //   screen: NSScreen,
+  //   screenImage: CGImage?,
+  //   initialMode: String = "capture",
+  //   initialRecordOptions: OverlayRecordOptions = OverlayRecordOptions(),
+  //   onCapture: @escaping (CGImage?) -> Void,
+  //   onPanoramicCapture: ((NSRect) -> Void)? = nil,
+  //   onRecordCapture: ((NSRect, OverlayRecordOptions) -> Void)? = nil,
+  //   onCancel: @escaping () -> Void
+  // ) {
+  //   super.init(
+  //     contentRect: screen.frame,
+  //     styleMask: [.borderless, .nonactivatingPanel],
+  //     backing: .buffered,
+  //     defer: false
+  //   )
+  //
+  //   self.isOpaque = false
+  //   self.backgroundColor = .clear
+  //   self.level = .screenSaver
+  //   self.hasShadow = false
+  //   self.ignoresMouseEvents = false
+  //   self.acceptsMouseMovedEvents = true
+  //   self.hidesOnDeactivate = false
+  //   self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+  //
+  //   let view = CaptureOverlayView(
+  //     frame: NSRect(origin: .zero, size: screen.frame.size),
+  //     screenImage: screenImage,
+  //     scaleFactor: screen.backingScaleFactor,
+  //     initialMode: initialMode,
+  //     initialRecordOptions: initialRecordOptions,
+  //     onCapture: onCapture,
+  //     onPanoramicCapture: onPanoramicCapture,
+  //     onRecordCapture: onRecordCapture,
+  //     onCancel: onCancel
+  //   )
+  //   self.contentView = view
+  //   self.setFrame(screen.frame, display: true)
+  // }
   init(
     screen: NSScreen,
     screenImage: CGImage?,
     initialMode: String = "capture",
     initialRecordOptions: OverlayRecordOptions = OverlayRecordOptions(),
+    onActivateScreen: (() -> Void)? = nil,
     onCapture: @escaping (CGImage?) -> Void,
     onPanoramicCapture: ((NSRect) -> Void)? = nil,
     onRecordCapture: ((NSRect, OverlayRecordOptions) -> Void)? = nil,
@@ -2004,6 +2060,7 @@ private class CaptureOverlayWindow: NSPanel {
       scaleFactor: screen.backingScaleFactor,
       initialMode: initialMode,
       initialRecordOptions: initialRecordOptions,
+      onActivateScreen: onActivateScreen,
       onCapture: onCapture,
       onPanoramicCapture: onPanoramicCapture,
       onRecordCapture: onRecordCapture,
@@ -2012,6 +2069,10 @@ private class CaptureOverlayWindow: NSPanel {
     self.contentView = view
     // Gene - Nov, 13, 2026: Ensure borderless overlay stays on the exact target screen without AppKit constraining its frame to the main display.
     self.setFrame(screen.frame, display: true)
+  }
+
+  func clearOverlaySelection() {
+    (contentView as? CaptureOverlayView)?.resetSelectionToIdle()
   }
 
   // Gene - Nov, 13, 2026: Bypass AppKit constrainFrameRect so panels on secondary monitors never snap onto the primary screen.
@@ -2184,8 +2245,11 @@ private class CaptureOverlayView: NSView {
   private let screenImage: CGImage?
   private let scaleFactor: CGFloat
   // Gene - Nov, 08, 2026: Added initialMode and onRecordCapture to support unified Capture + Record overlay.
-  // Gene - Nov, 13, 2026: Added OverlayRecordOptions state, Snagit pre-recording toolbar hit rects, and live mic level meter.
-  private let initialMode: String
+  // Gene - Nov, 13, 2026: Added OverlayRecordOptions state, Snagit pre-recording toolbar hit rects, live mic level meter, mutable initialMode, and active-screen callback.
+  // Old implementation:
+  // private let initialMode: String
+  private var initialMode: String
+  private let onActivateScreen: (() -> Void)?
   private let onCapture: (CGImage?) -> Void
   // Gene - Oct, 27, 2026: Added onPanoramicCapture callback.
   private let onPanoramicCapture: ((NSRect) -> Void)?
@@ -2288,12 +2352,40 @@ private class CaptureOverlayView: NSView {
     self.wantsLayer = true
   }
   */
+  // Gene - Nov, 13, 2026: Added optional onActivateScreen callback and resetSelectionToIdle() helper for multi-monitor coordination.
+  // Old implementation:
+  // init(
+  //   frame: NSRect,
+  //   screenImage: CGImage?,
+  //   scaleFactor: CGFloat,
+  //   initialMode: String = "capture",
+  //   initialRecordOptions: OverlayRecordOptions = OverlayRecordOptions(),
+  //   onCapture: @escaping (CGImage?) -> Void,
+  //   onPanoramicCapture: ((NSRect) -> Void)? = nil,
+  //   onRecordCapture: ((NSRect, OverlayRecordOptions) -> Void)? = nil,
+  //   onCancel: @escaping () -> Void
+  // ) {
+  //   self.screenImage = screenImage
+  //   self.scaleFactor = scaleFactor
+  //   self.initialMode = initialMode
+  //   self.recordOptions = initialRecordOptions
+  //   self.onCapture = onCapture
+  //   self.onPanoramicCapture = onPanoramicCapture
+  //   self.onRecordCapture = onRecordCapture
+  //   self.onCancel = onCancel
+  //   super.init(frame: frame)
+  //   self.wantsLayer = true
+  //   if initialMode == "record" && initialRecordOptions.recordMic {
+  //     refreshMicMonitor()
+  //   }
+  // }
   init(
     frame: NSRect,
     screenImage: CGImage?,
     scaleFactor: CGFloat,
     initialMode: String = "capture",
     initialRecordOptions: OverlayRecordOptions = OverlayRecordOptions(),
+    onActivateScreen: (() -> Void)? = nil,
     onCapture: @escaping (CGImage?) -> Void,
     onPanoramicCapture: ((NSRect) -> Void)? = nil,
     onRecordCapture: ((NSRect, OverlayRecordOptions) -> Void)? = nil,
@@ -2303,6 +2395,7 @@ private class CaptureOverlayView: NSView {
     self.scaleFactor = scaleFactor
     self.initialMode = initialMode
     self.recordOptions = initialRecordOptions
+    self.onActivateScreen = onActivateScreen
     self.onCapture = onCapture
     self.onPanoramicCapture = onPanoramicCapture
     self.onRecordCapture = onRecordCapture
@@ -2312,6 +2405,14 @@ private class CaptureOverlayView: NSView {
     if initialMode == "record" && initialRecordOptions.recordMic {
       refreshMicMonitor()
     }
+  }
+
+  func resetSelectionToIdle() {
+    if case .idle = mode, selection == nil { return }
+    selection = nil
+    mode = .idle
+    clearToolbarRects()
+    refreshChrome()
   }
 
   deinit {
@@ -2684,8 +2785,9 @@ private class CaptureOverlayView: NSView {
   }
   */
   override func mouseDown(with event: NSEvent) {
-    // Gene - Nov, 13, 2026: Promote clicked monitor's overlay window to key so Return/Space shortcuts act on the active screen.
+    // Gene - Nov, 13, 2026: Promote clicked monitor's overlay window to key and clear sibling monitor selections.
     self.window?.makeKey()
+    onActivateScreen?()
     let pt = convert(event.locationInWindow, from: nil)
     dragOrigin = pt
 
@@ -2717,8 +2819,21 @@ private class CaptureOverlayView: NSView {
         captureCurrentSelection()
         return
       }
+      // Gene - Nov, 13, 2026: In capture mode, clicking Video switches in-place to the Snagit Pre-Recording Toolbar; in record mode, Rec starts recording.
+      // Old implementation:
+      // if !recordButtonRect.isEmpty && recordButtonRect.contains(pt) {
+      //   startRecordSelection()
+      //   return
+      // }
       if !recordButtonRect.isEmpty && recordButtonRect.contains(pt) {
-        startRecordSelection()
+        if initialMode == "record" {
+          startRecordSelection()
+        } else {
+          recordOptions.isFullScreen = (abs(sel.width - bounds.width) < 4 && abs(sel.height - bounds.height) < 4)
+          initialMode = "record"
+          refreshMicMonitor()
+          refreshChrome()
+        }
         return
       }
       if initialMode == "record" {
@@ -2761,8 +2876,16 @@ private class CaptureOverlayView: NSView {
           needsDisplay = true
           return
         }
+        // Gene - Nov, 13, 2026: Clicking Image in record toolbar switches back to Capture/Video selector on the same selection.
+        // Old implementation:
+        // if !tbImageRect.isEmpty && tbImageRect.contains(pt) {
+        //   captureCurrentSelection()
+        //   return
+        // }
         if !tbImageRect.isEmpty && tbImageRect.contains(pt) {
-          captureCurrentSelection()
+          initialMode = "capture"
+          stopMicMonitor()
+          refreshChrome()
           return
         }
       }
@@ -2868,17 +2991,26 @@ private class CaptureOverlayView: NSView {
         return
       }
       */
+      // Gene - Nov, 13, 2026: Settle full-display selection on a click without drag in both capture and record modes so the [Capture] / [Video] selector appears.
+      // Old implementation:
+      // if !isUsable(sel) {
+      //   if initialMode == "record" {
+      //     selection = bounds
+      //     recordOptions.isFullScreen = true
+      //     mode = .adjusting
+      //     refreshChrome()
+      //   } else {
+      //     selection = nil
+      //     mode = .idle
+      //     settle(with: screenImage)
+      //   }
+      //   return
+      // }
       if !isUsable(sel) {
-        if initialMode == "record" {
-          selection = bounds
-          recordOptions.isFullScreen = true
-          mode = .adjusting
-          refreshChrome()
-        } else {
-          selection = nil
-          mode = .idle
-          settle(with: screenImage)
-        }
+        selection = bounds
+        recordOptions.isFullScreen = true
+        mode = .adjusting
+        refreshChrome()
         return
       }
       recordOptions.isFullScreen = (abs(sel.width - bounds.width) < 2 && abs(sel.height - bounds.height) < 2)
@@ -3213,12 +3345,28 @@ private class CaptureOverlayView: NSView {
     let gap: CGFloat = 6
     let margin: CGFloat = 10
 
-    var barY = selRect.minY - barH - margin
-    if barY < 10 {
-      barY = selRect.maxY + margin
-    }
-    if barY + barH > bounds.height - 10 {
-      barY = max(12, selRect.minY + 14)
+    // Gene - Nov, 13, 2026: Position Snagit toolbar cleanly above macOS Dock when full-display preset is selected.
+    // Old implementation:
+    // var barY = selRect.minY - barH - margin
+    // if barY < 10 {
+    //   barY = selRect.maxY + margin
+    // }
+    // if barY + barH > bounds.height - 10 {
+    //   barY = max(12, selRect.minY + 14)
+    // }
+    let isFullDisplay = abs(selRect.width - bounds.width) < 4 && abs(selRect.height - bounds.height) < 4
+    var barY: CGFloat
+    if isFullDisplay {
+      let preferredY = min(CGFloat(84), max(CGFloat(14), bounds.height * 0.16))
+      barY = min(max(12, bounds.height - barH - presetBarH - gap - 12), preferredY)
+    } else {
+      barY = selRect.minY - barH - margin
+      if barY < 10 {
+        barY = selRect.maxY + margin
+      }
+      if barY + barH > bounds.height - 10 {
+        barY = max(12, selRect.minY + 14)
+      }
     }
     var barX = selRect.midX - barW / 2
     if barX < 8 { barX = 8 }
@@ -3531,30 +3679,124 @@ private class CaptureOverlayView: NSView {
     // drawCancelButton(in: cancelButtonRect, accent: accent)
 
     // Gene - Nov, 08, 2026: Placed [Capture] + [Record] + [Cancel (X)] as one unified control block.
+    // Gene - Nov, 13, 2026: Relabel [Video] selector with video glyph, center horizontally above Dock on full-display selection, and clear stale record toolbar rects.
     // Old implementation:
     // // Capture and cancel are placed as one block: [Capture] + [Cancel (X)]
     // let buttonW = pillW + controlGap + buttonH
-    let recLabel = "Record"
+    // let recLabel = "Record"
+    // let recAttrString = NSAttributedString(string: recLabel, attributes: attrs)
+    // let recTextSize = recAttrString.size()
+    // let recPillW = padH * 2 + iconW + gap + recTextSize.width
+    //
+    // let buttonW = pillW + controlGap + recPillW + controlGap + buttonH
+    //
+    // // Below the selection by default, above it when that would run off the
+    // // bottom, and pulled inside when the selection reaches both edges.
+    // var y = selRect.minY - buttonH - margin
+    // if y < 4 {
+    //   y = selRect.maxY + margin
+    // }
+    // if y + buttonH > bounds.height - 4 {
+    //   y = max(4, selRect.minY + margin)
+    // }
+    // var x = selRect.maxX - buttonW
+    // if x < 4 { x = 4 }
+    // if x + buttonW > bounds.width - 4 { x = bounds.width - buttonW - 4 }
+    //
+    // let block = NSRect(x: x, y: y, width: buttonW, height: buttonH)
+    // let captureRect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
+    // captureButtonRect = captureRect
+    // panoramicButtonRect = .zero
+    //
+    // let recRect = NSRect(x: block.minX + pillW + controlGap, y: block.minY, width: recPillW, height: buttonH)
+    // recordButtonRect = recRect
+    //
+    // cancelButtonRect = NSRect(
+    //   x: block.maxX - buttonH,
+    //   y: block.minY,
+    //   width: buttonH,
+    //   height: buttonH
+    // )
+    //
+    // // 1. Draw Capture button
+    // let capturePath = NSBezierPath(roundedRect: captureRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
+    // (captureButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : accent).setFill()
+    // capturePath.fill()
+    // NSColor(white: 1.0, alpha: 0.35).setStroke()
+    // capturePath.lineWidth = 1
+    // capturePath.stroke()
+    //
+    // drawCameraGlyph(
+    //   in: NSRect(x: captureRect.minX + padH, y: captureRect.midY - 5.5, width: iconW, height: 11)
+    // )
+    // attrString.draw(
+    //   at: NSPoint(x: captureRect.minX + padH + iconW + gap, y: captureRect.midY - textSize.height / 2)
+    // )
+    //
+    // // 2. Draw Record button beside Capture
+    // let recPath = NSBezierPath(roundedRect: recRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
+    // (recordButtonHot ? crimson.blended(withFraction: 0.25, of: NSColor.white) ?? crimson : crimson).setFill()
+    // recPath.fill()
+    // NSColor(white: 1.0, alpha: 0.35).setStroke()
+    // recPath.lineWidth = 1
+    // recPath.stroke()
+    //
+    // let dotR: CGFloat = 9.0
+    // let dotRect = NSRect(x: recRect.minX + padH + (iconW - dotR) / 2, y: recRect.midY - dotR / 2, width: dotR, height: dotR)
+    // NSColor.white.setFill()
+    // NSBezierPath(ovalIn: dotRect).fill()
+    //
+    // recAttrString.draw(
+    //   at: NSPoint(x: recRect.minX + padH + iconW + gap, y: recRect.midY - recTextSize.height / 2)
+    // )
+    //
+    // // 3. Draw Cancel (X) button
+    // drawCancelButton(in: cancelButtonRect, accent: accent)
+    clearToolbarRects()
+    let recLabel = "Video"
     let recAttrString = NSAttributedString(string: recLabel, attributes: attrs)
     let recTextSize = recAttrString.size()
     let recPillW = padH * 2 + iconW + gap + recTextSize.width
 
     let buttonW = pillW + controlGap + recPillW + controlGap + buttonH
+    let isFullDisplay = abs(selRect.width - bounds.width) < 4 && abs(selRect.height - bounds.height) < 4
 
-    // Below the selection by default, above it when that would run off the
-    // bottom, and pulled inside when the selection reaches both edges.
-    var y = selRect.minY - buttonH - margin
-    if y < 4 {
-      y = selRect.maxY + margin
+    var y: CGFloat
+    var x: CGFloat
+    if isFullDisplay {
+      let preferredY = min(CGFloat(84), max(CGFloat(12), bounds.height * 0.16))
+      y = min(max(8, bounds.height - buttonH - 12), preferredY)
+      x = max(4, min(bounds.width - buttonW - 4, (bounds.width - buttonW) / 2))
+    } else {
+      // Below the selection by default, above it when that would run off the
+      // bottom, and pulled inside when the selection reaches both edges.
+      y = selRect.minY - buttonH - margin
+      if y < 4 {
+        y = selRect.maxY + margin
+      }
+      if y + buttonH > bounds.height - 4 {
+        y = max(4, selRect.minY + margin)
+      }
+      x = selRect.maxX - buttonW
+      if x < 4 { x = 4 }
+      if x + buttonW > bounds.width - 4 { x = bounds.width - buttonW - 4 }
     }
-    if y + buttonH > bounds.height - 4 {
-      y = max(4, selRect.minY + margin)
-    }
-    var x = selRect.maxX - buttonW
-    if x < 4 { x = 4 }
-    if x + buttonW > bounds.width - 4 { x = bounds.width - buttonW - 4 }
 
     let block = NSRect(x: x, y: y, width: buttonW, height: buttonH)
+    if isFullDisplay {
+      let backdropPill = block.insetBy(dx: -8, dy: -6).intersection(bounds.insetBy(dx: 2, dy: 2))
+      let trayPath = NSBezierPath(
+        roundedRect: backdropPill,
+        xRadius: backdropPill.height / 2,
+        yRadius: backdropPill.height / 2
+      )
+      bean.setFill()
+      trayPath.fill()
+      NSColor(white: 1.0, alpha: 0.22).setStroke()
+      trayPath.lineWidth = 1
+      trayPath.stroke()
+    }
+
     let captureRect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
     captureButtonRect = captureRect
     panoramicButtonRect = .zero
@@ -3584,7 +3826,7 @@ private class CaptureOverlayView: NSView {
       at: NSPoint(x: captureRect.minX + padH + iconW + gap, y: captureRect.midY - textSize.height / 2)
     )
 
-    // 2. Draw Record button beside Capture
+    // 2. Draw Video button beside Capture
     let recPath = NSBezierPath(roundedRect: recRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
     (recordButtonHot ? crimson.blended(withFraction: 0.25, of: NSColor.white) ?? crimson : crimson).setFill()
     recPath.fill()
@@ -3592,10 +3834,9 @@ private class CaptureOverlayView: NSView {
     recPath.lineWidth = 1
     recPath.stroke()
 
-    let dotR: CGFloat = 9.0
-    let dotRect = NSRect(x: recRect.minX + padH + (iconW - dotR) / 2, y: recRect.midY - dotR / 2, width: dotR, height: dotR)
-    NSColor.white.setFill()
-    NSBezierPath(ovalIn: dotRect).fill()
+    drawVideoGlyph(
+      in: NSRect(x: recRect.minX + padH, y: recRect.midY - 5.0, width: iconW, height: 10)
+    )
 
     recAttrString.draw(
       at: NSPoint(x: recRect.minX + padH + iconW + gap, y: recRect.midY - recTextSize.height / 2)
@@ -3603,6 +3844,26 @@ private class CaptureOverlayView: NSView {
 
     // 3. Draw Cancel (X) button
     drawCancelButton(in: cancelButtonRect, accent: accent)
+  }
+
+  // Gene - Nov, 13, 2026: Vector camcorder glyph for the Capture / Video selector pill.
+  private func drawVideoGlyph(in rect: NSRect) {
+    NSColor.white.setFill()
+    let bodyW = rect.width * 0.66
+    let body = NSBezierPath(
+      roundedRect: NSRect(x: rect.minX, y: rect.minY, width: bodyW, height: rect.height),
+      xRadius: 2,
+      yRadius: 2
+    )
+    body.fill()
+
+    let lens = NSBezierPath()
+    lens.move(to: NSPoint(x: rect.minX + bodyW + 1, y: rect.midY - rect.height * 0.22))
+    lens.line(to: NSPoint(x: rect.maxX, y: rect.minY + 1))
+    lens.line(to: NSPoint(x: rect.maxX, y: rect.maxY - 1))
+    lens.line(to: NSPoint(x: rect.minX + bodyW + 1, y: rect.midY + rect.height * 0.22))
+    lens.close()
+    lens.fill()
   }
 
   // Gene - Oct, 27, 2026: Glyph for Panoramic / Scrolling capture button.
@@ -3697,7 +3958,9 @@ private class CaptureOverlayView: NSView {
   /// `tool/capture_overlay_harness`. Both are computed during `draw`, so a
   /// caller has to render the view before reading them.
   var captureButtonRectForTesting: NSRect { captureButtonRect }
+  var recordButtonRectForTesting: NSRect { recordButtonRect }
   var cancelButtonRectForTesting: NSRect { cancelButtonRect }
+  var currentModeForTesting: String { initialMode }
 
   private func normalizedRect(from p1: NSPoint, to p2: NSPoint) -> NSRect {
     let x = min(p1.x, p2.x)

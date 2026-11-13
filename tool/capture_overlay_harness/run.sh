@@ -15,6 +15,9 @@ cat "$here/overlay_tests.swift" >> "$work/Plugin.swift"
 # macos12.0 matches MACOSX_DEPLOYMENT_TARGET in the Xcode project. It matters:
 # CGDisplayCreateImage and CGWindowListCreateImage are marked obsoleted in
 # macOS 15.0 and will not compile against a newer deployment target.
-swiftc -O -target arm64-apple-macos12.0 -parse-as-library \
+# Gene - Nov, 13, 2026: Match Runner Xcode deployment target macos13.0 for ScreenCaptureKit and async AVAsset APIs.
+# swiftc -O -target arm64-apple-macos12.0 -parse-as-library \
+#   "$here/FlutterStubs.swift" "$work/Plugin.swift" -o "$work/harness"
+swiftc -O -target arm64-apple-macos13.0 -parse-as-library \
   "$here/FlutterStubs.swift" "$work/Plugin.swift" -o "$work/harness"
 "$work/harness"
