@@ -1,4 +1,7 @@
-platform :osx, '12.0'
+# Gene - Nov, 13, 2026: Bumped macOS deployment target to 13.0 for ScreenCaptureKit video and system audio capture.
+# Old implementation:
+# platform :osx, '12.0'
+platform :osx, '13.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'

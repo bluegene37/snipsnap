@@ -1,8 +1,157 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+
+// Gene - Nov, 13, 2026: Added AudioInputDevice, OverlayRecordRequest, and NativeVideoPlayerInfo models for Snagit-grade screen recording and native 60fps video playback.
+class AudioInputDevice {
+  final String id;
+  final String name;
+  final bool isDefault;
+
+  const AudioInputDevice({
+    required this.id,
+    required this.name,
+    this.isDefault = false,
+  });
+
+  factory AudioInputDevice.fromMap(Map<dynamic, dynamic> map) {
+    return AudioInputDevice(
+      id: (map['id'] as String?) ?? '',
+      name: (map['name'] as String?) ?? 'Microphone',
+      isDefault: map['isDefault'] == true,
+    );
+  }
+}
+
+class OverlayRecordRequest {
+  final double x;
+  final double y;
+  final double width;
+  final double height;
+  final int? fps;
+  final bool? recordMicrophone;
+  final bool? recordSystemAudio;
+  final bool? recordCursor;
+  final bool? highlightClicks;
+  final bool fullScreen;
+  final String? microphoneDeviceId;
+
+  const OverlayRecordRequest({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+    this.fps,
+    this.recordMicrophone,
+    this.recordSystemAudio,
+    this.recordCursor,
+    this.highlightClicks,
+    this.fullScreen = false,
+    this.microphoneDeviceId,
+  });
+
+  static OverlayRecordRequest? tryParse(String raw) {
+    if (!raw.startsWith('record:')) return null;
+    final parts = raw.substring('record:'.length).split(':');
+    if (parts.length < 4) return null;
+    final x = double.tryParse(parts[0]) ?? 0.0;
+    final y = double.tryParse(parts[1]) ?? 0.0;
+    final w = double.tryParse(parts[2]) ?? 0.0;
+    final h = double.tryParse(parts[3]) ?? 0.0;
+    int? fps;
+    bool? mic;
+    bool? sysAudio;
+    bool? cursor;
+    bool? clicks;
+    var fullScreen = w <= 4 || h <= 4;
+    String? micId;
+    if (parts.length >= 10) {
+      fps = int.tryParse(parts[4]);
+      mic = parts[5] == '1';
+      sysAudio = parts[6] == '1';
+      cursor = parts[7] == '1';
+      clicks = parts[8] == '1';
+      fullScreen = parts[9] == '1' || w <= 4 || h <= 4;
+      if (parts.length >= 11 && parts[10].isNotEmpty) {
+        micId = Uri.decodeComponent(parts[10]);
+      }
+    }
+    return OverlayRecordRequest(
+      x: x,
+      y: y,
+      width: w,
+      height: h,
+      fps: fps,
+      recordMicrophone: mic,
+      recordSystemAudio: sysAudio,
+      recordCursor: cursor,
+      highlightClicks: clicks,
+      fullScreen: fullScreen,
+      microphoneDeviceId: micId,
+    );
+  }
+}
+
+class NativeVideoPlayerInfo {
+  final int textureId;
+  final int durationMs;
+  final int width;
+  final int height;
+  final bool hasAudio;
+
+  const NativeVideoPlayerInfo({
+    required this.textureId,
+    required this.durationMs,
+    required this.width,
+    required this.height,
+    required this.hasAudio,
+  });
+
+  factory NativeVideoPlayerInfo.fromMap(Map<dynamic, dynamic> map) {
+    return NativeVideoPlayerInfo(
+      textureId: (map['textureId'] as num).toInt(),
+      durationMs: (map['durationMs'] as num?)?.toInt() ?? 0,
+      width: (map['width'] as num?)?.toInt() ?? 0,
+      height: (map['height'] as num?)?.toInt() ?? 0,
+      hasAudio: map['hasAudio'] == true,
+    );
+  }
+}
+
+class VideoPlayerListener {
+  final void Function(int positionMs, bool isPlaying)? onProgress;
+  final VoidCallback? onCompleted;
+
+  const VideoPlayerListener({this.onProgress, this.onCompleted});
+}
+
+Future<Uint8List?> _encodePngFramesToGif(Map<String, dynamic> params) async {
+  final framePaths = (params['framePaths'] as List<dynamic>).cast<String>();
+  final fps = params['fps'] as int;
+  final maxWidth = params['maxWidth'] as int;
+  if (framePaths.isEmpty) return null;
+
+  final encoder = img.GifEncoder(
+    repeat: 0,
+    delay: (100 / fps.clamp(1, 30)).round().clamp(3, 100),
+  );
+  for (final framePath in framePaths) {
+    final f = File(framePath);
+    if (!await f.exists()) continue;
+    final bytes = await f.readAsBytes();
+    var decoded = img.decodePng(bytes);
+    if (decoded == null) continue;
+    if (maxWidth > 0 && decoded.width > maxWidth) {
+      decoded = img.copyResize(decoded, width: maxWidth);
+    }
+    encoder.addFrame(decoded);
+  }
+  return encoder.finish();
+}
 
 class CaptureService {
   static const MethodChannel _channel = MethodChannel('snipsnap/capture');
@@ -153,32 +302,84 @@ class CaptureService {
     return p.join(dir.path, '${prefix}_$timestamp.$extension');
   }
 
+  // Gene - Nov, 13, 2026: Isolate video thumbnails (.thumbnails/) and original backups (.originals/) from the main Captures library folder so StorageService never adopts them as separate captures.
+  Future<Directory> getThumbnailsDirectory() async {
+    final base = await getStorageDirectory();
+    final thumbDir = Directory(p.join(base.path, '.thumbnails'));
+    if (!await thumbDir.exists()) {
+      await thumbDir.create(recursive: true);
+    }
+    return thumbDir;
+  }
+
+  Future<String> generateNewThumbnailPath({String prefix = 'rec_thumb'}) async {
+    final dir = await getThumbnailsDirectory();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    return p.join(dir.path, '${prefix}_$timestamp.png');
+  }
+
+  Future<Directory> getOriginalsDirectory() async {
+    final base = await getStorageDirectory();
+    final origDir = Directory(p.join(base.path, '.originals'));
+    if (!await origDir.exists()) {
+      await origDir.create(recursive: true);
+    }
+    return origDir;
+  }
+
+  Future<String> getOriginalBackupPath(String captureId) async {
+    final dir = await getOriginalsDirectory();
+    final safeId = captureId.replaceAll(RegExp(r'[^\w\-]'), '_');
+    return p.join(dir.path, '$safeId.mp4');
+  }
+
   /// Perform interactive area capture across macOS, Windows, and Linux
-  // Gene - Nov, 08, 2026: Added optional initialMode ('capture' or 'record'), "record:x:y:w:h" handling, and native Windows C++ captureInteractive channel invocation.
+  // Gene - Nov, 13, 2026: Added Snagit pre-recording overlay configuration options (fps, mic, micDeviceId, systemAudio, cursor, clicks).
   // Old implementation:
-  // Future<String?> captureInteractive() async {
+  // Future<String?> captureInteractive({String initialMode = 'capture'}) async {
   //   final targetPath = await _generateNewPath();
   //   try {
   //     if (Platform.isMacOS) {
   //       try {
   //         final result = await _channel.invokeMethod<String?>(
   //           'captureInteractive',
-  //           {'targetPath': targetPath},
+  //           {
+  //             'targetPath': targetPath,
+  //             'initialMode': initialMode,
+  //           },
   //         );
-  //         if (result != null && result.startsWith('scrolling:')) {
-  //           return result;
-  //         }
-  Future<String?> captureInteractive({String initialMode = 'capture'}) async {
+  Future<String?> captureInteractive({
+    String initialMode = 'capture',
+    int initialFps = 60,
+    bool initialRecordMic = false,
+    String? initialMicDeviceId,
+    bool initialRecordSystemAudio = true,
+    bool initialRecordCursor = true,
+    bool initialHighlightClicks = true,
+  }) async {
     final targetPath = await _generateNewPath();
+    final invokeArgs = <String, dynamic>{
+      'targetPath': targetPath,
+      'initialMode': initialMode,
+      if (initialMode == 'record') ...{
+        'initialFps': initialFps,
+        'initialRecordMic': initialRecordMic,
+        // Gene - Nov, 13, 2026: Use null-aware map element syntax per Dart 3.8 lint rule.
+        // Old implementation:
+        // if (initialMicDeviceId != null)
+        //   'initialMicDeviceId': initialMicDeviceId,
+        'initialMicDeviceId': ?initialMicDeviceId,
+        'initialRecordSystemAudio': initialRecordSystemAudio,
+        'initialRecordCursor': initialRecordCursor,
+        'initialHighlightClicks': initialHighlightClicks,
+      },
+    };
     try {
       if (Platform.isMacOS) {
         try {
           final result = await _channel.invokeMethod<String?>(
             'captureInteractive',
-            {
-              'targetPath': targetPath,
-              'initialMode': initialMode,
-            },
+            invokeArgs,
           );
           // Gene - Oct, 27, 2026: If the user clicked Panoramic in the overlay, result is formatted as "scrolling:x:y:w:h".
           // Old implementation:
@@ -221,13 +422,19 @@ class CaptureService {
         }
       } else if (Platform.isWindows) {
         // Gene - Nov, 08, 2026: Use native C++ Win32 captureInteractive overlay first (<15ms GDI/WIC); fall back to PowerShell ms-screenclip only on MissingPluginException.
+        // Gene - Nov, 13, 2026: Pass Snagit pre-recording options to native Windows interactive overlay as well.
+        // Old implementation:
+        //   final result = await _channel.invokeMethod<String?>(
+        //     'captureInteractive',
+        //     {
+        //       'targetPath': targetPath,
+        //       'initialMode': initialMode,
+        //     },
+        //   );
         try {
           final result = await _channel.invokeMethod<String?>(
             'captureInteractive',
-            {
-              'targetPath': targetPath,
-              'initialMode': initialMode,
-            },
+            invokeArgs,
           );
           if (result != null &&
               (result.startsWith('scrolling:') ||
@@ -448,6 +655,10 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
   ValueChanged<Map<String, dynamic>>? _onRecordingStopped;
   VoidCallback? _onRecordingCancelled;
   ValueChanged<bool>? _onRecordingStateChanged;
+  // Gene - Nov, 13, 2026: Added native restart recording callback, audio mute state sync, and 60fps FlutterTexture video player listener registry.
+  VoidCallback? _onRecordingRestartRequested;
+  ValueChanged<bool>? _onRecordingMicMutedChanged;
+  final Map<int, VideoPlayerListener> _videoPlayerListeners = {};
 
   void setScrollingCallbacks({VoidCallback? onDone, VoidCallback? onCancel}) {
     _onScrollingDone = onDone;
@@ -455,15 +666,43 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
     _channel.setMethodCallHandler(_handleNativeMethodCall);
   }
 
+  // Gene - Nov, 13, 2026: Extended setRecordingCallbacks with onRestartRequested and onMicMutedChanged.
+  // Old implementation:
+  // void setRecordingCallbacks({
+  //   ValueChanged<Map<String, dynamic>>? onStopped,
+  //   VoidCallback? onCancelled,
+  //   ValueChanged<bool>? onStateChanged,
+  // }) {
+  //   _onRecordingStopped = onStopped;
+  //   _onRecordingCancelled = onCancelled;
+  //   _onRecordingStateChanged = onStateChanged;
+  //   _channel.setMethodCallHandler(_handleNativeMethodCall);
+  // }
   void setRecordingCallbacks({
     ValueChanged<Map<String, dynamic>>? onStopped,
     VoidCallback? onCancelled,
     ValueChanged<bool>? onStateChanged,
+    VoidCallback? onRestartRequested,
+    ValueChanged<bool>? onMicMutedChanged,
   }) {
     _onRecordingStopped = onStopped;
     _onRecordingCancelled = onCancelled;
     _onRecordingStateChanged = onStateChanged;
+    _onRecordingRestartRequested = onRestartRequested;
+    _onRecordingMicMutedChanged = onMicMutedChanged;
     _channel.setMethodCallHandler(_handleNativeMethodCall);
+  }
+
+  void registerVideoPlayerListener(
+    int textureId,
+    VideoPlayerListener listener,
+  ) {
+    _videoPlayerListeners[textureId] = listener;
+    _channel.setMethodCallHandler(_handleNativeMethodCall);
+  }
+
+  void unregisterVideoPlayerListener(int textureId) {
+    _videoPlayerListeners.remove(textureId);
   }
 
   Future<dynamic> _handleNativeMethodCall(MethodCall call) async {
@@ -479,21 +718,150 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
         }
       case 'onRecordingCancelled':
         _onRecordingCancelled?.call();
+      case 'onRecordingRestartRequested':
+        _onRecordingRestartRequested?.call();
+      case 'onRecordingMicMutedChanged':
+        if (call.arguments is Map) {
+          final muted = (call.arguments as Map)['isMuted'] == true;
+          _onRecordingMicMutedChanged?.call(muted);
+        }
       case 'onRecordingStateChanged':
         if (call.arguments is Map) {
           final isPaused = (call.arguments as Map)['isPaused'] == true;
           _onRecordingStateChanged?.call(isPaused);
         }
+      case 'onVideoPlayerProgress':
+        if (call.arguments is Map) {
+          final args = call.arguments as Map;
+          final textureId = (args['textureId'] as num?)?.toInt();
+          final positionMs = (args['positionMs'] as num?)?.toInt() ?? 0;
+          final isPlaying = args['isPlaying'] == true;
+          if (textureId != null) {
+            _videoPlayerListeners[textureId]?.onProgress?.call(
+              positionMs,
+              isPlaying,
+            );
+          }
+        }
+      case 'onVideoPlayerCompleted':
+        if (call.arguments is Map) {
+          final textureId =
+              ((call.arguments as Map)['textureId'] as num?)?.toInt();
+          if (textureId != null) {
+            _videoPlayerListeners[textureId]?.onCompleted?.call();
+          }
+        }
     }
   }
 
+  // Gene - Nov, 13, 2026: Added main window show/hide, audio input enumeration, microphone permissions, and live mic mute channel helpers.
+  Future<void> setMainWindowVisible(bool visible) async {
+    if (!Platform.isMacOS && !Platform.isWindows) return;
+    try {
+      await _channel.invokeMethod<void>('setMainWindowVisible', {
+        'visible': visible,
+      });
+    } catch (e) {
+      debugPrint('SnipSnap setMainWindowVisible error: $e');
+    }
+  }
+
+  Future<List<AudioInputDevice>> listAudioInputDevices() async {
+    if (!Platform.isMacOS && !Platform.isWindows) return const [];
+    try {
+      final res = await _channel.invokeMethod<List<dynamic>>(
+        'listAudioInputDevices',
+      );
+      if (res == null) return const [];
+      return res
+          .whereType<Map<dynamic, dynamic>>()
+          .map(AudioInputDevice.fromMap)
+          .where((d) => d.id.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('SnipSnap listAudioInputDevices error: $e');
+      return const [];
+    }
+  }
+
+  Future<bool> hasMicrophonePermission() async {
+    if (!Platform.isMacOS) return true;
+    try {
+      return await _channel.invokeMethod<bool>('microphoneAuthorized') ?? true;
+    } on MissingPluginException catch (_) {
+      return true;
+    } catch (e) {
+      debugPrint('SnipSnap microphoneAuthorized error: $e');
+      return true;
+    }
+  }
+
+  Future<bool> requestMicrophonePermission() async {
+    if (!Platform.isMacOS) return true;
+    try {
+      return await _channel.invokeMethod<bool>('requestMicrophoneAccess') ??
+          true;
+    } on MissingPluginException catch (_) {
+      return true;
+    } catch (e) {
+      debugPrint('SnipSnap requestMicrophoneAccess error: $e');
+      return true;
+    }
+  }
+
+  Future<bool> setRecordingMicrophoneMuted(bool muted) async {
+    try {
+      return await _channel.invokeMethod<bool>(
+            'setRecordingMicrophoneMuted',
+            {'muted': muted},
+          ) ??
+          false;
+    } catch (e) {
+      debugPrint('SnipSnap setRecordingMicrophoneMuted error: $e');
+      return false;
+    }
+  }
+
+  // Gene - Nov, 13, 2026: Extended startScreenRecording with 60fps default, microphone device ID, system audio, cursor, click highlight, and 3-2-1 countdown.
+  // Old implementation:
+  // Future<bool> startScreenRecording({
+  //   required String targetPath,
+  //   required String thumbnailPath,
+  //   required bool fullScreen,
+  //   Rect? region,
+  //   int fps = 30,
+  //   bool recordAudio = false,
+  // }) async {
+  //   try {
+  //     final ok = await _channel.invokeMethod<bool>('startScreenRecording', {
+  //       'targetPath': targetPath,
+  //       'thumbnailPath': thumbnailPath,
+  //       'fullScreen': fullScreen,
+  //       'x': region?.left ?? 0.0,
+  //       'y': region?.top ?? 0.0,
+  //       'width': region?.width ?? 0.0,
+  //       'height': region?.height ?? 0.0,
+  //       'fps': fps,
+  //       'recordAudio': recordAudio,
+  //     });
+  //     return ok ?? false;
+  //   } catch (e) {
+  //     debugPrint('SnipSnap startScreenRecording error: $e');
+  //     return false;
+  //   }
+  // }
   Future<bool> startScreenRecording({
     required String targetPath,
     required String thumbnailPath,
     required bool fullScreen,
     Rect? region,
-    int fps = 30,
+    int fps = 60,
     bool recordAudio = false,
+    String? microphoneDeviceId,
+    bool recordSystemAudio = true,
+    bool recordCursor = true,
+    bool highlightClicks = true,
+    int countdownSeconds = 0,
   }) async {
     try {
       final ok = await _channel.invokeMethod<bool>('startScreenRecording', {
@@ -506,6 +874,15 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
         'height': region?.height ?? 0.0,
         'fps': fps,
         'recordAudio': recordAudio,
+        // Gene - Nov, 13, 2026: Use null-aware map element syntax per Dart 3.8 lint rule.
+        // Old implementation:
+        // if (microphoneDeviceId != null)
+        //   'microphoneDeviceId': microphoneDeviceId,
+        'microphoneDeviceId': ?microphoneDeviceId,
+        'recordSystemAudio': recordSystemAudio,
+        'recordCursor': recordCursor,
+        'highlightClicks': highlightClicks,
+        'countdownSeconds': countdownSeconds,
       });
       return ok ?? false;
     } catch (e) {
@@ -598,6 +975,211 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
       debugPrint('SnipSnap trimVideo error: $e');
     }
     return null;
+  }
+
+  // Gene - Nov, 13, 2026: Added Snagit middle-segment cutVideo, animated GIF export (native ImageIO / isolate GifEncoder fallback), and 60fps FlutterTexture video player channel methods.
+  Future<({String filePath, int durationMs})?> cutVideo({
+    required String videoPath,
+    required int cutStartMs,
+    required int cutEndMs,
+    required String targetPath,
+  }) async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('cutVideo', {
+        'videoPath': videoPath,
+        'cutStartMs': cutStartMs,
+        'cutEndMs': cutEndMs,
+        'targetPath': targetPath,
+      });
+      if (res is Map) {
+        final path = res['filePath'] as String?;
+        final durationMs = (res['durationMs'] as num?)?.toInt() ?? 0;
+        if (path != null &&
+            await File(path).exists() &&
+            await File(path).length() > 0) {
+          return (filePath: path, durationMs: durationMs);
+        }
+      } else if (res is String &&
+          await File(res).exists() &&
+          await File(res).length() > 0) {
+        return (filePath: res, durationMs: 0);
+      }
+    } catch (e) {
+      debugPrint('SnipSnap cutVideo error: $e');
+    }
+    return null;
+  }
+
+  Future<String?> exportVideoAsGif({
+    required String videoPath,
+    required String targetPath,
+    required int startMs,
+    required int endMs,
+    int fps = 15,
+    int maxWidth = 720,
+  }) async {
+    try {
+      final saved = await _channel.invokeMethod<String?>('exportVideoAsGif', {
+        'videoPath': videoPath,
+        'targetPath': targetPath,
+        'startMs': startMs,
+        'endMs': endMs,
+        'fps': fps.clamp(5, 30),
+        'maxWidth': maxWidth,
+      });
+      if (saved != null &&
+          await File(saved).exists() &&
+          await File(saved).length() > 0) {
+        return saved;
+      }
+    } on MissingPluginException catch (_) {
+      return await _exportGifFallback(
+        videoPath: videoPath,
+        targetPath: targetPath,
+        startMs: startMs,
+        endMs: endMs,
+        fps: fps,
+        maxWidth: maxWidth,
+      );
+    } on PlatformException catch (_) {
+      return await _exportGifFallback(
+        videoPath: videoPath,
+        targetPath: targetPath,
+        startMs: startMs,
+        endMs: endMs,
+        fps: fps,
+        maxWidth: maxWidth,
+      );
+    } catch (e) {
+      debugPrint('SnipSnap exportVideoAsGif error: $e');
+    }
+    return await _exportGifFallback(
+      videoPath: videoPath,
+      targetPath: targetPath,
+      startMs: startMs,
+      endMs: endMs,
+      fps: fps,
+      maxWidth: maxWidth,
+    );
+  }
+
+  Future<String?> _exportGifFallback({
+    required String videoPath,
+    required String targetPath,
+    required int startMs,
+    required int endMs,
+    required int fps,
+    required int maxWidth,
+  }) async {
+    final safeFps = fps.clamp(5, 25);
+    final rangeMs = (endMs - startMs).clamp(200, 120000);
+    final stepMs = (1000 / safeFps).round().clamp(40, 500);
+    final tempDir = await Directory.systemTemp.createTemp('snipsnap_gif_');
+    final framePaths = <String>[];
+    try {
+      var idx = 0;
+      for (var t = startMs; t <= endMs && idx < 300; t += stepMs) {
+        final frameOut = p.join(tempDir.path, 'f_${idx++}.png');
+        final extracted = await extractVideoFrame(
+          videoPath: videoPath,
+          timestampMs: t,
+          targetPath: frameOut,
+        );
+        if (extracted != null) {
+          framePaths.add(extracted);
+        }
+        if (rangeMs < stepMs) break;
+      }
+      if (framePaths.isEmpty) return null;
+      final gifBytes = await compute(_encodePngFramesToGif, {
+        'framePaths': framePaths,
+        'fps': safeFps,
+        'maxWidth': maxWidth,
+      });
+      if (gifBytes == null || gifBytes.isEmpty) return null;
+      await File(targetPath).writeAsBytes(gifBytes, flush: true);
+      return await _acceptIfNonEmpty(targetPath);
+    } catch (e) {
+      debugPrint('SnipSnap GIF fallback error: $e');
+      return null;
+    } finally {
+      try {
+        await tempDir.delete(recursive: true);
+      } catch (_) {}
+    }
+  }
+
+  Future<NativeVideoPlayerInfo?> createVideoPlayer(String videoPath) async {
+    try {
+      final res = await _channel.invokeMethod<dynamic>('createVideoPlayer', {
+        'videoPath': videoPath,
+      });
+      if (res is Map && res['textureId'] != null) {
+        return NativeVideoPlayerInfo.fromMap(res);
+      }
+    } on MissingPluginException catch (_) {
+      return null;
+    } catch (e) {
+      debugPrint('SnipSnap createVideoPlayer error: $e');
+    }
+    return null;
+  }
+
+  Future<void> playVideo(int textureId) async {
+    try {
+      await _channel.invokeMethod<void>('playVideo', {'textureId': textureId});
+    } catch (_) {}
+  }
+
+  Future<void> pauseVideo(int textureId) async {
+    try {
+      await _channel.invokeMethod<void>('pauseVideo', {'textureId': textureId});
+    } catch (_) {}
+  }
+
+  Future<void> seekVideo(int textureId, int positionMs) async {
+    try {
+      await _channel.invokeMethod<void>('seekVideo', {
+        'textureId': textureId,
+        'positionMs': positionMs,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> setVideoVolume(int textureId, double volume) async {
+    try {
+      await _channel.invokeMethod<void>('setVideoVolume', {
+        'textureId': textureId,
+        'volume': volume.clamp(0.0, 1.0),
+      });
+    } catch (_) {}
+  }
+
+  Future<void> setVideoMuted(int textureId, bool muted) async {
+    try {
+      await _channel.invokeMethod<void>('setVideoMuted', {
+        'textureId': textureId,
+        'muted': muted,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> setVideoSpeed(int textureId, double speed) async {
+    try {
+      await _channel.invokeMethod<void>('setVideoSpeed', {
+        'textureId': textureId,
+        'speed': speed.clamp(0.25, 4.0),
+      });
+    } catch (_) {}
+  }
+
+  Future<void> disposeVideoPlayer(int textureId) async {
+    unregisterVideoPlayerListener(textureId);
+    try {
+      await _channel.invokeMethod<void>('disposeVideoPlayer', {
+        'textureId': textureId,
+      });
+    } catch (_) {}
   }
 
   Future<void> showScrollingHud(Rect rect) async {

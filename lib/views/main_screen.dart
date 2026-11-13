@@ -534,19 +534,35 @@ class _MainScreenState extends State<MainScreen> {
   // Gene - Nov, 08, 2026: Added ScreenRecordingController and auto-copy after capture preference.
   late final ScreenRecordingController _recordingController;
   bool _autoCopyAfterCapture = false;
+  // Gene - Nov, 13, 2026: Per-video edit undo history for non-destructive Snagit Cut/Trim with 1-click Undo / Restore Original.
+  final Map<String, List<({String filePath, int durationMs})>>
+      _videoEditUndoStacks = {};
 
   @override
   void initState() {
     super.initState();
+    // Gene - Nov, 13, 2026: Restore main window on cancel and load initial audio input devices.
+    // Old implementation:
+    // _recordingController = ScreenRecordingController(
+    //   captureService: _captureService,
+    //   onRecordingCompleted: _handleRecordingCompleted,
+    //   onRecordingCancelled: () {
+    //     if (mounted) _showToast('Screen recording cancelled');
+    //   },
+    // )..addListener(() {
+    //   if (mounted) setState(() {});
+    // });
     _recordingController = ScreenRecordingController(
       captureService: _captureService,
       onRecordingCompleted: _handleRecordingCompleted,
       onRecordingCancelled: () {
+        unawaited(_captureService.setMainWindowVisible(true));
         if (mounted) _showToast('Screen recording cancelled');
       },
     )..addListener(() {
       if (mounted) setState(() {});
     });
+    unawaited(_recordingController.refreshAudioDevices());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _lifecycleListener = AppLifecycleListener(
@@ -1712,26 +1728,116 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
-  // Gene - Nov, 08, 2026: Added whole-screen & selected-area screen recording handlers, clipboard paste, video frame extraction, video trimming, and gallery rename.
+  // Gene - Nov, 13, 2026: Parse extended Snagit pre-recording overlay config, auto-hide/restore SnipSnap window, run 3-2-1 countdown, and support in-place Cut/Trim + Undo/Save Copy + Animated GIF export.
+  // Old implementation:
+  // Future<void> _startRecordingFromOverlayString(String recordSpec) async {
+  //   final parts = recordSpec.substring('record:'.length).split(':');
+  //   if (parts.length == 4) {
+  //     final x = double.tryParse(parts[0]) ?? 0.0;
+  //     final y = double.tryParse(parts[1]) ?? 0.0;
+  //     final w = double.tryParse(parts[2]) ?? 0.0;
+  //     final h = double.tryParse(parts[3]) ?? 0.0;
+  //     if (w <= 4 || h <= 4) {
+  //       final started = await _recordingController.startFullScreenRecording();
+  //       if (!started && mounted) {
+  //         _showToast('Could not start full screen recording');
+  //       }
+  //     } else {
+  //       final started = await _recordingController.startAreaRecording(
+  //         Rect.fromLTWH(x, y, w, h),
+  //       );
+  //       if (!started && mounted) {
+  //         _showToast('Could not start area screen recording');
+  //       }
+  //     }
+  //   }
+  // }
+  //
+  // Future<void> _handleRecordArea() async {
+  //   if (_recordingController.isRecording) {
+  //     await _recordingController.stopRecording();
+  //     return;
+  //   }
+  //   if (!await _ensureCapturePermission()) return;
+  //   setState(() => _isCapturing = true);
+  //   final path = await _captureService.captureInteractive(
+  //     initialMode: 'record',
+  //   );
+  //   setState(() => _isCapturing = false);
+  //   if (path != null) {
+  //     if (path.startsWith('record:')) {
+  //       await _startRecordingFromOverlayString(path);
+  //     } else if (!path.startsWith('scrolling:')) {
+  //       await _addCaptureFromPath(path);
+  //     }
+  //   }
+  // }
+  //
+  // Future<void> _handleRecordFullScreen() async {
+  //   if (_recordingController.isRecording) {
+  //     await _recordingController.stopRecording();
+  //     return;
+  //   }
+  //   if (!await _ensureCapturePermission()) return;
+  //   final started = await _recordingController.startFullScreenRecording();
+  //   if (!started && mounted) {
+  //     _showToast('Could not start full screen recording');
+  //   }
+  // }
   Future<void> _startRecordingFromOverlayString(String recordSpec) async {
-    final parts = recordSpec.substring('record:'.length).split(':');
-    if (parts.length == 4) {
-      final x = double.tryParse(parts[0]) ?? 0.0;
-      final y = double.tryParse(parts[1]) ?? 0.0;
-      final w = double.tryParse(parts[2]) ?? 0.0;
-      final h = double.tryParse(parts[3]) ?? 0.0;
-      if (w <= 4 || h <= 4) {
-        final started = await _recordingController.startFullScreenRecording();
-        if (!started && mounted) {
-          _showToast('Could not start full screen recording');
+    final req = OverlayRecordRequest.tryParse(recordSpec);
+    if (req == null) {
+      await _captureService.setMainWindowVisible(true);
+      return;
+    }
+    if (req.fps != null) _recordingController.setFps(req.fps!);
+    if (req.recordMicrophone != null) {
+      _recordingController.setRecordMicrophone(req.recordMicrophone!);
+    }
+    if (req.microphoneDeviceId != null) {
+      _recordingController.setSelectedMicrophoneId(req.microphoneDeviceId);
+    }
+    if (req.recordSystemAudio != null) {
+      _recordingController.setRecordSystemAudio(req.recordSystemAudio!);
+    }
+    if (req.recordCursor != null) {
+      _recordingController.setRecordCursor(req.recordCursor!);
+    }
+    if (req.highlightClicks != null) {
+      _recordingController.setHighlightClicks(req.highlightClicks!);
+    }
+    if (_recordingController.recordMicrophone) {
+      final hasMic = await _captureService.hasMicrophonePermission();
+      if (!hasMic) {
+        final granted = await _captureService.requestMicrophonePermission();
+        if (!granted && mounted) {
+          _showToast(
+            'Microphone access denied — continuing with system audio/mute',
+          );
+          _recordingController.setRecordMicrophone(false);
         }
-      } else {
-        final started = await _recordingController.startAreaRecording(
-          Rect.fromLTWH(x, y, w, h),
+      }
+    }
+
+    final bool started;
+    if (req.fullScreen) {
+      started = await _recordingController.startFullScreenRecording(
+        countdownSeconds: 3,
+      );
+    } else {
+      started = await _recordingController.startAreaRecording(
+        Rect.fromLTWH(req.x, req.y, req.width, req.height),
+        countdownSeconds: 3,
+      );
+    }
+    if (!started) {
+      await _captureService.setMainWindowVisible(true);
+      if (mounted) {
+        _showToast(
+          req.fullScreen
+              ? 'Could not start full screen recording'
+              : 'Could not start area screen recording',
         );
-        if (!started && mounted) {
-          _showToast('Could not start area screen recording');
-        }
       }
     }
   }
@@ -1742,17 +1848,29 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
     if (!await _ensureCapturePermission()) return;
-    setState(() => _isCapturing = true);
+    await _recordingController.refreshAudioDevices();
+    await _captureService.setMainWindowVisible(false);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (mounted) setState(() => _isCapturing = true);
     final path = await _captureService.captureInteractive(
       initialMode: 'record',
+      initialFps: _recordingController.fps,
+      initialRecordMic: _recordingController.recordMicrophone,
+      initialMicDeviceId: _recordingController.selectedMicrophoneId,
+      initialRecordSystemAudio: _recordingController.recordSystemAudio,
+      initialRecordCursor: _recordingController.recordCursor,
+      initialHighlightClicks: _recordingController.highlightClicks,
     );
-    setState(() => _isCapturing = false);
-    if (path != null) {
-      if (path.startsWith('record:')) {
-        await _startRecordingFromOverlayString(path);
-      } else if (!path.startsWith('scrolling:')) {
-        await _addCaptureFromPath(path);
-      }
+    if (mounted) setState(() => _isCapturing = false);
+    if (path == null) {
+      await _captureService.setMainWindowVisible(true);
+      return;
+    }
+    if (path.startsWith('record:')) {
+      await _startRecordingFromOverlayString(path);
+    } else if (!path.startsWith('scrolling:')) {
+      await _captureService.setMainWindowVisible(true);
+      await _addCaptureFromPath(path);
     }
   }
 
@@ -1762,13 +1880,30 @@ class _MainScreenState extends State<MainScreen> {
       return;
     }
     if (!await _ensureCapturePermission()) return;
-    final started = await _recordingController.startFullScreenRecording();
-    if (!started && mounted) {
-      _showToast('Could not start full screen recording');
+    if (_recordingController.recordMicrophone) {
+      final hasMic = await _captureService.hasMicrophonePermission();
+      if (!hasMic) {
+        final granted = await _captureService.requestMicrophonePermission();
+        if (!granted && mounted) {
+          _recordingController.setRecordMicrophone(false);
+        }
+      }
+    }
+    await _captureService.setMainWindowVisible(false);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    final started = await _recordingController.startFullScreenRecording(
+      countdownSeconds: 3,
+    );
+    if (!started) {
+      await _captureService.setMainWindowVisible(true);
+      if (mounted) {
+        _showToast('Could not start full screen recording');
+      }
     }
   }
 
   void _handleRecordingCompleted(ScreenRecordingResult result) {
+    unawaited(_captureService.setMainWindowVisible(true));
     if (!mounted) return;
     _syncCurrentCaptureAnnotations();
     final now = DateTime.now();
@@ -1839,6 +1974,102 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
+  // Gene - Nov, 13, 2026: Added non-destructive in-place Cut/Trim + Undo/Restore Original, Save Copy, and Animated GIF export.
+  // Old implementation:
+  // Future<void> _handleTrimVideo(int startMs, int endMs) async {
+  //   final capture = _activeCapture;
+  //   if (capture == null || !capture.isVideo) return;
+  //   if (endMs <= startMs + 200) {
+  //     _showToast('Trimmed range must be at least 0.2 seconds');
+  //     return;
+  //   }
+  //   await _runBusy('Trimming video\u2026', () async {
+  //     final targetPath = await _captureService.generateNewMediaPath(
+  //       prefix: 'rec_trim',
+  //       extension: 'mp4',
+  //     );
+  //     final thumbPath = await _captureService.generateNewMediaPath(
+  //       prefix: 'rec_thumb',
+  //       extension: 'png',
+  //     );
+  //     final savedPath = await _captureService.trimVideo(
+  //       videoPath: capture.filePath,
+  //       targetPath: targetPath,
+  //       startMs: startMs,
+  //       endMs: endMs,
+  //     );
+  //     if (savedPath != null && File(savedPath).existsSync()) {
+  //       await _captureService.extractVideoFrame(
+  //         videoPath: savedPath,
+  //         targetPath: thumbPath,
+  //         timestampMs: 0,
+  //       );
+  //       final durationMs = endMs - startMs;
+  //       final result = ScreenRecordingResult(
+  //         filePath: savedPath,
+  //         thumbnailPath: File(thumbPath).existsSync()
+  //             ? thumbPath
+  //             : capture.thumbnailPath,
+  //         durationMs: durationMs,
+  //         width: capture.width,
+  //         height: capture.height,
+  //         hasAudio: capture.hasAudio,
+  //       );
+  //       _handleRecordingCompleted(result);
+  //     } else {
+  //       _showToast('Failed to trim video clip');
+  //     }
+  //   });
+  // }
+  Future<void> _ensureOriginalVideoBackup(CaptureItem capture) async {
+    final backupPath = await _captureService.getOriginalBackupPath(capture.id);
+    if (!File(backupPath).existsSync() && File(capture.filePath).existsSync()) {
+      await File(capture.filePath).copy(backupPath);
+    }
+  }
+
+  Future<void> _applyInPlaceVideoEdit({
+    required CaptureItem capture,
+    required String newFilePath,
+    required int newDurationMs,
+  }) async {
+    await _ensureOriginalVideoBackup(capture);
+    final stack = _videoEditUndoStacks.putIfAbsent(capture.id, () => []);
+    stack.add((filePath: capture.filePath, durationMs: capture.durationMs));
+
+    final thumbPath = await _captureService.generateNewThumbnailPath(
+      prefix: 'rec_thumb',
+    );
+    await _captureService.extractVideoFrame(
+      videoPath: newFilePath,
+      targetPath: thumbPath,
+      timestampMs: 0,
+    );
+    final updatedThumb = File(thumbPath).existsSync()
+        ? thumbPath
+        : capture.thumbnailPath;
+    if (updatedThumb != capture.thumbnailPath &&
+        capture.thumbnailPath != null &&
+        File(capture.thumbnailPath!).existsSync()) {
+      try {
+        await File(capture.thumbnailPath!).delete();
+      } catch (_) {}
+    }
+
+    final updated = capture.copyWith(
+      filePath: newFilePath,
+      durationMs: newDurationMs,
+      thumbnailPath: updatedThumb,
+    );
+    if (!mounted) return;
+    setState(() {
+      final idx = _captures.indexWhere((c) => c.id == capture.id);
+      if (idx != -1) _captures[idx] = updated;
+      if (_activeCapture?.id == capture.id) _activeCapture = updated;
+    });
+    unawaited(StorageService.saveCaptureItem(updated));
+  }
+
   Future<void> _handleTrimVideo(int startMs, int endMs) async {
     final capture = _activeCapture;
     if (capture == null || !capture.isVideo) return;
@@ -1851,9 +2082,77 @@ class _MainScreenState extends State<MainScreen> {
         prefix: 'rec_trim',
         extension: 'mp4',
       );
-      final thumbPath = await _captureService.generateNewMediaPath(
+      final savedPath = await _captureService.trimVideo(
+        videoPath: capture.filePath,
+        targetPath: targetPath,
+        startMs: startMs,
+        endMs: endMs,
+      );
+      if (savedPath != null && File(savedPath).existsSync()) {
+        await _applyInPlaceVideoEdit(
+          capture: capture,
+          newFilePath: savedPath,
+          newDurationMs: endMs - startMs,
+        );
+        _showToast('Trimmed clip in-place (Undo available)');
+      } else {
+        _showToast('Failed to trim video clip');
+      }
+    });
+  }
+
+  Future<void> _handleCutVideo(int cutStartMs, int cutEndMs) async {
+    final capture = _activeCapture;
+    if (capture == null || !capture.isVideo) return;
+    if (cutEndMs <= cutStartMs + 200) {
+      _showToast('Cut selection must be at least 0.2 seconds');
+      return;
+    }
+    if (capture.durationMs - (cutEndMs - cutStartMs) < 200) {
+      _showToast('Remaining video must be at least 0.2 seconds');
+      return;
+    }
+    await _runBusy('Cutting selection\u2026', () async {
+      final targetPath = await _captureService.generateNewMediaPath(
+        prefix: 'rec_cut',
+        extension: 'mp4',
+      );
+      final res = await _captureService.cutVideo(
+        videoPath: capture.filePath,
+        cutStartMs: cutStartMs,
+        cutEndMs: cutEndMs,
+        targetPath: targetPath,
+      );
+      if (res != null && File(res.filePath).existsSync()) {
+        final nextDur = res.durationMs > 0
+            ? res.durationMs
+            : (capture.durationMs - (cutEndMs - cutStartMs)).clamp(200, 36000000);
+        await _applyInPlaceVideoEdit(
+          capture: capture,
+          newFilePath: res.filePath,
+          newDurationMs: nextDur,
+        );
+        _showToast('Removed selected segment (Undo available)');
+      } else {
+        _showToast('Could not cut selected segment');
+      }
+    });
+  }
+
+  Future<void> _handleSaveTrimmedCopy(int startMs, int endMs) async {
+    final capture = _activeCapture;
+    if (capture == null || !capture.isVideo) return;
+    if (endMs <= startMs + 200) {
+      _showToast('Selected range must be at least 0.2 seconds');
+      return;
+    }
+    await _runBusy('Saving clip copy\u2026', () async {
+      final targetPath = await _captureService.generateNewMediaPath(
+        prefix: 'rec_copy',
+        extension: 'mp4',
+      );
+      final thumbPath = await _captureService.generateNewThumbnailPath(
         prefix: 'rec_thumb',
-        extension: 'png',
       );
       final savedPath = await _captureService.trimVideo(
         videoPath: capture.filePath,
@@ -1867,20 +2166,121 @@ class _MainScreenState extends State<MainScreen> {
           targetPath: thumbPath,
           timestampMs: 0,
         );
-        final durationMs = endMs - startMs;
         final result = ScreenRecordingResult(
           filePath: savedPath,
           thumbnailPath: File(thumbPath).existsSync()
               ? thumbPath
               : capture.thumbnailPath,
-          durationMs: durationMs,
+          durationMs: endMs - startMs,
           width: capture.width,
           height: capture.height,
           hasAudio: capture.hasAudio,
         );
         _handleRecordingCompleted(result);
       } else {
-        _showToast('Failed to trim video clip');
+        _showToast('Failed to save clip copy');
+      }
+    });
+  }
+
+  Future<void> _handleUndoOrRestoreVideo() async {
+    final capture = _activeCapture;
+    if (capture == null || !capture.isVideo) return;
+    final stack = _videoEditUndoStacks[capture.id];
+    String? restorePath;
+    int restoreDuration = capture.durationMs;
+    if (stack != null && stack.isNotEmpty) {
+      final prev = stack.removeLast();
+      if (File(prev.filePath).existsSync()) {
+        restorePath = prev.filePath;
+        restoreDuration = prev.durationMs;
+      }
+    }
+    if (restorePath == null) {
+      final backup = await _captureService.getOriginalBackupPath(capture.id);
+      if (File(backup).existsSync()) {
+        final target = await _captureService.generateNewMediaPath(
+          prefix: 'rec_restored',
+          extension: 'mp4',
+        );
+        await File(backup).copy(target);
+        restorePath = target;
+      }
+    }
+    if (restorePath == null) {
+      _showToast('No previous version available to restore');
+      return;
+    }
+    final thumbPath = await _captureService.generateNewThumbnailPath(
+      prefix: 'rec_thumb',
+    );
+    await _captureService.extractVideoFrame(
+      videoPath: restorePath,
+      targetPath: thumbPath,
+      timestampMs: 0,
+    );
+    final updated = capture.copyWith(
+      filePath: restorePath,
+      durationMs: restoreDuration,
+      thumbnailPath: File(thumbPath).existsSync()
+          ? thumbPath
+          : capture.thumbnailPath,
+    );
+    if (!mounted) return;
+    setState(() {
+      final idx = _captures.indexWhere((c) => c.id == capture.id);
+      if (idx != -1) _captures[idx] = updated;
+      if (_activeCapture?.id == capture.id) _activeCapture = updated;
+    });
+    unawaited(StorageService.saveCaptureItem(updated));
+    _showToast('Restored previous video version');
+  }
+
+  Future<void> _handleExportVideoGif({
+    required int startMs,
+    required int endMs,
+    required int fps,
+    required int maxWidth,
+    required bool copyToClipboard,
+  }) async {
+    final capture = _activeCapture;
+    if (capture == null || !capture.isVideo) return;
+    await _runBusy('Exporting animated GIF\u2026', () async {
+      final tempGifPath = await _captureService.generateNewMediaPath(
+        prefix: 'export_gif',
+        extension: 'gif',
+      );
+      final gifPath = await _captureService.exportVideoAsGif(
+        videoPath: capture.filePath,
+        targetPath: tempGifPath,
+        startMs: startMs,
+        endMs: endMs,
+        fps: fps,
+        maxWidth: maxWidth,
+      );
+      if (gifPath == null || !File(gifPath).existsSync()) {
+        _showToast('Failed to export animated GIF');
+        return;
+      }
+      if (copyToClipboard) {
+        final ok = await ClipboardService.copyFileToClipboard(gifPath);
+        _showToast(ok ? 'Copied animated GIF to clipboard!' : 'GIF copy failed');
+        return;
+      }
+      final sanitized = capture.title
+          .replaceAll(RegExp(r'[^\w\s\-]'), '_')
+          .trim();
+      final bytes = await File(gifPath).readAsBytes();
+      final savedUri = await FilePicker.saveFile(
+        dialogTitle: 'Export Animated GIF',
+        fileName: '${sanitized.isEmpty ? 'recording' : sanitized}.gif',
+        bytes: bytes,
+      );
+      try {
+        await File(gifPath).delete();
+      } catch (_) {}
+      if (savedUri != null) {
+        _showToast('Exported GIF: ${p.basename(savedUri.toFilePath())}');
       }
     });
   }
@@ -2992,6 +3392,17 @@ class _MainScreenState extends State<MainScreen> {
                       recordMicrophone: _recordingController.recordMicrophone,
                       onToggleRecordMicrophone: (val) =>
                           _recordingController.setRecordMicrophone(val),
+                      // Gene - Nov, 13, 2026: Wired System Audio toggle, live mic mute, and restart recording into HeaderBar.
+                      recordSystemAudio:
+                          _recordingController.recordSystemAudio,
+                      onToggleRecordSystemAudio: (val) =>
+                          _recordingController.setRecordSystemAudio(val),
+                      isMicrophoneMuted:
+                          _recordingController.isMicrophoneMuted,
+                      onToggleMicrophoneMute:
+                          _recordingController.toggleMicrophoneMute,
+                      onRestartRecording: () =>
+                          unawaited(_recordingController.restartRecording()),
                       autoCopyAfterCapture: _autoCopyAfterCapture,
                       onToggleAutoCopy: (_) => _toggleAutoCopyAfterCapture(),
                       onUndo: _undo,
@@ -3055,6 +3466,8 @@ class _MainScreenState extends State<MainScreen> {
                                   // ),
                                 ),
 
+                              // Gene - Nov, 13, 2026: Wire in-place cut, save-trimmed-copy, undo/restore, and GIF export callbacks to VideoCapturePlayerView.
+                              /*
                               // Editor Canvas or Video Capture Player View
                               Expanded(
                                 child: (_activeCapture != null &&
@@ -3066,6 +3479,43 @@ class _MainScreenState extends State<MainScreen> {
                                         onGrabFrameAsScreenshot:
                                             _handleGrabVideoFrame,
                                         onTrimVideo: _handleTrimVideo,
+                                        onCopyVideo: _handleCopyToClipboard,
+                                        onSaveVideoAs: _handleSaveVideoAs,
+                                        onRevealInFolder: () async {
+                                          final revealed =
+                                              await StorageService.revealFileInFolder(
+                                                _activeCapture!.filePath,
+                                              );
+                                          if (!revealed) {
+                                            _showToast(
+                                              'Could not reveal file in folder',
+                                            );
+                                          }
+                                        },
+                                      )
+                                    : _buildEditorCanvas(),
+                              ),
+                              */
+                              // Editor Canvas or Video Capture Player View
+                              Expanded(
+                                child: (_activeCapture != null &&
+                                        _activeCapture!.isVideo)
+                                    ? VideoCapturePlayerView(
+                                        key: ValueKey(_activeCapture!.id),
+                                        capture: _activeCapture!,
+                                        captureService: _captureService,
+                                        onGrabFrameAsScreenshot:
+                                            _handleGrabVideoFrame,
+                                        onTrimVideo: _handleTrimVideo,
+                                        onCutVideo: _handleCutVideo,
+                                        onSaveTrimmedCopy: _handleSaveTrimmedCopy,
+                                        canRestoreOriginal:
+                                            (_videoEditUndoStacks[_activeCapture!.id]
+                                                    ?.isNotEmpty ??
+                                                false),
+                                        onRestoreOriginal:
+                                            _handleUndoOrRestoreVideo,
+                                        onExportGif: _handleExportVideoGif,
                                         onCopyVideo: _handleCopyToClipboard,
                                         onSaveVideoAs: _handleSaveVideoAs,
                                         onRevealInFolder: () async {
@@ -3485,6 +3935,39 @@ class _MainScreenState extends State<MainScreen> {
                             final thumb = File(item.thumbnailPath!);
                             if (thumb.existsSync()) {
                               await thumb.delete();
+                            }
+                          }
+                          // Gene - Nov, 13, 2026: Only clean up .originals backup and video undo files when deleting a video capture so image deletes never await extra directory lookups before DB cleanup.
+                          // Old implementation:
+                          // final backupPath = await _captureService
+                          //     .getOriginalBackupPath(item.id);
+                          // final backupFile = File(backupPath);
+                          // if (backupFile.existsSync()) {
+                          //   await backupFile.delete();
+                          // }
+                          // final undoEntries =
+                          //     _videoEditUndoStacks.remove(item.id) ?? const [];
+                          // for (final entry in undoEntries) {
+                          //   final f = File(entry.filePath);
+                          //   if (f.existsSync()) {
+                          //     await f.delete();
+                          //   }
+                          // }
+                          if (item.isVideo) {
+                            final backupPath = await _captureService
+                                .getOriginalBackupPath(item.id);
+                            final backupFile = File(backupPath);
+                            if (backupFile.existsSync()) {
+                              await backupFile.delete();
+                            }
+                            final undoEntries =
+                                _videoEditUndoStacks.remove(item.id) ??
+                                const [];
+                            for (final entry in undoEntries) {
+                              final f = File(entry.filePath);
+                              if (f.existsSync()) {
+                                await f.delete();
+                              }
                             }
                           }
                         } catch (_) {}

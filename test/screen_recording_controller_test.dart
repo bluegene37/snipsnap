@@ -22,6 +22,19 @@ class _FakeRecordingCaptureService extends CaptureService {
   Rect? lastRegion;
   bool lastRecordAudio = false;
   int cancelCalls = 0;
+  // Gene - Nov, 13, 2026: Track Snagit 60fps, thumbnail dir, system audio, cursor, click highlights, mic device, and mute calls in fake service.
+  String? lastThumbnailPath;
+  int lastFps = 0;
+  String? lastMicDeviceId;
+  bool lastRecordSystemAudio = false;
+  bool lastRecordCursor = false;
+  bool lastHighlightClicks = false;
+  int lastCountdownSeconds = 0;
+  bool? lastMuted;
+  List<AudioInputDevice> fakeDevices = const [
+    AudioInputDevice(id: 'mic_builtin', name: 'Built-in Mic', isDefault: true),
+    AudioInputDevice(id: 'mic_usb', name: 'USB Podcast Mic', isDefault: false),
+  ];
 
   @override
   Future<String> generateNewMediaPath({
@@ -32,17 +45,63 @@ class _FakeRecordingCaptureService extends CaptureService {
   }
 
   @override
+  Future<String> generateNewThumbnailPath({
+    String prefix = 'rec_thumb',
+  }) async {
+    return '/tmp/.thumbnails/${prefix}_mock.png';
+  }
+
+  @override
+  Future<List<AudioInputDevice>> listAudioInputDevices() async {
+    return fakeDevices;
+  }
+
+  @override
+  Future<bool> setRecordingMicrophoneMuted(bool muted) async {
+    lastMuted = muted;
+    return true;
+  }
+
+  // Gene - Nov, 13, 2026: Updated startScreenRecording mock signature for 60fps, mic device, system audio, cursor/click highlight, and countdown parameters.
+  // Old implementation:
+  // @override
+  // Future<bool> startScreenRecording({
+  //   required String targetPath,
+  //   required String thumbnailPath,
+  //   bool fullScreen = true,
+  //   Rect? region,
+  //   int fps = 30,
+  //   bool recordAudio = false,
+  // }) async {
+  //   lastFullScreen = fullScreen;
+  //   lastRegion = region;
+  //   lastRecordAudio = recordAudio;
+  //   return startResult;
+  // }
+  @override
   Future<bool> startScreenRecording({
     required String targetPath,
     required String thumbnailPath,
-    bool fullScreen = true,
+    required bool fullScreen,
     Rect? region,
-    int fps = 30,
+    int fps = 60,
     bool recordAudio = false,
+    String? microphoneDeviceId,
+    bool recordSystemAudio = true,
+    bool recordCursor = true,
+    bool highlightClicks = true,
+    int countdownSeconds = 0,
   }) async {
+    lastThumbnailPath = thumbnailPath;
     lastFullScreen = fullScreen;
     lastRegion = region;
+    lastFps = fps;
     lastRecordAudio = recordAudio;
+    lastMicDeviceId = microphoneDeviceId;
+    lastRecordSystemAudio = recordSystemAudio;
+    lastRecordCursor = recordCursor;
+    lastHighlightClicks = highlightClicks;
+    lastCountdownSeconds = countdownSeconds;
     return startResult;
   }
 
@@ -133,6 +192,60 @@ void main() {
       expect(controller.isRecording, isFalse);
       expect(cancelledCount, 1);
       expect(fakeService.cancelCalls, 1);
+    });
+
+    // Gene - Nov, 13, 2026: Added tests for 60fps defaults, thumbnail path isolation, audio device selection, mic mute, and restartRecording.
+    test(
+      'defaults to 60fps, system audio, cursor+click highlight, and .thumbnails/ path',
+      () async {
+        expect(controller.fps, 60);
+        expect(controller.recordSystemAudio, isTrue);
+        expect(controller.recordCursor, isTrue);
+        expect(controller.highlightClicks, isTrue);
+
+        final started = await controller.startFullScreenRecording();
+        expect(started, isTrue);
+        expect(fakeService.lastFps, 60);
+        expect(fakeService.lastRecordSystemAudio, isTrue);
+        expect(fakeService.lastRecordCursor, isTrue);
+        expect(fakeService.lastHighlightClicks, isTrue);
+        expect(fakeService.lastThumbnailPath, contains('/.thumbnails/'));
+      },
+    );
+
+    test(
+      'refreshes audio devices, selects mic, and toggles live mute',
+      () async {
+        await controller.refreshAudioDevices();
+        expect(controller.availableMicrophones, hasLength(2));
+        expect(controller.selectedMicrophoneId, 'mic_builtin');
+
+        controller.setSelectedMicrophoneId('mic_usb');
+        expect(controller.selectedMicrophoneId, 'mic_usb');
+
+        controller.setRecordMicrophone(true);
+        await controller.startFullScreenRecording();
+        expect(fakeService.lastMicDeviceId, 'mic_usb');
+
+        expect(controller.isMicrophoneMuted, isFalse);
+        await controller.toggleMicrophoneMute();
+        expect(controller.isMicrophoneMuted, isTrue);
+        expect(fakeService.lastMuted, isTrue);
+      },
+    );
+
+    test('restartRecording cancels current capture and restarts same region', () async {
+      const region = Rect.fromLTWH(50, 60, 1280, 720);
+      final started = await controller.startAreaRecording(region);
+      expect(started, isTrue);
+
+      final restarted = await controller.restartRecording(countdownSeconds: 3);
+      expect(restarted, isTrue);
+      expect(fakeService.cancelCalls, 1);
+      expect(controller.isRecording, isTrue);
+      expect(fakeService.lastFullScreen, isFalse);
+      expect(fakeService.lastRegion, region);
+      expect(fakeService.lastCountdownSeconds, 3);
     });
   });
 }

@@ -180,6 +180,11 @@ class StorageService {
       final snapDir = Directory(p.join(docsDir.path, 'SnipSnap', 'Captures'));
       if (await snapDir.exists()) {
         final existingPaths = items.map((i) => i.filePath).toSet();
+        // Gene - Nov, 13, 2026: Track known video thumbnails and ignore hidden subfolders (.thumbnails, .originals) and rec_thumb_* files so video thumbnails are never adopted as standalone screenshots.
+        final knownThumbnails = items
+            .map((i) => i.thumbnailPath)
+            .whereType<String>()
+            .toSet();
         final files = await snapDir.list().toList();
         for (final f in files) {
           // Gene - Oct, 27, 2026: Supported adopting existing .mp4 video captures from the storage directory alongside images.
@@ -222,6 +227,12 @@ class StorageService {
                   f.path.endsWith('.jpg') ||
                   f.path.endsWith('.jpeg') ||
                   f.path.endsWith('.mp4'))) {
+            final baseName = p.basename(f.path);
+            if (baseName.startsWith('.') ||
+                baseName.startsWith('rec_thumb_') ||
+                knownThumbnails.contains(f.path)) {
+              continue;
+            }
             if (!existingPaths.contains(f.path)) {
               final stat = await f.stat();
               final isVideo = f.path.endsWith('.mp4');

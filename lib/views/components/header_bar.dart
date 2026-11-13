@@ -34,6 +34,12 @@ class HeaderBar extends StatelessWidget {
   final VoidCallback? onPasteFromClipboard;
   final bool recordMicrophone;
   final ValueChanged<bool>? onToggleRecordMicrophone;
+  // Gene - Nov, 13, 2026: Added system audio toggle, live mic mute, and restart recording controls to HeaderBar.
+  final bool recordSystemAudio;
+  final ValueChanged<bool>? onToggleRecordSystemAudio;
+  final bool isMicrophoneMuted;
+  final VoidCallback? onToggleMicrophoneMute;
+  final VoidCallback? onRestartRecording;
   final bool autoCopyAfterCapture;
   final ValueChanged<bool>? onToggleAutoCopy;
   final bool isRecording;
@@ -89,6 +95,12 @@ class HeaderBar extends StatelessWidget {
     this.onPasteFromClipboard,
     this.recordMicrophone = false,
     this.onToggleRecordMicrophone,
+    // Gene - Nov, 13, 2026: Added optional system audio, live mic mute, and restart parameters.
+    this.recordSystemAudio = true,
+    this.onToggleRecordSystemAudio,
+    this.isMicrophoneMuted = false,
+    this.onToggleMicrophoneMute,
+    this.onRestartRecording,
     this.autoCopyAfterCapture = false,
     this.onToggleAutoCopy,
     this.isRecording = false,
@@ -412,6 +424,9 @@ class HeaderBar extends StatelessWidget {
                   'record_full' => onRecordFullScreen?.call(),
                   'toggle_mic' =>
                     onToggleRecordMicrophone?.call(!recordMicrophone),
+                  // Gene - Nov, 13, 2026: Handle System Audio toggle from Capture Modes dropdown.
+                  'toggle_sys_audio' =>
+                    onToggleRecordSystemAudio?.call(!recordSystemAudio),
                   'paste' => onPasteFromClipboard?.call(),
                   _ => null,
                 },
@@ -495,6 +510,19 @@ class HeaderBar extends StatelessWidget {
                           : 'Microphone Audio: OFF',
                       subtitle: 'Include voice narration in recordings',
                     ),
+                  // Gene - Nov, 13, 2026: Added System Audio toggle to Capture Modes dropdown.
+                  if (onToggleRecordSystemAudio != null)
+                    _captureMenuItem(
+                      t,
+                      value: 'toggle_sys_audio',
+                      icon: recordSystemAudio
+                          ? Icons.volume_up_rounded
+                          : Icons.volume_off_rounded,
+                      title: recordSystemAudio
+                          ? 'System Audio: ON'
+                          : 'System Audio: OFF',
+                      subtitle: 'Capture computer & browser audio',
+                    ),
                   if (onPasteFromClipboard != null) ...[
                     const PopupMenuDivider(height: 8),
                     _captureMenuItem(
@@ -575,6 +603,39 @@ class HeaderBar extends StatelessWidget {
                     ),
                   ),
                 ),
+                // Gene - Nov, 13, 2026: Added live Mic Mute, Restart, and Stop controls to the active recording pill in HeaderBar.
+                if (recordMicrophone && onToggleMicrophoneMute != null) ...[
+                  const SizedBox(width: 6),
+                  InkWell(
+                    onTap: onToggleMicrophoneMute,
+                    child: Tooltip(
+                      message: isMicrophoneMuted
+                          ? 'Unmute Microphone'
+                          : 'Mute Microphone',
+                      child: Icon(
+                        isMicrophoneMuted
+                            ? Icons.mic_off_rounded
+                            : Icons.mic_rounded,
+                        size: 15,
+                        color: isMicrophoneMuted ? t.danger : t.ink,
+                      ),
+                    ),
+                  ),
+                ],
+                if (onRestartRecording != null) ...[
+                  const SizedBox(width: 6),
+                  InkWell(
+                    onTap: onRestartRecording,
+                    child: Tooltip(
+                      message: 'Restart Recording',
+                      child: Icon(
+                        Icons.replay_rounded,
+                        size: 15,
+                        color: t.ink,
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(width: 6),
                 InkWell(
                   onTap: onStopRecording,

@@ -36,5 +36,8 @@
 	<string>NSApplication</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>SnipSnap needs screen recording access to capture and annotate the content you select on screen. Captures stay on this Mac.</string>
+	<!-- Gene - Nov, 13, 2026: Added NSMicrophoneUsageDescription for optional voice narration during screen recording. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>SnipSnap uses your microphone when you enable voice narration for screen recordings. Recordings stay on this Mac.</string>
 </dict>
 </plist>

@@ -60,7 +60,10 @@ target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
 # (RoActivateInstance, WindowsCreateString and friends).
 target_link_libraries(${BINARY_NAME} PRIVATE "windowsapp.lib")
 # Gene - Nov, 08, 2026: Link Windows Imaging Component (WIC) and Media Foundation libraries for native C++ screen capture, clipboard, and H.264 screen recording.
-target_link_libraries(${BINARY_NAME} PRIVATE "windowscodecs.lib" "mfplat.lib" "mfreadwrite.lib" "mfuuid.lib" "ole32.lib")
+# Gene - Nov, 13, 2026: Added mmdevapi.lib, mf.lib, and msimg32.lib for WASAPI audio mixing, Media Foundation transcoding, and alpha-blended click/toolbar rendering.
+# Old implementation:
+# target_link_libraries(${BINARY_NAME} PRIVATE "windowscodecs.lib" "mfplat.lib" "mfreadwrite.lib" "mfuuid.lib" "ole32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "windowscodecs.lib" "mfplat.lib" "mfreadwrite.lib" "mfuuid.lib" "mf.lib" "mmdevapi.lib" "msimg32.lib" "ole32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

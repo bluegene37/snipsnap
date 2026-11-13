@@ -8,5 +8,8 @@
 	<true/>
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
+	<!-- Gene - Nov, 13, 2026: Enabled audio-input entitlement for microphone capture during screen recording. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 </dict>
 </plist>
