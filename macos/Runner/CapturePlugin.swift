@@ -37,11 +37,21 @@ class CapturePlugin: NSObject {
   // Gene - Nov, 13, 2026: Retain FlutterTextureRegistry, sharedInstance guard for window hiding, countdown/click-highlight windows, menu-bar status item, and video players.
   private static weak var sharedInstance: CapturePlugin?
 
+  // Gene - Nov, 13, 2026: Include in-flight stoppingSession in active capture guard so finalization cannot overlap a new session.
+  // Old implementation:
+  // static var isCaptureOrRecordingActive: Bool {
+  //   guard let inst = sharedInstance else { return false }
+  //   return !inst.activeWindows.isEmpty ||
+  //     inst.countdownWindow != nil ||
+  //     inst.recordingSession != nil ||
+  //     inst.isMainWindowHiddenForCapture
+  // }
   static var isCaptureOrRecordingActive: Bool {
     guard let inst = sharedInstance else { return false }
     return !inst.activeWindows.isEmpty ||
       inst.countdownWindow != nil ||
       inst.recordingSession != nil ||
+      inst.stoppingSession != nil ||
       inst.isMainWindowHiddenForCapture
   }
 
@@ -84,6 +94,8 @@ class CapturePlugin: NSObject {
   private var recordingHudWindow: NSPanel?
   private var recordingStatusItem: NSStatusItem?
   private var recordingSession: MacScreenRecordingSession?
+  // Gene - Nov, 13, 2026: Retain session strongly in stoppingSession until AVAssetWriter.finishWriting completes.
+  private var stoppingSession: MacScreenRecordingSession?
   private var videoPlayers: [Int64: MacVideoTexturePlayer] = [:]
 
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -1046,7 +1058,10 @@ class CapturePlugin: NSObject {
   ) {
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
-      if self.recordingSession != nil || self.countdownWindow != nil {
+      // Gene - Nov, 13, 2026: Also reject starting a new recording while a previous session is finalizing.
+      // Old implementation:
+      // if self.recordingSession != nil || self.countdownWindow != nil {
+      if self.recordingSession != nil || self.stoppingSession != nil || self.countdownWindow != nil {
         result(FlutterError(code: "already_recording", message: "Screen recording is already active", details: nil))
         return
       }
@@ -1098,11 +1113,22 @@ class CapturePlugin: NSObject {
             strongSelf.updateMenuBarStatusItem(elapsedMs: elapsedMs, isPaused: isPaused)
           }
         },
-        onStreamError: { [weak self] _ in
+        // Gene - Nov, 13, 2026: Guard stream error stop callback and always pass an error dictionary if finalization yields nil so Dart resets top-bar recording state.
+        // Old implementation:
+        // onStreamError: { [weak self] _ in
+        //   DispatchQueue.main.async {
+        //     guard let strongSelf = self else { return }
+        //     strongSelf.stopNativeScreenRecording(cancel: false) { info in
+        //       strongSelf.channel?.invokeMethod("onRecordingStopped", arguments: info)
+        //     }
+        //   }
+        // }
+        onStreamError: { [weak self] errMsg in
           DispatchQueue.main.async {
-            guard let strongSelf = self else { return }
+            guard let strongSelf = self, strongSelf.recordingSession != nil else { return }
             strongSelf.stopNativeScreenRecording(cancel: false) { info in
-              strongSelf.channel?.invokeMethod("onRecordingStopped", arguments: info)
+              let payload = info ?? ["error": errMsg.isEmpty ? "Could not finalize screen recording" : errMsg]
+              strongSelf.channel?.invokeMethod("onRecordingStopped", arguments: payload)
             }
           }
         }
@@ -1295,9 +1321,18 @@ class CapturePlugin: NSObject {
     }
   }
 
+  // Gene - Nov, 13, 2026: Ignore duplicate stop clicks and send error dictionary when finalization fails so Dart always resets UI recording state.
+  // Old implementation:
+  // @objc private func handleMenuBarStopClicked() {
+  //   stopNativeScreenRecording(cancel: false) { [weak self] info in
+  //     self?.channel?.invokeMethod("onRecordingStopped", arguments: info)
+  //   }
+  // }
   @objc private func handleMenuBarStopClicked() {
+    guard recordingSession != nil else { return }
     stopNativeScreenRecording(cancel: false) { [weak self] info in
-      self?.channel?.invokeMethod("onRecordingStopped", arguments: info)
+      let payload = info ?? ["error": "Could not finalize screen recording"]
+      self?.channel?.invokeMethod("onRecordingStopped", arguments: payload)
     }
   }
 
@@ -1343,10 +1378,19 @@ class CapturePlugin: NSObject {
         self.updateRecordingHudState()
         self.channel?.invokeMethod("onRecordingStateChanged", arguments: ["isPaused": session.isPaused])
       },
+      // Gene - Nov, 13, 2026: Ignore duplicate HUD Stop clicks and forward an error payload when info is nil.
+      // Old implementation:
+      // onStop: { [weak self] in
+      //   guard let self = self else { return }
+      //   self.stopNativeScreenRecording(cancel: false) { info in
+      //     self.channel?.invokeMethod("onRecordingStopped", arguments: info)
+      //   }
+      // },
       onStop: { [weak self] in
-        guard let self = self else { return }
+        guard let self = self, self.recordingSession != nil else { return }
         self.stopNativeScreenRecording(cancel: false) { info in
-          self.channel?.invokeMethod("onRecordingStopped", arguments: info)
+          let payload = info ?? ["error": "Could not finalize screen recording"]
+          self.channel?.invokeMethod("onRecordingStopped", arguments: payload)
         }
       },
       onRestart: { [weak self] in
@@ -1402,6 +1446,34 @@ class CapturePlugin: NSObject {
     removeMenuBarStatusItem()
   }
 
+  // Gene - Nov, 13, 2026: Retain session strongly in stoppingSession across async AVAssetWriter teardown so ARC never deallocates it before finishWriting runs.
+  // Old implementation:
+  // private func stopNativeScreenRecording(
+  //   cancel: Bool,
+  //   restoreWindow: Bool = true,
+  //   result: @escaping FlutterResult
+  // ) {
+  //   DispatchQueue.main.async { [weak self] in
+  //     guard let self = self else { return }
+  //     self.closeRecordingHudInternal()
+  //     guard let session = self.recordingSession else {
+  //       if restoreWindow {
+  //         self.restoreMainWindowIfHidden()
+  //       }
+  //       result(nil)
+  //       return
+  //     }
+  //     self.recordingSession = nil
+  //     session.stop(cancel: cancel) { info in
+  //       DispatchQueue.main.async {
+  //         if restoreWindow {
+  //           self.restoreMainWindowIfHidden()
+  //         }
+  //         result(info)
+  //       }
+  //     }
+  //   }
+  // }
   private func stopNativeScreenRecording(
     cancel: Bool,
     restoreWindow: Bool = true,
@@ -1411,17 +1483,23 @@ class CapturePlugin: NSObject {
       guard let self = self else { return }
       self.closeRecordingHudInternal()
       guard let session = self.recordingSession else {
-        if restoreWindow {
+        if self.stoppingSession == nil && restoreWindow {
           self.restoreMainWindowIfHidden()
         }
         result(nil)
         return
       }
       self.recordingSession = nil
-      session.stop(cancel: cancel) { info in
+      self.stoppingSession = session
+      session.stop(cancel: cancel) { [weak self] info in
         DispatchQueue.main.async {
-          if restoreWindow {
-            self.restoreMainWindowIfHidden()
+          if let strongSelf = self {
+            if strongSelf.stoppingSession === session {
+              strongSelf.stoppingSession = nil
+            }
+            if restoreWindow {
+              strongSelf.restoreMainWindowIfHidden()
+            }
           }
           result(info)
         }
@@ -4568,10 +4646,45 @@ private final class ClickHighlightOverlayView: NSView {
 
 // MARK: - Real-time 48kHz Stereo AAC Audio Mixer (Mic + SCStream System Audio)
 
-private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
+// Gene - Nov, 13, 2026: Serialize MacAudioMixer audioInput appends onto writerQueue, guard isStopped with NSLock, and defer start() until SCStream begins capturing.
+// Old implementation:
+// private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
+//   ...
+//   private let audioInput: AVAssetWriterInput
+//   private let elapsedMsProvider: () -> Int
+//
+//   init?(
+//     audioInput: AVAssetWriterInput,
+//     enableMic: Bool,
+//     micDeviceId: String?,
+//     elapsedMsProvider: @escaping () -> Int
+//   ) {
+//     guard let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 2, interleaved: true) else {
+//       return nil
+//     }
+//     self.targetFormat = fmt
+//     self.formatDesc = fmt.formatDescription
+//     self.audioInput = audioInput
+//     self.elapsedMsProvider = elapsedMsProvider
+//     super.init()
+//
+//     if enableMic && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+//       setupMicSession(deviceId: micDeviceId)
+//     }
+//
+//     let timerSrc = DispatchSource.makeTimerSource(queue: mixQueue)
+//     timerSrc.schedule(deadline: .now() + .milliseconds(20), repeating: .milliseconds(20), leeway: .milliseconds(2))
+//     timerSrc.setEventHandler { [weak self] in
+//       self?.drainMixChunk()
+//     }
+//     self.mixTimer = timerSrc
+//     timerSrc.resume()
+//   }
+private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate, @unchecked Sendable {
   private let targetFormat: AVAudioFormat
   private let formatDesc: CMAudioFormatDescription
   private let mixQueue = DispatchQueue(label: "com.snipsnap.audiomixer.mix", qos: .userInitiated)
+  private let writerQueue: DispatchQueue
   private let lock = NSLock()
 
   private var sysBuffer: [Float] = []
@@ -4586,14 +4699,18 @@ private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBuffe
   private var isMicMuted: Bool = false
   private var isPaused: Bool = false
   private var isStopped: Bool = false
+  private var isStarted: Bool = false
   private var nextAudioPts: CMTime = .zero
   private let chunkFrames = 960 // 20ms @ 48kHz
 
   private let audioInput: AVAssetWriterInput
+  private let enableMic: Bool
+  private let micDeviceId: String?
   private let elapsedMsProvider: () -> Int
 
   init?(
     audioInput: AVAssetWriterInput,
+    writerQueue: DispatchQueue,
     enableMic: Bool,
     micDeviceId: String?,
     elapsedMsProvider: @escaping () -> Int
@@ -4604,8 +4721,29 @@ private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBuffe
     self.targetFormat = fmt
     self.formatDesc = fmt.formatDescription
     self.audioInput = audioInput
+    self.writerQueue = writerQueue
+    self.enableMic = enableMic
+    self.micDeviceId = micDeviceId
     self.elapsedMsProvider = elapsedMsProvider
     super.init()
+  }
+
+  private func checkStopped() -> Bool {
+    lock.lock()
+    let stopped = isStopped
+    lock.unlock()
+    return stopped
+  }
+
+  func start() {
+    lock.lock()
+    guard !isStopped, !isStarted else {
+      lock.unlock()
+      return
+    }
+    isStarted = true
+    nextAudioPts = .zero
+    lock.unlock()
 
     if enableMic && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
       setupMicSession(deviceId: micDeviceId)
@@ -4616,8 +4754,15 @@ private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBuffe
     timerSrc.setEventHandler { [weak self] in
       self?.drainMixChunk()
     }
-    self.mixTimer = timerSrc
-    timerSrc.resume()
+    lock.lock()
+    if !isStopped {
+      self.mixTimer = timerSrc
+      lock.unlock()
+      timerSrc.resume()
+    } else {
+      lock.unlock()
+      timerSrc.cancel()
+    }
   }
 
   private func setupMicSession(deviceId: String?) {
@@ -4666,7 +4811,13 @@ private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBuffe
   }
 
   func appendSystemAudio(_ sampleBuffer: CMSampleBuffer) {
-    guard !isStopped, !isPaused else { return }
+    // Gene - Nov, 13, 2026: Check stopped/paused state under lock.
+    // Old implementation:
+    // guard !isStopped, !isPaused else { return }
+    lock.lock()
+    let activeNow = !isStopped && !isPaused
+    lock.unlock()
+    guard activeNow else { return }
     let converted = convertToStereo48k(sampleBuffer, converter: &sysConverter, lastSig: &sysSig)
     guard !converted.isEmpty else { return }
     lock.lock()
@@ -4683,11 +4834,17 @@ private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBuffe
     didOutput sampleBuffer: CMSampleBuffer,
     from connection: AVCaptureConnection
   ) {
-    guard !isStopped, !isPaused else { return }
+    // Gene - Nov, 13, 2026: Check stopped/paused/muted state under lock.
+    // Old implementation:
+    // guard !isStopped, !isPaused else { return }
+    // lock.lock()
+    // let mutedNow = isMicMuted
+    // lock.unlock()
+    // guard !mutedNow else { return }
     lock.lock()
-    let mutedNow = isMicMuted
+    let activeNow = !isStopped && !isPaused && !isMicMuted
     lock.unlock()
-    guard !mutedNow else { return }
+    guard activeNow else { return }
     let converted = convertToStereo48k(sampleBuffer, converter: &micConverter, lastSig: &micSig)
     guard !converted.isEmpty else { return }
     lock.lock()
@@ -4768,12 +4925,42 @@ private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBuffe
     return Array(UnsafeBufferPointer(start: fPtr, count: Int(dstPCM.frameLength) * 2))
   }
 
+  // Gene - Nov, 13, 2026: Lock isStopped/isPaused and serialize audioInput.append onto writerQueue so it can never race with AVAssetWriter.finishWriting().
+  // Old implementation:
+  // private func drainMixChunk() {
+  //   guard !isStopped else { return }
+  //   let needed = chunkFrames * 2
+  //
+  //   lock.lock()
+  //   if isPaused {
+  //     lock.unlock()
+  //     return
+  //   }
+  //   ...
+  //   guard audioInput.isReadyForMoreMediaData else { return }
+  //   ...
+  //   if sbStatus == noErr, let outSB = sbOut {
+  //     audioInput.append(outSB)
+  //   }
+  // }
+  //
+  // func stop() {
+  //   isStopped = true
+  //   mixTimer?.cancel()
+  //   mixTimer = nil
+  //   let capSess = captureSession
+  //   captureSession = nil
+  //   mixQueue.async {
+  //     if let s = capSess, s.isRunning {
+  //       s.stopRunning()
+  //     }
+  //   }
+  // }
   private func drainMixChunk() {
-    guard !isStopped else { return }
     let needed = chunkFrames * 2
 
     lock.lock()
-    if isPaused {
+    if isStopped || isPaused {
       lock.unlock()
       return
     }
@@ -4800,8 +4987,6 @@ private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBuffe
     let pts = nextAudioPts
     nextAudioPts = CMTimeAdd(pts, CMTime(value: CMTimeValue(chunkFrames), timescale: 48_000))
     lock.unlock()
-
-    guard audioInput.isReadyForMoreMediaData else { return }
 
     let byteLen = needed * MemoryLayout<Float>.size
     var blockOut: CMBlockBuffer?
@@ -4835,16 +5020,27 @@ private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBuffe
       sampleBufferOut: &sbOut
     )
     if sbStatus == noErr, let outSB = sbOut {
-      audioInput.append(outSB)
+      let sbBox = UncheckedSendableBox(value: outSB)
+      writerQueue.async { [weak self] in
+        guard let strongSelf = self,
+              !strongSelf.checkStopped(),
+              strongSelf.audioInput.isReadyForMoreMediaData
+        else { return }
+        _ = strongSelf.audioInput.append(sbBox.value)
+      }
     }
   }
 
   func stop() {
+    lock.lock()
     isStopped = true
-    mixTimer?.cancel()
+    let timerToCancel = mixTimer
     mixTimer = nil
     let capSess = captureSession
     captureSession = nil
+    lock.unlock()
+
+    timerToCancel?.cancel()
     mixQueue.async {
       if let s = capSess, s.isRunning {
         s.stopRunning()
@@ -4855,7 +5051,12 @@ private final class MacAudioMixer: NSObject, AVCaptureAudioDataOutputSampleBuffe
 
 // MARK: - ScreenCaptureKit 60fps Recorder Session
 
-private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStreamDelegate {
+// Gene - Nov, 13, 2026: Conform MacScreenRecordingSession to @unchecked Sendable and add NSLock-guarded stop state helpers for safe multi-queue teardown.
+// Old implementation:
+// private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStreamDelegate {
+private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+  private let stateLock = NSLock()
+  private var didBeginWriterFinalize: Bool = false
   let targetPath: String
   let thumbnailPath: String
   let displayID: CGDirectDisplayID
@@ -4928,6 +5129,24 @@ private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStrea
     let rawH = max(64, Int((pointRect.height * scale).rounded()))
     self.pixelWidth = rawW & ~1
     self.pixelHeight = rawH & ~1
+  }
+
+  func checkStopped() -> Bool {
+    stateLock.lock()
+    let stopped = isStopped
+    stateLock.unlock()
+    return stopped
+  }
+
+  private func markStoppedIfNeeded() -> Bool {
+    stateLock.lock()
+    if isStopped {
+      stateLock.unlock()
+      return false
+    }
+    isStopped = true
+    stateLock.unlock()
+    return true
   }
 
   func setMicrophoneMuted(_ muted: Bool) {
@@ -5044,6 +5263,8 @@ private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStrea
             strongSelf.scStream = stream
             strongSelf.startTimestampNs = DispatchTime.now().uptimeNanoseconds
             strongSelf.lastFrameWallNs = strongSelf.startTimestampNs
+            // Gene - Nov, 13, 2026: Start audio mixer timer & mic session after SCStream begins capturing frames so audio/video timestamps align.
+            strongSelf.audioMixer?.start()
             strongSelf.startKeepAliveTimer()
             completion(true)
           }
@@ -5112,8 +5333,17 @@ private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStrea
     self.pixelBufferAdaptor = adaptor
     self.audioInput = aInput
     if let addedAudio = aInput {
+      // Gene - Nov, 13, 2026: Pass writerQueue to MacAudioMixer so audio sample appends are serialized on the AVAssetWriter queue.
+      // Old implementation:
+      // self.audioMixer = MacAudioMixer(
+      //   audioInput: addedAudio,
+      //   enableMic: recordAudio,
+      //   micDeviceId: microphoneDeviceId,
+      //   elapsedMsProvider: { [weak self] in self?.currentElapsedMs() ?? 0 }
+      // )
       self.audioMixer = MacAudioMixer(
         audioInput: addedAudio,
+        writerQueue: writerQueue,
         enableMic: recordAudio,
         micDeviceId: microphoneDeviceId,
         elapsedMsProvider: { [weak self] in self?.currentElapsedMs() ?? 0 }
@@ -5134,7 +5364,10 @@ private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStrea
   }
 
   private func onKeepAliveTick() {
-    guard !isStopped else { return }
+    // Gene - Nov, 13, 2026: Check stopped flag under NSLock.
+    // Old implementation:
+    // guard !isStopped else { return }
+    guard !checkStopped() else { return }
     let elapsed = currentElapsedMs()
     onTick(elapsed, isPaused)
     if isPaused { return }
@@ -5150,7 +5383,10 @@ private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStrea
     didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
     of type: SCStreamOutputType
   ) {
-    guard !isStopped else { return }
+    // Gene - Nov, 13, 2026: Check stopped flag under NSLock across writerQueue and audioSampleQueue.
+    // Old implementation:
+    // guard !isStopped else { return }
+    guard !checkStopped() else { return }
     switch type {
     case .audio:
       if !isPaused {
@@ -5185,7 +5421,10 @@ private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStrea
   }
 
   func stream(_ stream: SCStream, didStopWithError error: Error) {
-    guard !isStopped else { return }
+    // Gene - Nov, 13, 2026: Check stopped flag under NSLock before forwarding stream errors.
+    // Old implementation:
+    // guard !isStopped else { return }
+    guard !checkStopped() else { return }
     onStreamError(error.localizedDescription)
   }
 
@@ -5234,70 +5473,186 @@ private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStrea
     }
   }
 
+  // Gene - Nov, 13, 2026: Strongly retain self through stopCapture and AVAssetWriter.finishWriting(), await SCStream.stopCapture (300ms cap), log/clean failed writes, and verify output file before returning metadata.
+  // Old implementation:
+  // func stop(cancel: Bool, completion: @escaping ([String: Any]?) -> Void) {
+  //   writerQueue.async { [weak self] in
+  //     guard let strongSelf = self else {
+  //       completion(nil)
+  //       return
+  //     }
+  //     if strongSelf.isStopped {
+  //       completion(nil)
+  //       return
+  //     }
+  //     strongSelf.isStopped = true
+  //     let finalDurationMs = max(120, strongSelf.currentElapsedMs())
+  //
+  //     strongSelf.tickTimer?.cancel()
+  //     strongSelf.tickTimer = nil
+  //     strongSelf.audioMixer?.stop()
+  //     strongSelf.audioMixer = nil
+  //
+  //     let activeStream = strongSelf.scStream
+  //     strongSelf.scStream = nil
+  //     activeStream?.stopCapture { _ in }
+  //
+  //     guard let writer = strongSelf.assetWriter, let vInput = strongSelf.videoInput else {
+  //       completion(nil)
+  //       return
+  //     }
+  //
+  //     if cancel {
+  //       writer.cancelWriting()
+  //       try? FileManager.default.removeItem(atPath: strongSelf.targetPath)
+  //       if !strongSelf.thumbnailPath.isEmpty {
+  //         try? FileManager.default.removeItem(atPath: strongSelf.thumbnailPath)
+  //       }
+  //       completion(nil)
+  //       return
+  //     }
+  //
+  //     // Guarantee static-screen & ultra-short clips always have >=2 valid frames.
+  //     if strongSelf.frameCount == 0 {
+  //       if let fallback = strongSelf.synthesizeFallbackPixelBuffer() {
+  //         strongSelf.appendPixelBuffer(fallback, atMs: 0)
+  //         strongSelf.appendPixelBuffer(fallback, atMs: finalDurationMs)
+  //       }
+  //     } else if let cached = strongSelf.lastPixelBuffer {
+  //       strongSelf.appendPixelBuffer(cached, atMs: finalDurationMs)
+  //     }
+  //
+  //     vInput.markAsFinished()
+  //     strongSelf.audioInput?.markAsFinished()
+  //     writer.finishWriting {
+  //       let ok = writer.status == .completed
+  //       if !ok {
+  //         completion(nil)
+  //         return
+  //       }
+  //       let info: [String: Any] = [
+  //         "filePath": strongSelf.targetPath,
+  //         "thumbnailPath": strongSelf.thumbnailPath,
+  //         "durationMs": finalDurationMs,
+  //         "width": strongSelf.pixelWidth,
+  //         "height": strongSelf.pixelHeight,
+  //         "hasAudio": (strongSelf.recordAudio || strongSelf.recordSystemAudio)
+  //       ]
+  //       completion(info)
+  //     }
+  //   }
+  // }
   func stop(cancel: Bool, completion: @escaping ([String: Any]?) -> Void) {
-    writerQueue.async { [weak self] in
-      guard let strongSelf = self else {
-        completion(nil)
+    let completionBox = UncheckedSendableBox(value: completion)
+    writerQueue.async { [self] in
+      guard self.markStoppedIfNeeded() else {
+        completionBox.value(nil)
         return
       }
-      if strongSelf.isStopped {
-        completion(nil)
-        return
-      }
-      strongSelf.isStopped = true
-      let finalDurationMs = max(120, strongSelf.currentElapsedMs())
+      let finalDurationMs = max(120, self.currentElapsedMs())
 
-      strongSelf.tickTimer?.cancel()
-      strongSelf.tickTimer = nil
-      strongSelf.audioMixer?.stop()
-      strongSelf.audioMixer = nil
+      self.tickTimer?.cancel()
+      self.tickTimer = nil
+      self.audioMixer?.stop()
+      self.audioMixer = nil
 
-      let activeStream = strongSelf.scStream
-      strongSelf.scStream = nil
-      activeStream?.stopCapture { _ in }
+      let activeStream = self.scStream
+      self.scStream = nil
 
-      guard let writer = strongSelf.assetWriter, let vInput = strongSelf.videoInput else {
-        completion(nil)
-        return
-      }
-
-      if cancel {
-        writer.cancelWriting()
-        try? FileManager.default.removeItem(atPath: strongSelf.targetPath)
-        if !strongSelf.thumbnailPath.isEmpty {
-          try? FileManager.default.removeItem(atPath: strongSelf.thumbnailPath)
-        }
-        completion(nil)
-        return
-      }
-
-      // Guarantee static-screen & ultra-short clips always have >=2 valid frames.
-      if strongSelf.frameCount == 0 {
-        if let fallback = strongSelf.synthesizeFallbackPixelBuffer() {
-          strongSelf.appendPixelBuffer(fallback, atMs: 0)
-          strongSelf.appendPixelBuffer(fallback, atMs: finalDurationMs)
-        }
-      } else if let cached = strongSelf.lastPixelBuffer {
-        strongSelf.appendPixelBuffer(cached, atMs: finalDurationMs)
-      }
-
-      vInput.markAsFinished()
-      strongSelf.audioInput?.markAsFinished()
-      writer.finishWriting {
-        let ok = writer.status == .completed
-        if !ok {
-          completion(nil)
+      let finalizeWriter: @Sendable () -> Void = { [self] in
+        guard let writer = self.assetWriter, let vInput = self.videoInput else {
+          self.lastPixelBuffer = nil
+          completionBox.value(nil)
           return
         }
-        let info: [String: Any] = [
-          "filePath": strongSelf.targetPath,
-          "thumbnailPath": strongSelf.thumbnailPath,
-          "durationMs": finalDurationMs,
-          "width": strongSelf.pixelWidth,
-          "height": strongSelf.pixelHeight,
-          "hasAudio": (strongSelf.recordAudio || strongSelf.recordSystemAudio)
-        ]
-        completion(info)
+
+        if cancel {
+          writer.cancelWriting()
+          self.assetWriter = nil
+          self.videoInput = nil
+          self.pixelBufferAdaptor = nil
+          self.audioInput = nil
+          self.lastPixelBuffer = nil
+          try? FileManager.default.removeItem(atPath: self.targetPath)
+          if !self.thumbnailPath.isEmpty {
+            try? FileManager.default.removeItem(atPath: self.thumbnailPath)
+          }
+          completionBox.value(nil)
+          return
+        }
+
+        // Guarantee static-screen & ultra-short clips always have >=2 valid frames.
+        if self.frameCount == 0 {
+          if let fallback = self.synthesizeFallbackPixelBuffer() {
+            self.appendPixelBuffer(fallback, atMs: 0)
+            self.appendPixelBuffer(fallback, atMs: finalDurationMs)
+          }
+        } else if let cached = self.lastPixelBuffer {
+          self.appendPixelBuffer(cached, atMs: finalDurationMs)
+        }
+        self.lastPixelBuffer = nil
+
+        vInput.markAsFinished()
+        self.audioInput?.markAsFinished()
+        // Gene - Nov, 13, 2026: Wrap non-Sendable AVAssetWriter in UncheckedSendableBox inside finishWriting completion to eliminate Swift 6 Sendable warning.
+        // Old implementation:
+        // writer.finishWriting { [self] in
+        //   let ok = writer.status == .completed
+        //   if !ok {
+        //     NSLog("SnipSnap AVAssetWriter finishWriting failed: status=%ld error=%@", writer.status.rawValue, writer.error?.localizedDescription ?? "unknown")
+        //   }
+        let writerBox = UncheckedSendableBox(value: writer)
+        writer.finishWriting { [self] in
+          let finishedWriter = writerBox.value
+          let ok = finishedWriter.status == .completed
+          if !ok {
+            NSLog("SnipSnap AVAssetWriter finishWriting failed: status=%ld error=%@", finishedWriter.status.rawValue, finishedWriter.error?.localizedDescription ?? "unknown")
+          }
+          self.assetWriter = nil
+          self.videoInput = nil
+          self.pixelBufferAdaptor = nil
+          self.audioInput = nil
+
+          let attrs = try? FileManager.default.attributesOfItem(atPath: self.targetPath)
+          let fileSize = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+          if !ok || fileSize <= 0 {
+            try? FileManager.default.removeItem(atPath: self.targetPath)
+            if !self.thumbnailPath.isEmpty {
+              try? FileManager.default.removeItem(atPath: self.thumbnailPath)
+            }
+            completionBox.value(nil)
+            return
+          }
+          let info: [String: Any] = [
+            "filePath": self.targetPath,
+            "thumbnailPath": self.thumbnailPath,
+            "durationMs": finalDurationMs,
+            "width": self.pixelWidth,
+            "height": self.pixelHeight,
+            "hasAudio": (self.recordAudio || self.recordSystemAudio)
+          ]
+          completionBox.value(info)
+        }
+      }
+
+      let resumeFinalize: @Sendable () -> Void = { [self] in
+        self.writerQueue.async { [self] in
+          guard !self.didBeginWriterFinalize else { return }
+          self.didBeginWriterFinalize = true
+          finalizeWriter()
+        }
+      }
+
+      if let streamToStop = activeStream {
+        self.writerQueue.asyncAfter(deadline: .now() + .milliseconds(300)) {
+          resumeFinalize()
+        }
+        streamToStop.stopCapture { _ in
+          resumeFinalize()
+        }
+      } else {
+        self.didBeginWriterFinalize = true
+        finalizeWriter()
       }
     }
   }

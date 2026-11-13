@@ -1,5 +1,9 @@
 // Gene - Nov, 08, 2026: Unit tests for ScreenRecordingController and ScreenRecordingResult.
-import 'package:flutter/painting.dart';
+// Gene - Nov, 13, 2026: Replaced painting.dart import with services.dart + dart:io for real CaptureService channel dispatch test.
+// import 'package:flutter/painting.dart';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:snipsnap/models/capture_item.dart';
 import 'package:snipsnap/services/capture_service.dart';
@@ -285,6 +289,70 @@ void main() {
         expect(req.fps, 60);
         expect(req.fullScreen, isTrue);
         expect(req.microphoneDeviceId, 'mic_usb');
+      },
+    );
+
+    // Gene - Nov, 13, 2026: Verify native onRecordingStopped with null or error payload resets recording state and notifies onRecordingFailed.
+    test(
+      'native onRecordingStopped with null or error payload resets recording state and invokes onRecordingFailed',
+      () async {
+        final tempDir = Directory.systemTemp.createTempSync(
+          'snipsnap_ctrl_native_stop',
+        );
+        addTearDown(() async {
+          if (await tempDir.exists()) {
+            await tempDir.delete(recursive: true);
+          }
+        });
+        const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(pathChannel, (call) async => tempDir.path);
+        const channel = MethodChannel('snipsnap/capture');
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'startScreenRecording') return true;
+          return null;
+        });
+        addTearDown(() {
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(channel, null);
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(pathChannel, null);
+        });
+
+        final failedMessages = <String?>[];
+        final realService = CaptureService();
+        final realController = ScreenRecordingController(
+          captureService: realService,
+          onRecordingFailed: failedMessages.add,
+        );
+        addTearDown(realController.dispose);
+
+        await realController.startFullScreenRecording();
+        expect(realController.isRecording, isTrue);
+
+        Future<void> dispatchNativeStop(dynamic args) async {
+          final bytes = const StandardMethodCodec().encodeMethodCall(
+            MethodCall('onRecordingStopped', args),
+          );
+          await TestDefaultBinaryMessengerBinding
+              .instance
+              .defaultBinaryMessenger
+              .handlePlatformMessage('snipsnap/capture', bytes, (_) {});
+        }
+
+        await dispatchNativeStop(null);
+        expect(realController.isRecording, isFalse);
+        expect(realController.state, ScreenRecordingState.idle);
+        expect(failedMessages, [null]);
+
+        await realController.startFullScreenRecording();
+        expect(realController.isRecording, isTrue);
+
+        await dispatchNativeStop(<String, dynamic>{'error': 'Failed'});
+        expect(realController.isRecording, isFalse);
+        expect(realController.state, ScreenRecordingState.idle);
+        expect(failedMessages, [null, 'Failed']);
       },
     );
   });

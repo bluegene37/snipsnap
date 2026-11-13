@@ -711,11 +711,18 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
         _onScrollingDone?.call();
       case 'onScrollingCancel':
         _onScrollingCancel?.call();
+      // Gene - Nov, 13, 2026: Always forward onRecordingStopped even when arguments are null so ScreenRecordingController resets top-bar recording state on failure.
+      // Old implementation:
+      // case 'onRecordingStopped':
+      //   if (call.arguments is Map) {
+      //     final map = Map<String, dynamic>.from(call.arguments as Map);
+      //     _onRecordingStopped?.call(map);
+      //   }
       case 'onRecordingStopped':
-        if (call.arguments is Map) {
-          final map = Map<String, dynamic>.from(call.arguments as Map);
-          _onRecordingStopped?.call(map);
-        }
+        final map = call.arguments is Map
+            ? Map<String, dynamic>.from(call.arguments as Map)
+            : <String, dynamic>{};
+        _onRecordingStopped?.call(map);
       case 'onRecordingCancelled':
         _onRecordingCancelled?.call();
       case 'onRecordingRestartRequested':

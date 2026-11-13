@@ -552,12 +552,30 @@ class _MainScreenState extends State<MainScreen> {
     // )..addListener(() {
     //   if (mounted) setState(() {});
     // });
+    // Gene - Nov, 13, 2026: Restore main window on cancel/failure, toast native save errors, and load initial audio input devices.
+    // Old implementation:
+    // _recordingController = ScreenRecordingController(
+    //   captureService: _captureService,
+    //   onRecordingCompleted: _handleRecordingCompleted,
+    //   onRecordingCancelled: () {
+    //     unawaited(_captureService.setMainWindowVisible(true));
+    //     if (mounted) _showToast('Screen recording cancelled');
+    //   },
+    // )..addListener(() {
+    //   if (mounted) setState(() {});
+    // });
     _recordingController = ScreenRecordingController(
       captureService: _captureService,
       onRecordingCompleted: _handleRecordingCompleted,
       onRecordingCancelled: () {
         unawaited(_captureService.setMainWindowVisible(true));
         if (mounted) _showToast('Screen recording cancelled');
+      },
+      onRecordingFailed: (errMsg) {
+        unawaited(_captureService.setMainWindowVisible(true));
+        if (mounted) {
+          _showToast(errMsg ?? 'Could not save screen recording');
+        }
       },
     )..addListener(() {
       if (mounted) setState(() {});
@@ -1919,9 +1937,20 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  // Gene - Nov, 13, 2026: Verify recorded MP4 exists and is non-empty before inserting into library history.
+  // Old implementation:
+  // void _handleRecordingCompleted(ScreenRecordingResult result) {
+  //   unawaited(_captureService.setMainWindowVisible(true));
+  //   if (!mounted) return;
+  //   _syncCurrentCaptureAnnotations();
   void _handleRecordingCompleted(ScreenRecordingResult result) {
     unawaited(_captureService.setMainWindowVisible(true));
     if (!mounted) return;
+    final videoFile = File(result.filePath);
+    if (!videoFile.existsSync() || videoFile.lengthSync() == 0) {
+      _showToast('Could not save screen recording');
+      return;
+    }
     _syncCurrentCaptureAnnotations();
     final now = DateTime.now();
     final newItem = result.toCaptureItem(

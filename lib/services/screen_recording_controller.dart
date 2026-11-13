@@ -52,6 +52,8 @@ class ScreenRecordingController extends ChangeNotifier {
   final CaptureService captureService;
   final ValueChanged<ScreenRecordingResult>? onRecordingCompleted;
   final VoidCallback? onRecordingCancelled;
+  // Gene - Nov, 13, 2026: Added onRecordingFailed callback so native finalization failures notify the UI instead of leaving stale state.
+  final ValueChanged<String?>? onRecordingFailed;
 
   ScreenRecordingState _state = ScreenRecordingState.idle;
   Duration _elapsed = Duration.zero;
@@ -86,10 +88,26 @@ class ScreenRecordingController extends ChangeNotifier {
   //     onStateChanged: _handleNativeStateChanged,
   //   );
   // }
+  // Gene - Nov, 13, 2026: Accept optional onRecordingFailed callback.
+  // Old implementation:
+  // ScreenRecordingController({
+  //   required this.captureService,
+  //   this.onRecordingCompleted,
+  //   this.onRecordingCancelled,
+  // }) {
+  //   captureService.setRecordingCallbacks(
+  //     onStopped: _handleNativeRecordingStopped,
+  //     onCancelled: _handleNativeRecordingCancelled,
+  //     onStateChanged: _handleNativeStateChanged,
+  //     onRestartRequested: _handleNativeRestartRequested,
+  //     onMicMutedChanged: _handleNativeMicMutedChanged,
+  //   );
+  // }
   ScreenRecordingController({
     required this.captureService,
     this.onRecordingCompleted,
     this.onRecordingCancelled,
+    this.onRecordingFailed,
   }) {
     captureService.setRecordingCallbacks(
       onStopped: _handleNativeRecordingStopped,
@@ -430,6 +448,44 @@ class ScreenRecordingController extends ChangeNotifier {
     }
   }
 
+  // Gene - Nov, 13, 2026: Reset idle state and invoke onRecordingFailed when stopRecording or native onRecordingStopped reports an error or missing filePath.
+  // Old implementation:
+  // Future<ScreenRecordingResult?> stopRecording() async {
+  //   if (!isRecording) return null;
+  //   _state = ScreenRecordingState.stopping;
+  //   _uiTimer?.cancel();
+  //   _uiTimer = null;
+  //   notifyListeners();
+  //
+  //   final info = await captureService.stopScreenRecording();
+  //   _resetToIdle();
+  //   if (info == null) return null;
+  //
+  //   final result = _parseRecordingInfo(info);
+  //   if (result != null) {
+  //     onRecordingCompleted?.call(result);
+  //   }
+  //   return result;
+  // }
+  //
+  // Future<void> cancelRecording() async {
+  //   if (!isRecording && !isStopping) return;
+  //   _uiTimer?.cancel();
+  //   _uiTimer = null;
+  //   await captureService.cancelScreenRecording();
+  //   _resetToIdle();
+  //   onRecordingCancelled?.call();
+  // }
+  //
+  // void _handleNativeRecordingStopped(Map<String, dynamic> info) {
+  //   _uiTimer?.cancel();
+  //   _uiTimer = null;
+  //   _resetToIdle();
+  //   final result = _parseRecordingInfo(info);
+  //   if (result != null) {
+  //     onRecordingCompleted?.call(result);
+  //   }
+  // }
   Future<ScreenRecordingResult?> stopRecording() async {
     if (!isRecording) return null;
     _state = ScreenRecordingState.stopping;
@@ -439,11 +495,16 @@ class ScreenRecordingController extends ChangeNotifier {
 
     final info = await captureService.stopScreenRecording();
     _resetToIdle();
-    if (info == null) return null;
+    if (info == null) {
+      onRecordingFailed?.call(null);
+      return null;
+    }
 
     final result = _parseRecordingInfo(info);
     if (result != null) {
       onRecordingCompleted?.call(result);
+    } else {
+      onRecordingFailed?.call(info['error'] as String?);
     }
     return result;
   }
@@ -464,6 +525,10 @@ class ScreenRecordingController extends ChangeNotifier {
     final result = _parseRecordingInfo(info);
     if (result != null) {
       onRecordingCompleted?.call(result);
+    } else if (onRecordingFailed != null) {
+      onRecordingFailed!(info['error'] as String?);
+    } else {
+      onRecordingCancelled?.call();
     }
   }
 

@@ -164,6 +164,46 @@ class StorageService {
     return file.path;
   }
 
+  // Gene - Nov, 13, 2026: Detect unfinalized AVAssetWriter MP4 files whose mdat box still has size=0 (extending to EOF) and no moov atom.
+  static Future<bool> _isFinalizedMp4File(File file) async {
+    RandomAccessFile? raf;
+    try {
+      raf = await file.open();
+      final fileLen = await raf.length();
+      if (fileLen <= 0) return false;
+      if (fileLen < 44) return true;
+
+      var pos = 0;
+      for (var i = 0; i < 32 && pos + 8 <= fileLen; i++) {
+        await raf.setPosition(pos);
+        final hdr = await raf.read(8);
+        if (hdr.length < 8) break;
+        final view = ByteData.sublistView(hdr);
+        final len32 = view.getUint32(0, Endian.big);
+        final fourcc = String.fromCharCodes(hdr.sublist(4, 8));
+        if (fourcc == 'moov') return true;
+        if (fourcc == 'mdat' && len32 == 0) return false;
+
+        int boxLen = len32;
+        if (len32 == 1) {
+          if (pos + 16 > fileLen) break;
+          final extHdr = await raf.read(8);
+          if (extHdr.length < 8) break;
+          boxLen = ByteData.sublistView(extHdr).getUint64(0, Endian.big);
+        } else if (len32 == 0) {
+          boxLen = fileLen - pos;
+        }
+        if (boxLen < 8 || pos + boxLen > fileLen) break;
+        pos += boxLen;
+      }
+      return true;
+    } catch (_) {
+      return true;
+    } finally {
+      await raf?.close();
+    }
+  }
+
   /// Load persistent capture history from Drift SQLite local database
   static Future<List<CaptureItem>> loadHistory() async {
     final items = <CaptureItem>[];
@@ -234,8 +274,12 @@ class StorageService {
               continue;
             }
             if (!existingPaths.contains(f.path)) {
-              final stat = await f.stat();
               final isVideo = f.path.endsWith('.mp4');
+              // Gene - Nov, 13, 2026: Skip unfinalized MP4 files (e.g., AVAssetWriter mdat size=0 with no moov) when scanning disk.
+              if (isVideo && !await _isFinalizedMp4File(f)) {
+                continue;
+              }
+              final stat = await f.stat();
               int w = 0;
               int h = 0;
               // Gene - Nov, 08, 2026: Replaced full-bitmap compute(img.decodeImage) with ImageHeaderParser.readDimensions (<0.1ms header read).
