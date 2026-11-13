@@ -157,12 +157,29 @@ class CaptureService {
   static const MethodChannel _channel = MethodChannel('snipsnap/capture');
 
   /// Gets the directory where captures are stored
+  // Gene - Nov, 13, 2026: Cache resolved Captures storage directory per service instance to avoid repeated path_provider + disk stat latency before launching interactive capture overlay.
+  // Old implementation:
+  // Future<Directory> getStorageDirectory() async {
+  //   final docsDir = await getApplicationDocumentsDirectory();
+  //   final snapDir = Directory(p.join(docsDir.path, 'SnipSnap', 'Captures'));
+  //   if (!await snapDir.exists()) {
+  //     await snapDir.create(recursive: true);
+  //   }
+  //   return snapDir;
+  // }
+  Directory? _cachedStorageDir;
+
   Future<Directory> getStorageDirectory() async {
+    final cached = _cachedStorageDir;
+    if (cached != null && await cached.exists()) {
+      return cached;
+    }
     final docsDir = await getApplicationDocumentsDirectory();
     final snapDir = Directory(p.join(docsDir.path, 'SnipSnap', 'Captures'));
     if (!await snapDir.exists()) {
       await snapDir.create(recursive: true);
     }
+    _cachedStorageDir = snapDir;
     return snapDir;
   }
 

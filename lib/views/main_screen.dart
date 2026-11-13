@@ -1883,7 +1883,11 @@ class _MainScreenState extends State<MainScreen> {
     if (!await _ensureCapturePermission()) return;
     await _recordingController.refreshAudioDevices();
     await _captureService.setMainWindowVisible(false);
-    await Future<void>.delayed(const Duration(milliseconds: 120));
+    // Gene - Nov, 13, 2026: Use minimal 30ms DWM settle on Windows where ShowWindow(SW_HIDE) is synchronous, keeping 120ms on macOS for WindowServer hide animation.
+    // await Future<void>.delayed(const Duration(milliseconds: 120));
+    await Future<void>.delayed(
+      Duration(milliseconds: Platform.isWindows ? 30 : 120),
+    );
     if (mounted) setState(() => _isCapturing = true);
     final path = await _captureService.captureInteractive(
       initialMode: 'record',
@@ -1923,7 +1927,11 @@ class _MainScreenState extends State<MainScreen> {
       }
     }
     await _captureService.setMainWindowVisible(false);
-    await Future<void>.delayed(const Duration(milliseconds: 120));
+    // Gene - Nov, 13, 2026: Use minimal 30ms DWM settle on Windows where ShowWindow(SW_HIDE) is synchronous, keeping 120ms on macOS for WindowServer hide animation.
+    // await Future<void>.delayed(const Duration(milliseconds: 120));
+    await Future<void>.delayed(
+      Duration(milliseconds: Platform.isWindows ? 30 : 120),
+    );
     final started = await _recordingController.startFullScreenRecording(
       countdownSeconds: 3,
     );
