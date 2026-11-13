@@ -1250,6 +1250,8 @@ class CapturePlugin: NSObject {
     let cWin = CountdownOverlayWindow(contentRect: panelRect, initialValue: seconds)
     self.countdownWindow = cWin
     cWin.orderFrontRegardless()
+    // Gene - Nov, 13, 2026: Make the non-activating countdown panel key so local Escape monitor receives Esc without requiring macOS Accessibility permission or activating the main app.
+    cWin.makeKey()
 
     var remaining = seconds
     let escapeCode: UInt16 = 53
@@ -4729,7 +4731,9 @@ private final class CountdownOverlayWindow: NSPanel {
     countdownView.updateValue(val)
   }
 
-  override var canBecomeKey: Bool { return false }
+  // Gene - Nov, 13, 2026: Allow non-activating countdown panel to become key so local Escape monitor receives Esc without Accessibility permission.
+  // override var canBecomeKey: Bool { return false }
+  override var canBecomeKey: Bool { return true }
   override var canBecomeMain: Bool { return false }
 }
 

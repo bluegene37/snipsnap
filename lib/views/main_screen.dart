@@ -960,22 +960,23 @@ class _MainScreenState extends State<MainScreen> {
   //   );
   // }
   Future<void> _registerGlobalHotKeys() async {
-    if (Platform.isMacOS) {
-      final isTrusted = await _captureService.hasAccessibilityPermission();
-      if (!isTrusted && mounted) {
-        _showToast(
-          'SnipSnap needs Accessibility access for global capture shortcuts. '
-          'If you just updated, remove SnipSnap with [-] in System Settings > Accessibility and re-add it.',
-          duration: const Duration(seconds: 10),
-          action: SnackBarAction(
-            label: 'Open Settings',
-            textColor: _theme.emphasis,
-            onPressed: () =>
-                unawaited(_captureService.openAccessibilitySettings()),
-          ),
-        );
-      }
-    }
+    // Gene - Nov, 13, 2026: Removed false-positive startup Accessibility check and "Open Settings" toast. Carbon RegisterEventHotKey (hotkey_manager_macos) works without macOS Accessibility permission, and ad-hoc build cdhash changes caused AXIsProcessTrusted() to return false on launch even when Accessibility was toggled on in System Settings.
+    // if (Platform.isMacOS) {
+    //   final isTrusted = await _captureService.hasAccessibilityPermission();
+    //   if (!isTrusted && mounted) {
+    //     _showToast(
+    //       'SnipSnap needs Accessibility access for global capture shortcuts. '
+    //       'If you just updated, remove SnipSnap with [-] in System Settings > Accessibility and re-add it.',
+    //       duration: const Duration(seconds: 10),
+    //       action: SnackBarAction(
+    //         label: 'Open Settings',
+    //         textColor: _theme.emphasis,
+    //         onPressed: () =>
+    //             unawaited(_captureService.openAccessibilitySettings()),
+    //       ),
+    //     );
+    //   }
+    // }
 
     final failed = await ShortcutService.registerGlobalHotKeys(
       shortcuts: _shortcuts,
