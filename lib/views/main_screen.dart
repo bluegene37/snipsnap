@@ -1726,10 +1726,37 @@ class _MainScreenState extends State<MainScreen> {
   //     await _addCaptureFromPath(path);
   //   }
   // }
+  // Gene - Nov, 13, 2026: Pass current recording options into interactive capture so switching to Video preserves settings, and auto-hide main window before starting recording countdown.
+  // Old implementation:
+  // Future<void> _handleInteractiveCapture() async {
+  //   if (!await _ensureCapturePermission()) return;
+  //   setState(() => _isCapturing = true);
+  //   final path = await _captureService.captureInteractive();
+  //   setState(() => _isCapturing = false);
+  //   if (path != null) {
+  //     if (path.startsWith('scrolling:')) {
+  //       // Panoramic capture switched off for beta testing.
+  //       return;
+  //     }
+  //     if (path.startsWith('record:')) {
+  //       await _startRecordingFromOverlayString(path);
+  //       return;
+  //     }
+  //     await _addCaptureFromPath(path);
+  //   }
+  // }
   Future<void> _handleInteractiveCapture() async {
     if (!await _ensureCapturePermission()) return;
+    unawaited(_recordingController.refreshAudioDevices());
     setState(() => _isCapturing = true);
-    final path = await _captureService.captureInteractive();
+    final path = await _captureService.captureInteractive(
+      initialFps: _recordingController.fps,
+      initialRecordMic: _recordingController.recordMicrophone,
+      initialMicDeviceId: _recordingController.selectedMicrophoneId,
+      initialRecordSystemAudio: _recordingController.recordSystemAudio,
+      initialRecordCursor: _recordingController.recordCursor,
+      initialHighlightClicks: _recordingController.highlightClicks,
+    );
     setState(() => _isCapturing = false);
     if (path != null) {
       if (path.startsWith('scrolling:')) {
@@ -1737,6 +1764,10 @@ class _MainScreenState extends State<MainScreen> {
         return;
       }
       if (path.startsWith('record:')) {
+        await _captureService.setMainWindowVisible(false);
+        await Future<void>.delayed(
+          Duration(milliseconds: Platform.isWindows ? 30 : 120),
+        );
         await _startRecordingFromOverlayString(path);
         return;
       }

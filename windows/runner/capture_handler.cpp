@@ -1166,8 +1166,18 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
             SettleOverlayCapture(g_overlay.sel);
             return 0;
           }
+          // Gene - Nov, 13, 2026: Clicking Video in capture mode switches in-place to Snagit Pre-Recording Toolbar on the current selection instead of starting recording immediately.
+          // Old implementation:
+          // if (::PtInRect(&g_overlay.record_btn, pt)) {
+          //   SettleOverlayRecord(g_overlay.sel, false);
+          //   return 0;
+          // }
           if (::PtInRect(&g_overlay.record_btn, pt)) {
-            SettleOverlayRecord(g_overlay.sel, false);
+            if (g_overlay.mic_devices.empty()) {
+              PopulateOverlayMicDevices();
+            }
+            g_overlay.initial_mode = "record";
+            ::InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
           }
         }
@@ -1289,15 +1299,22 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
           };
           RECT mon = ScreenRectToOverlayRect(
               GetMonitorRectForScreenPoint(screen_pt));
-          if (g_overlay.initial_mode == "record") {
-            g_overlay.sel = mon;
-            g_overlay.has_selection = true;
-            g_overlay.is_full_screen_preset = true;
-            g_overlay.mode = InteractiveOverlayState::Mode::kAdjusting;
-            ::InvalidateRect(hwnd, nullptr, FALSE);
-          } else {
-            SettleOverlayCapture(mon);
-          }
+          // Gene - Nov, 13, 2026: Settle full-monitor selection on click without drag in both capture and record modes so the [Capture] / [Video] selector appears.
+          // Old implementation:
+          // if (g_overlay.initial_mode == "record") {
+          //   g_overlay.sel = mon;
+          //   g_overlay.has_selection = true;
+          //   g_overlay.is_full_screen_preset = true;
+          //   g_overlay.mode = InteractiveOverlayState::Mode::kAdjusting;
+          //   ::InvalidateRect(hwnd, nullptr, FALSE);
+          // } else {
+          //   SettleOverlayCapture(mon);
+          // }
+          g_overlay.sel = mon;
+          g_overlay.has_selection = true;
+          g_overlay.is_full_screen_preset = true;
+          g_overlay.mode = InteractiveOverlayState::Mode::kAdjusting;
+          ::InvalidateRect(hwnd, nullptr, FALSE);
           return 0;
         }
         g_overlay.mode = InteractiveOverlayState::Mode::kAdjusting;
@@ -1371,6 +1388,8 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
       int cur_mon_r = static_cast<int>(cur_mon.right);
       int cur_mon_b = static_cast<int>(cur_mon.bottom);
       int cur_mon_w = std::max(1, cur_mon_r - cur_mon_l);
+      // Gene - Nov, 13, 2026: Track monitor height to detect full-monitor selection accurately.
+      int cur_mon_h = std::max(1, static_cast<int>(cur_mon.bottom - cur_mon.top));
 
       if (!g_overlay.has_selection && g_overlay.initial_mode == "record") {
         int btn_h = 34;
@@ -1450,7 +1469,12 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
         if (g_overlay.mode == InteractiveOverlayState::Mode::kAdjusting ||
             g_overlay.mode == InteractiveOverlayState::Mode::kMoving ||
             g_overlay.mode == InteractiveOverlayState::Mode::kResizing) {
+          // Gene - Nov, 13, 2026: Reset stale button rects on mode switch and center controls cleanly above taskbar when full-monitor selected.
+          bool is_full_mon = g_overlay.is_full_screen_preset ||
+                             ((sr - sl) >= cur_mon_w - 8 &&
+                              (sb - st) >= cur_mon_h - 8);
           if (g_overlay.initial_mode == "record") {
+            g_overlay.capture_btn = {0, 0, 0, 0};
             bool has_multi_mic = g_overlay.mic_devices.size() > 1;
             int btn_h = 34;
             int w_full = 44;
@@ -1473,8 +1497,18 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
                 std::max(min_bx, std::min(g_overlay.virt_w, cur_mon_r) -
                                      total_w - 8);
             int bx = std::clamp((sl + sr - total_w) / 2, min_bx, max_bx);
-            int by = sb + 10;
-            if (by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 10) {
+            // Old implementation:
+            // int by = sb + 10;
+            // if (by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 10) {
+            //   by = std::max(10, sb - btn_h - 14);
+            // }
+            int by = is_full_mon
+                         ? std::max(12,
+                                    std::min(g_overlay.virt_h, cur_mon_b) -
+                                        btn_h - 68)
+                         : (sb + 10);
+            if (!is_full_mon &&
+                by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 10) {
               by = std::max(10, sb - btn_h - 14);
             }
 
@@ -1548,6 +1582,15 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
             DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(35, 25, 18),
                             RGB(110, 90, 78), L"X", RGB(255, 255, 255));
           } else {
+            g_overlay.tb_full_btn = {0, 0, 0, 0};
+            g_overlay.tb_1080_btn = {0, 0, 0, 0};
+            g_overlay.tb_720_btn = {0, 0, 0, 0};
+            g_overlay.fps_btn = {0, 0, 0, 0};
+            g_overlay.mic_btn = {0, 0, 0, 0};
+            g_overlay.mic_cycle_btn = {0, 0, 0, 0};
+            g_overlay.sys_audio_btn = {0, 0, 0, 0};
+            g_overlay.cursor_btn = {0, 0, 0, 0};
+            g_overlay.mode_snip_btn = {0, 0, 0, 0};
             int btn_h = 30;
             int cap_w = 88;
             int rec_w = 88;
@@ -1558,10 +1601,32 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
             int max_bx =
                 std::max(min_bx, std::min(g_overlay.virt_w, cur_mon_r) -
                                      total_w - 8);
-            int bx = std::clamp(sr - total_w, min_bx, max_bx);
-            int by = sb + 8;
-            if (by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 8) {
-              by = std::max(8, st - btn_h - 8);
+            // Gene - Nov, 13, 2026: Center [Capture] [Video] [X] above taskbar when full monitor selected, and relabel Record to Video.
+            // Old implementation:
+            // int bx = std::clamp(sr - total_w, min_bx, max_bx);
+            // int by = sb + 8;
+            // if (by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 8) {
+            //   by = std::max(8, st - btn_h - 8);
+            // }
+            int bx;
+            int by;
+            if (is_full_mon) {
+              bx = std::clamp(cur_mon_l + (cur_mon_w - total_w) / 2, min_bx,
+                              max_bx);
+              by = std::max(
+                  12, std::min(g_overlay.virt_h, cur_mon_b) - btn_h - 68);
+            } else {
+              bx = std::clamp(sr - total_w, min_bx, max_bx);
+              by = sb + 8;
+              if (by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 8) {
+                by = std::max(8, st - btn_h - 8);
+              }
+            }
+
+            if (is_full_mon) {
+              RECT tray = {bx - 10, by - 6, bx + total_w + 10, by + btn_h + 6};
+              DrawRoundedPill(mem_dc, tray, RGB(24, 18, 14), RGB(110, 90, 78),
+                              L"", RGB(255, 255, 255));
             }
 
             g_overlay.capture_btn = {bx, by, bx + cap_w, by + btn_h};
@@ -1572,8 +1637,11 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
 
             DrawRoundedPill(mem_dc, g_overlay.capture_btn, RGB(111, 78, 55),
                             RGB(160, 122, 92), L"Capture", RGB(255, 255, 255));
+            // Old implementation:
+            // DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(185, 45, 45),
+            //                 RGB(230, 85, 85), L"Record", RGB(255, 255, 255));
             DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(185, 45, 45),
-                            RGB(230, 85, 85), L"Record", RGB(255, 255, 255));
+                            RGB(230, 85, 85), L"Video", RGB(255, 255, 255));
             DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(35, 25, 18),
                             RGB(110, 90, 78), L"X", RGB(255, 255, 255));
           }
