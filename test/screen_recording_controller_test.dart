@@ -247,5 +247,45 @@ void main() {
       expect(fakeService.lastRegion, region);
       expect(fakeService.lastCountdownSeconds, 3);
     });
+
+    // Gene - Nov, 13, 2026: Regression tests for multi-monitor full-screen recording region preservation, restart, and negative display Quartz coordinate parsing.
+    test(
+      'startFullScreenRecording forwards secondary displayRegion and preserves it across restartRecording',
+      () async {
+        const secondaryDisplay = Rect.fromLTWH(-1920, 0, 1920, 1080);
+        final started = await controller.startFullScreenRecording(
+          displayRegion: secondaryDisplay,
+          countdownSeconds: 3,
+        );
+        expect(started, isTrue);
+        expect(controller.isFullScreen, isTrue);
+        expect(controller.activeRegion, secondaryDisplay);
+        expect(fakeService.lastFullScreen, isTrue);
+        expect(fakeService.lastRegion, secondaryDisplay);
+
+        final restarted = await controller.restartRecording(countdownSeconds: 3);
+        expect(restarted, isTrue);
+        expect(fakeService.cancelCalls, 1);
+        expect(fakeService.lastFullScreen, isTrue);
+        expect(fakeService.lastRegion, secondaryDisplay);
+      },
+    );
+
+    test(
+      'OverlayRecordRequest.tryParse parses negative secondary-monitor fullScreen bounds',
+      () {
+        final req = OverlayRecordRequest.tryParse(
+          'record:-1920.0:0.0:1920.0:1080.0:60:1:1:1:1:1:mic_usb',
+        );
+        expect(req, isNotNull);
+        expect(req!.x, -1920.0);
+        expect(req.y, 0.0);
+        expect(req.width, 1920.0);
+        expect(req.height, 1080.0);
+        expect(req.fps, 60);
+        expect(req.fullScreen, isTrue);
+        expect(req.microphoneDeviceId, 'mic_usb');
+      },
+    );
   });
 }

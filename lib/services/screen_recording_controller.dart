@@ -239,9 +239,46 @@ class ScreenRecordingController extends ChangeNotifier {
   //   _beginTimerState();
   //   return true;
   // }
+  // Gene - Nov, 13, 2026: Accept optional displayRegion in startFullScreenRecording and preserve _activeRegion across restartRecording for multi-monitor full-screen capture.
+  // Old implementation:
+  // Future<bool> startFullScreenRecording({
+  //   int? fps,
+  //   int countdownSeconds = 0,
+  // }) async {
+  //   if (isRecording || isStopping) return false;
+  //   final effectiveFps = fps ?? _fps;
+  //   final targetPath = await captureService.generateNewMediaPath(
+  //     prefix: 'rec',
+  //     extension: 'mp4',
+  //   );
+  //   final thumbnailPath = await captureService.generateNewThumbnailPath(
+  //     prefix: 'rec_thumb',
+  //   );
+  //
+  //   final ok = await captureService.startScreenRecording(
+  //     targetPath: targetPath,
+  //     thumbnailPath: thumbnailPath,
+  //     fullScreen: true,
+  //     fps: effectiveFps,
+  //     recordAudio: _recordMicrophone,
+  //     microphoneDeviceId: _selectedMicrophoneId,
+  //     recordSystemAudio: _recordSystemAudio,
+  //     recordCursor: _recordCursor,
+  //     highlightClicks: _highlightClicks,
+  //     countdownSeconds: countdownSeconds,
+  //   );
+  //   if (!ok) return false;
+  //
+  //   _isFullScreen = true;
+  //   _activeRegion = null;
+  //   _isMicrophoneMuted = false;
+  //   _beginTimerState(countdownDelaySeconds: countdownSeconds);
+  //   return true;
+  // }
   Future<bool> startFullScreenRecording({
     int? fps,
     int countdownSeconds = 0,
+    Rect? displayRegion,
   }) async {
     if (isRecording || isStopping) return false;
     final effectiveFps = fps ?? _fps;
@@ -257,6 +294,7 @@ class ScreenRecordingController extends ChangeNotifier {
       targetPath: targetPath,
       thumbnailPath: thumbnailPath,
       fullScreen: true,
+      region: displayRegion,
       fps: effectiveFps,
       recordAudio: _recordMicrophone,
       microphoneDeviceId: _selectedMicrophoneId,
@@ -268,7 +306,7 @@ class ScreenRecordingController extends ChangeNotifier {
     if (!ok) return false;
 
     _isFullScreen = true;
-    _activeRegion = null;
+    _activeRegion = displayRegion;
     _isMicrophoneMuted = false;
     _beginTimerState(countdownDelaySeconds: countdownSeconds);
     return true;
@@ -319,9 +357,17 @@ class ScreenRecordingController extends ChangeNotifier {
     _uiTimer = null;
     await captureService.cancelScreenRecording();
     _resetToIdle();
+    // Gene - Nov, 13, 2026: Preserve secondary-monitor displayRegion when restarting a full-screen recording.
+    // Old implementation:
+    // if (wasFullScreen || region == null) {
+    //   return await startFullScreenRecording(
+    //     countdownSeconds: countdownSeconds,
+    //   );
+    // }
     if (wasFullScreen || region == null) {
       return await startFullScreenRecording(
         countdownSeconds: countdownSeconds,
+        displayRegion: region,
       );
     }
     return await startAreaRecording(

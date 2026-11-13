@@ -2,6 +2,8 @@
 # Old implementation:
 # platform :osx, '12.0'
 platform :osx, '13.0'
+# Gene - Nov, 13, 2026: Suppress third-party CocoaPods compiler warnings (e.g., HotKey Swift conformance warning).
+inhibit_all_warnings!
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -38,8 +40,19 @@ target 'Runner' do
   end
 end
 
+# Gene - Nov, 13, 2026: Suppress third-party CocoaPods C/Swift compiler warnings in all Pod target build configurations.
+# Old implementation:
+# post_install do |installer|
+#   installer.pods_project.targets.each do |target|
+#     flutter_additional_macos_build_settings(target)
+#   end
+# end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+      config.build_settings['SWIFT_SUPPRESS_WARNINGS'] = 'YES'
+    end
   end
 end

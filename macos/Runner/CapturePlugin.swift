@@ -22,6 +22,11 @@ struct OverlayRecordOptions {
   var isFullScreen: Bool = false
 }
 
+// Gene - Nov, 13, 2026: Lightweight @unchecked Sendable wrapper for non-Sendable AVAssetExportSession across completion closures.
+private struct UncheckedSendableBox<T>: @unchecked Sendable {
+  let value: T
+}
+
 /// Native macOS Screen Capture Plugin.
 /// Provides interactive screen capture overlay where:
 /// - Clicking once (without drag) captures the whole screen.
@@ -67,8 +72,9 @@ class CapturePlugin: NSObject {
   private var scrollingLocalKeyMonitor: Any?
 
   // Gene - Nov, 08, 2026: Added screen recording session state and floating recording HUD windows.
-  // Gene - Nov, 13, 2026: Added main-window hide guard, 3-2-1 countdown window, click-highlight window, menu-bar stop item, and native FlutterTexture video players.
+  // Gene - Nov, 13, 2026: Added main-window hide guard, lastHiddenMainWindowScreen tracker, 3-2-1 countdown window, click-highlight window, menu-bar stop item, and native FlutterTexture video players.
   private var isMainWindowHiddenForCapture: Bool = false
+  private weak var lastHiddenMainWindowScreen: NSScreen?
   private var countdownWindow: CountdownOverlayWindow?
   private var countdownTimer: DispatchSourceTimer?
   private var countdownEscapeLocalMonitor: Any?
@@ -357,11 +363,23 @@ class CapturePlugin: NSObject {
           return
         }
         let mainWin = NSApp.windows.first(where: { !($0 is NSPanel) }) ?? NSApp.windows.first
+        // Gene - Nov, 13, 2026: Capture the main window's NSScreen before ordering it out so fallback full-screen recording honors the monitor where SnipSnap was open.
+        // Old implementation:
+        // if visible {
+        //   self.isMainWindowHiddenForCapture = false
+        //   mainWin?.makeKeyAndOrderFront(nil)
+        //   NSApp.activate(ignoringOtherApps: true)
+        // } else {
+        //   self.isMainWindowHiddenForCapture = true
+        //   mainWin?.orderOut(nil)
+        // }
         if visible {
           self.isMainWindowHiddenForCapture = false
+          self.lastHiddenMainWindowScreen = nil
           mainWin?.makeKeyAndOrderFront(nil)
           NSApp.activate(ignoringOtherApps: true)
         } else {
+          self.lastHiddenMainWindowScreen = mainWin?.screen
           self.isMainWindowHiddenForCapture = true
           mainWin?.orderOut(nil)
         }
@@ -700,13 +718,20 @@ class CapturePlugin: NSObject {
         overlayWindow.orderFrontRegardless()
       }
 
-      // Ensure first overlay window is key window to receive events
+      // Ensure overlay window on the cursor's current screen is key window to receive events
       // Deliberately no `NSApp.activate`. Activating a regular app brings its
       // main window's Space forward, which is the desktop — so it would switch
       // the user away from the full-screen app they meant to capture. The
       // non-activating panel takes key on its own, which is all the cancel
       // keys need.
-      self.activeWindows.first?.makeKey()
+      // Gene - Nov, 13, 2026: Make the overlay panel on the cursor's current screen key instead of blindly picking activeWindows.first.
+      // Old implementation:
+      // self.activeWindows.first?.makeKey()
+      let mouseLoc = NSEvent.mouseLocation
+      let cursorOverlayWindow = self.activeWindows.first(where: {
+        NSMouseInRect(mouseLoc, $0.frame, false) || $0.frame.contains(mouseLoc)
+      })
+      (cursorOverlayWindow ?? self.activeWindows.first)?.makeKey()
 
       // Escape cancels; every other key is passed through so the overlay can
       // act on it. These used to cancel on *any* key press, which was fine
@@ -969,6 +994,42 @@ class CapturePlugin: NSObject {
     )
   }
 
+  // Gene - Nov, 13, 2026: Resolve target NSScreen accurately across monitors using Quartz point containment, largest intersection area, mouse cursor location, or last hidden main-window screen.
+  private func resolveTargetScreen(forQuartzRect rect: CGRect) -> NSScreen {
+    let screens = NSScreen.screens
+    if rect.width >= 10 && rect.height >= 10 {
+      let midPt = CGPoint(x: rect.midX, y: rect.midY)
+      for scr in screens {
+        if quartzRect(for: scr).contains(midPt) {
+          return scr
+        }
+      }
+      var bestScreen: NSScreen?
+      var bestArea: CGFloat = 0
+      for scr in screens {
+        let inter = quartzRect(for: scr).intersection(rect)
+        if !inter.isNull {
+          let area = inter.width * inter.height
+          if area > bestArea {
+            bestArea = area
+            bestScreen = scr
+          }
+        }
+      }
+      if let best = bestScreen {
+        return best
+      }
+    }
+
+    let mousePt = NSEvent.mouseLocation
+    for scr in screens {
+      if NSMouseInRect(mousePt, scr.frame, false) || scr.frame.contains(mousePt) {
+        return scr
+      }
+    }
+    return lastHiddenMainWindowScreen ?? NSScreen.main ?? screens.first!
+  }
+
   private func startNativeScreenRecording(
     targetPath: String,
     thumbnailPath: String,
@@ -990,10 +1051,13 @@ class CapturePlugin: NSObject {
         return
       }
 
-      let probePoint = (rect.width >= 10 && rect.height >= 10)
-        ? CGPoint(x: rect.midX, y: rect.midY)
-        : CGPoint.zero
-      let targetScreen = self.screenForQuartzPoint(probePoint)
+      // Gene - Nov, 13, 2026: Resolve target screen across multi-monitor setups instead of probing (0,0) when a display region isn't specified.
+      // Old implementation:
+      // let probePoint = (rect.width >= 10 && rect.height >= 10)
+      //   ? CGPoint(x: rect.midX, y: rect.midY)
+      //   : CGPoint.zero
+      // let targetScreen = self.screenForQuartzPoint(probePoint)
+      let targetScreen = self.resolveTargetScreen(forQuartzRect: rect)
       let scale = targetScreen.backingScaleFactor
       let screenQuartz = self.quartzRect(for: targetScreen)
 
@@ -1198,6 +1262,8 @@ class CapturePlugin: NSObject {
 
   private func restoreMainWindowIfHidden() {
     isMainWindowHiddenForCapture = false
+    // Gene - Nov, 13, 2026: Clear tracked hidden main window screen when restoring visibility.
+    lastHiddenMainWindowScreen = nil
     let mainWin = NSApp.windows.first(where: { !($0 is NSPanel) }) ?? NSApp.windows.first
     mainWin?.makeKeyAndOrderFront(nil)
     NSApp.activate(ignoringOtherApps: true)
@@ -1424,6 +1490,78 @@ class CapturePlugin: NSObject {
     }
   }
 
+  // Gene - Nov, 13, 2026: Replaced deprecated synchronous AVAsset/AVAssetTrack property accesses with async asset.load(...) / loadTracks(...) APIs (macOS 13.0+).
+  // Old implementation:
+  // private func cutVideoFile(
+  //   videoPath: String,
+  //   cutStartMs: Int64,
+  //   cutEndMs: Int64,
+  //   targetPath: String,
+  //   result: @escaping FlutterResult
+  // ) {
+  //   let inputURL = URL(fileURLWithPath: videoPath)
+  //   let outputURL = URL(fileURLWithPath: targetPath)
+  //   try? FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+  //   try? FileManager.default.removeItem(at: outputURL)
+  //
+  //   let asset = AVURLAsset(url: inputURL)
+  //   let totalDuration = asset.duration
+  //   let totalMs = Int64((CMTimeGetSeconds(totalDuration) * 1000.0).rounded())
+  //   let clampedStart = max(Int64(0), min(cutStartMs, totalMs))
+  //   let clampedEnd = max(clampedStart, min(cutEndMs, totalMs))
+  //
+  //   let composition = AVMutableComposition()
+  //   guard let videoTrack = asset.tracks(withMediaType: .video).first,
+  //         let compVideo = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+  //   else {
+  //     result(nil)
+  //     return
+  //   }
+  //   compVideo.preferredTransform = videoTrack.preferredTransform
+  //
+  //   let compAudio = asset.tracks(withMediaType: .audio).first.flatMap { _ in
+  //     composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+  //   }
+  //
+  //   var cursorTime = CMTime.zero
+  //   if clampedStart > 20 {
+  //     let headRange = CMTimeRange(start: .zero, duration: CMTime(value: clampedStart, timescale: 1000))
+  //     try? compVideo.insertTimeRange(headRange, of: videoTrack, at: cursorTime)
+  //     if let srcAudio = asset.tracks(withMediaType: .audio).first, let dstAudio = compAudio {
+  //       try? dstAudio.insertTimeRange(headRange, of: srcAudio, at: cursorTime)
+  //     }
+  //     cursorTime = CMTimeAdd(cursorTime, headRange.duration)
+  //   }
+  //
+  //   if totalMs - clampedEnd > 20 {
+  //     let tailStart = CMTime(value: clampedEnd, timescale: 1000)
+  //     let tailRange = CMTimeRange(start: tailStart, duration: CMTimeSubtract(totalDuration, tailStart))
+  //     try? compVideo.insertTimeRange(tailRange, of: videoTrack, at: cursorTime)
+  //     if let srcAudio = asset.tracks(withMediaType: .audio).first, let dstAudio = compAudio {
+  //       try? dstAudio.insertTimeRange(tailRange, of: srcAudio, at: cursorTime)
+  //     }
+  //     cursorTime = CMTimeAdd(cursorTime, tailRange.duration)
+  //   }
+  //
+  //   let outDurationMs = Int((CMTimeGetSeconds(cursorTime) * 1000.0).rounded())
+  //   guard outDurationMs >= 100,
+  //         let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality)
+  //   else {
+  //     result(nil)
+  //     return
+  //   }
+  //   exportSession.outputURL = outputURL
+  //   exportSession.outputFileType = .mp4
+  //   exportSession.exportAsynchronously {
+  //     DispatchQueue.main.async {
+  //       if exportSession.status == .completed {
+  //         result(["filePath": targetPath, "durationMs": outDurationMs])
+  //       } else {
+  //         result(nil)
+  //       }
+  //     }
+  //   }
+  // }
   private func cutVideoFile(
     videoPath: String,
     cutStartMs: Int64,
@@ -1436,61 +1574,82 @@ class CapturePlugin: NSObject {
     try? FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     try? FileManager.default.removeItem(at: outputURL)
 
-    let asset = AVURLAsset(url: inputURL)
-    let totalDuration = asset.duration
-    let totalMs = Int64((CMTimeGetSeconds(totalDuration) * 1000.0).rounded())
-    let clampedStart = max(Int64(0), min(cutStartMs, totalMs))
-    let clampedEnd = max(clampedStart, min(cutEndMs, totalMs))
+    Task {
+      do {
+        let asset = AVURLAsset(url: inputURL)
+        let totalDuration = try await asset.load(.duration)
+        let totalMs = Int64((CMTimeGetSeconds(totalDuration) * 1000.0).rounded())
+        let clampedStart = max(Int64(0), min(cutStartMs, totalMs))
+        let clampedEnd = max(clampedStart, min(cutEndMs, totalMs))
 
-    let composition = AVMutableComposition()
-    guard let videoTrack = asset.tracks(withMediaType: .video).first,
-          let compVideo = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
-    else {
-      result(nil)
-      return
-    }
-    compVideo.preferredTransform = videoTrack.preferredTransform
-
-    let compAudio = asset.tracks(withMediaType: .audio).first.flatMap { _ in
-      composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
-    }
-
-    var cursorTime = CMTime.zero
-    if clampedStart > 20 {
-      let headRange = CMTimeRange(start: .zero, duration: CMTime(value: clampedStart, timescale: 1000))
-      try? compVideo.insertTimeRange(headRange, of: videoTrack, at: cursorTime)
-      if let srcAudio = asset.tracks(withMediaType: .audio).first, let dstAudio = compAudio {
-        try? dstAudio.insertTimeRange(headRange, of: srcAudio, at: cursorTime)
-      }
-      cursorTime = CMTimeAdd(cursorTime, headRange.duration)
-    }
-
-    if totalMs - clampedEnd > 20 {
-      let tailStart = CMTime(value: clampedEnd, timescale: 1000)
-      let tailRange = CMTimeRange(start: tailStart, duration: CMTimeSubtract(totalDuration, tailStart))
-      try? compVideo.insertTimeRange(tailRange, of: videoTrack, at: cursorTime)
-      if let srcAudio = asset.tracks(withMediaType: .audio).first, let dstAudio = compAudio {
-        try? dstAudio.insertTimeRange(tailRange, of: srcAudio, at: cursorTime)
-      }
-      cursorTime = CMTimeAdd(cursorTime, tailRange.duration)
-    }
-
-    let outDurationMs = Int((CMTimeGetSeconds(cursorTime) * 1000.0).rounded())
-    guard outDurationMs >= 100,
-          let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality)
-    else {
-      result(nil)
-      return
-    }
-    exportSession.outputURL = outputURL
-    exportSession.outputFileType = .mp4
-    exportSession.exportAsynchronously {
-      DispatchQueue.main.async {
-        if exportSession.status == .completed {
-          result(["filePath": targetPath, "durationMs": outDurationMs])
-        } else {
-          result(nil)
+        let composition = AVMutableComposition()
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        guard let videoTrack = videoTracks.first,
+              let compVideo = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+        else {
+          DispatchQueue.main.async { result(nil) }
+          return
         }
+        compVideo.preferredTransform = try await videoTrack.load(.preferredTransform)
+
+        let audioTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
+        let srcAudio = audioTracks.first
+        let compAudio = srcAudio != nil
+          ? composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+          : nil
+
+        var cursorTime = CMTime.zero
+        if clampedStart > 20 {
+          let headRange = CMTimeRange(start: .zero, duration: CMTime(value: clampedStart, timescale: 1000))
+          try? compVideo.insertTimeRange(headRange, of: videoTrack, at: cursorTime)
+          if let sAudio = srcAudio, let dstAudio = compAudio {
+            try? dstAudio.insertTimeRange(headRange, of: sAudio, at: cursorTime)
+          }
+          cursorTime = CMTimeAdd(cursorTime, headRange.duration)
+        }
+
+        if totalMs - clampedEnd > 20 {
+          let tailStart = CMTime(value: clampedEnd, timescale: 1000)
+          let tailRange = CMTimeRange(start: tailStart, duration: CMTimeSubtract(totalDuration, tailStart))
+          try? compVideo.insertTimeRange(tailRange, of: videoTrack, at: cursorTime)
+          if let sAudio = srcAudio, let dstAudio = compAudio {
+            try? dstAudio.insertTimeRange(tailRange, of: sAudio, at: cursorTime)
+          }
+          cursorTime = CMTimeAdd(cursorTime, tailRange.duration)
+        }
+
+        let outDurationMs = Int((CMTimeGetSeconds(cursorTime) * 1000.0).rounded())
+        guard outDurationMs >= 100,
+              let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality)
+        else {
+          DispatchQueue.main.async { result(nil) }
+          return
+        }
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .mp4
+        // Gene - Nov, 13, 2026: Wrap AVAssetExportSession in UncheckedSendableBox so the @Sendable completion closure compiles without Sendable capture warnings.
+        // Old implementation:
+        // exportSession.exportAsynchronously {
+        //   DispatchQueue.main.async {
+        //     if exportSession.status == .completed {
+        //       result(["filePath": targetPath, "durationMs": outDurationMs])
+        //     } else {
+        //       result(nil)
+        //     }
+        //   }
+        // }
+        let exportBox = UncheckedSendableBox(value: exportSession)
+        exportBox.value.exportAsynchronously {
+          DispatchQueue.main.async {
+            if exportBox.value.status == .completed {
+              result(["filePath": targetPath, "durationMs": outDurationMs])
+            } else {
+              result(nil)
+            }
+          }
+        }
+      } catch {
+        DispatchQueue.main.async { result(nil) }
       }
     }
   }
@@ -1504,69 +1663,85 @@ class CapturePlugin: NSObject {
     maxWidth: Int,
     result: @escaping FlutterResult
   ) {
-    DispatchQueue.global(qos: .userInitiated).async {
+    // Gene - Nov, 13, 2026: Load asset duration via async try await asset.load(.duration) before dispatching synchronous CGImage extraction on a background GCD queue.
+    // Old implementation:
+    // DispatchQueue.global(qos: .userInitiated).async {
+    //   let inputURL = URL(fileURLWithPath: videoPath)
+    //   let outputURL = URL(fileURLWithPath: targetPath)
+    //   try? FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    //   try? FileManager.default.removeItem(at: outputURL)
+    //
+    //   let asset = AVURLAsset(url: inputURL)
+    //   let durationTotalMs = Int64((CMTimeGetSeconds(asset.duration) * 1000.0).rounded())
+    Task {
       let inputURL = URL(fileURLWithPath: videoPath)
-      let outputURL = URL(fileURLWithPath: targetPath)
-      try? FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-      try? FileManager.default.removeItem(at: outputURL)
-
       let asset = AVURLAsset(url: inputURL)
-      let durationTotalMs = Int64((CMTimeGetSeconds(asset.duration) * 1000.0).rounded())
-      let effectiveStart = max(Int64(0), startMs)
-      let effectiveEnd = min(durationTotalMs, endMs > effectiveStart ? endMs : durationTotalMs)
-      let spanMs = max(Int64(100), effectiveEnd - effectiveStart)
-      let clampedFps = max(5, min(25, fps))
-      let stepMs = max(Int64(40), Int64(1000 / clampedFps))
-      let frameCount = min(300, max(1, Int(spanMs / stepMs) + 1))
-
-      let generator = AVAssetImageGenerator(asset: asset)
-      generator.appliesPreferredTrackTransform = true
-      generator.requestedTimeToleranceBefore = CMTime(value: stepMs / 2, timescale: 1000)
-      generator.requestedTimeToleranceAfter = CMTime(value: stepMs / 2, timescale: 1000)
-      if maxWidth > 0 {
-        generator.maximumSize = CGSize(width: CGFloat(maxWidth), height: CGFloat(maxWidth))
-      } else {
-        generator.maximumSize = CGSize(width: 1280, height: 1280)
-      }
-
-      guard let dest = CGImageDestinationCreateWithURL(
-        outputURL as CFURL,
-        UTType.gif.identifier as CFString,
-        frameCount,
-        nil
-      ) else {
+      guard let loadedDuration = try? await asset.load(.duration) else {
         DispatchQueue.main.async { result(nil) }
         return
       }
+      DispatchQueue.global(qos: .userInitiated).async {
+        let outputURL = URL(fileURLWithPath: targetPath)
+        try? FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: outputURL)
 
-      let fileProps: [String: Any] = [
-        kCGImagePropertyGIFDictionary as String: [
-          kCGImagePropertyGIFLoopCount as String: 0
-        ]
-      ]
-      CGImageDestinationSetProperties(dest, fileProps as CFDictionary)
+        let durationTotalMs = Int64((CMTimeGetSeconds(loadedDuration) * 1000.0).rounded())
+        let effectiveStart = max(Int64(0), startMs)
+        let effectiveEnd = min(durationTotalMs, endMs > effectiveStart ? endMs : durationTotalMs)
+        let spanMs = max(Int64(100), effectiveEnd - effectiveStart)
+        let clampedFps = max(5, min(25, fps))
+        let stepMs = max(Int64(40), Int64(1000 / clampedFps))
+        let frameCount = min(300, max(1, Int(spanMs / stepMs) + 1))
 
-      let delaySeconds = Double(stepMs) / 1000.0
-      let frameProps: [String: Any] = [
-        kCGImagePropertyGIFDictionary as String: [
-          kCGImagePropertyGIFDelayTime as String: delaySeconds,
-          kCGImagePropertyGIFUnclampedDelayTime as String: delaySeconds
-        ]
-      ]
-
-      var added = 0
-      for idx in 0..<frameCount {
-        let ts = min(effectiveEnd, effectiveStart + Int64(idx) * stepMs)
-        let cm = CMTime(value: ts, timescale: 1000)
-        if let frameImg = try? generator.copyCGImage(at: cm, actualTime: nil) {
-          CGImageDestinationAddImage(dest, frameImg, frameProps as CFDictionary)
-          added += 1
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = CMTime(value: stepMs / 2, timescale: 1000)
+        generator.requestedTimeToleranceAfter = CMTime(value: stepMs / 2, timescale: 1000)
+        if maxWidth > 0 {
+          generator.maximumSize = CGSize(width: CGFloat(maxWidth), height: CGFloat(maxWidth))
+        } else {
+          generator.maximumSize = CGSize(width: 1280, height: 1280)
         }
-      }
 
-      let finalized = added > 0 && CGImageDestinationFinalize(dest)
-      DispatchQueue.main.async {
-        result(finalized ? targetPath : nil)
+        guard let dest = CGImageDestinationCreateWithURL(
+          outputURL as CFURL,
+          UTType.gif.identifier as CFString,
+          frameCount,
+          nil
+        ) else {
+          DispatchQueue.main.async { result(nil) }
+          return
+        }
+
+        let fileProps: [String: Any] = [
+          kCGImagePropertyGIFDictionary as String: [
+            kCGImagePropertyGIFLoopCount as String: 0
+          ]
+        ]
+        CGImageDestinationSetProperties(dest, fileProps as CFDictionary)
+
+        let delaySeconds = Double(stepMs) / 1000.0
+        let frameProps: [String: Any] = [
+          kCGImagePropertyGIFDictionary as String: [
+            kCGImagePropertyGIFDelayTime as String: delaySeconds,
+            kCGImagePropertyGIFUnclampedDelayTime as String: delaySeconds
+          ]
+        ]
+
+        var added = 0
+        for idx in 0..<frameCount {
+          let ts = min(effectiveEnd, effectiveStart + Int64(idx) * stepMs)
+          let cm = CMTime(value: ts, timescale: 1000)
+          if let frameImg = try? generator.copyCGImage(at: cm, actualTime: nil) {
+            CGImageDestinationAddImage(dest, frameImg, frameProps as CFDictionary)
+            added += 1
+          }
+        }
+
+        let finalized = added > 0 && CGImageDestinationFinalize(dest)
+        DispatchQueue.main.async {
+          result(finalized ? targetPath : nil)
+        }
       }
     }
   }
@@ -1757,6 +1932,13 @@ private class CaptureOverlayWindow: NSPanel {
       onCancel: onCancel
     )
     self.contentView = view
+    // Gene - Nov, 13, 2026: Ensure borderless overlay stays on the exact target screen without AppKit constraining its frame to the main display.
+    self.setFrame(screen.frame, display: true)
+  }
+
+  // Gene - Nov, 13, 2026: Bypass AppKit constrainFrameRect so panels on secondary monitors never snap onto the primary screen.
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    return frameRect
   }
 
   func stopOverlayResources() {
@@ -2424,6 +2606,8 @@ private class CaptureOverlayView: NSView {
   }
   */
   override func mouseDown(with event: NSEvent) {
+    // Gene - Nov, 13, 2026: Promote clicked monitor's overlay window to key so Return/Space shortcuts act on the active screen.
+    self.window?.makeKey()
     let pt = convert(event.locationInWindow, from: nil)
     dragOrigin = pt
 
@@ -3468,6 +3652,13 @@ private class ScrollingGuideWindow: NSPanel {
 
     let view = ScrollingGuideView(frame: NSRect(origin: .zero, size: contentRect.size))
     self.contentView = view
+    // Gene - Nov, 13, 2026: Apply explicit contentRect frame so multi-monitor guide overlays aren't clamped to main display.
+    self.setFrame(contentRect, display: true)
+  }
+
+  // Gene - Nov, 13, 2026: Bypass AppKit constrainFrameRect for secondary-monitor guide frames.
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    return frameRect
   }
 
   override var canBecomeKey: Bool { return false }
@@ -4184,6 +4375,13 @@ private final class CountdownOverlayWindow: NSPanel {
     self.sharingType = .none
     self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
     self.contentView = view
+    // Gene - Nov, 13, 2026: Apply explicit contentRect frame so 3-2-1 countdown appears centered on the selected secondary screen.
+    self.setFrame(contentRect, display: true)
+  }
+
+  // Gene - Nov, 13, 2026: Bypass AppKit constrainFrameRect so countdown panel stays on target screen.
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    return frameRect
   }
 
   func updateValue(_ val: Int) {
@@ -4266,6 +4464,8 @@ private final class ClickHighlightOverlayWindow: NSPanel {
     self.sharingType = .readOnly
     self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
     self.contentView = view
+    // Gene - Nov, 13, 2026: Ensure click-highlight overlay stays on target secondary monitor.
+    self.setFrame(screen.frame, display: true)
 
     self.globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
       self?.hlView.triggerPulse(atScreenPoint: NSEvent.mouseLocation)
@@ -4290,6 +4490,11 @@ private final class ClickHighlightOverlayWindow: NSPanel {
 
   deinit {
     stopMonitoring()
+  }
+
+  // Gene - Nov, 13, 2026: Bypass AppKit constrainFrameRect for secondary-monitor click highlights.
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    return frameRect
   }
 
   override var canBecomeKey: Bool { return false }
@@ -4970,7 +5175,11 @@ private final class MacScreenRecordingSession: NSObject, SCStreamOutput, SCStrea
         saveThumbnailPixelBuffer(pixBuf, toPath: thumbnailPath)
       }
       appendPixelBuffer(pixBuf, atMs: elapsed)
-    @unknown default:
+    // Gene - Nov, 13, 2026: Use default branch so newer SCStreamOutputType cases (e.g., .microphone) are handled exhaustively without compiler warning.
+    // Old implementation:
+    // @unknown default:
+    //   break
+    default:
       break
     }
   }
@@ -5130,6 +5339,13 @@ private class RecordingHudWindow: NSPanel {
       onCancel: onCancel
     )
     self.contentView = view
+    // Gene - Nov, 13, 2026: Ensure floating recording HUD pill stays on the recorded display.
+    self.setFrame(contentRect, display: true)
+  }
+
+  // Gene - Nov, 13, 2026: Bypass AppKit constrainFrameRect so recording HUD on secondary monitors isn't pushed to main screen.
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    return frameRect
   }
 
   override var canBecomeKey: Bool { return true }
@@ -5359,7 +5575,10 @@ private class RecordingHudView: NSView {
 
 // MARK: - 60fps Native Video Player Texture (AVPlayer + AVPlayerItemVideoOutput + FlutterTexture)
 
-private final class MacVideoTexturePlayer: NSObject, FlutterTexture {
+// Gene - Nov, 13, 2026: Declare @unchecked Sendable on MacVideoTexturePlayer (thread-safe via NSLock and main-queue player isolation) to silence Sendable closure warnings in async prepare().
+// Old implementation:
+// private final class MacVideoTexturePlayer: NSObject, FlutterTexture {
+private final class MacVideoTexturePlayer: NSObject, FlutterTexture, @unchecked Sendable {
   private let videoURL: URL
   private weak var registry: FlutterTextureRegistry?
   private let onProgress: (Int64, Int, Bool) -> Void
@@ -5392,74 +5611,154 @@ private final class MacVideoTexturePlayer: NSObject, FlutterTexture {
     super.init()
   }
 
+  // Gene - Nov, 13, 2026: Replaced deprecated AVAsset.loadValuesAsynchronously / statusOfValue / duration / tracks / naturalSize / preferredTransform with async asset.load(...) APIs (macOS 13.0+).
+  // Old implementation:
+  // func prepare(completion: @escaping ([String: Any]?) -> Void) {
+  //   let asset = AVURLAsset(url: videoURL)
+  //   asset.loadValuesAsynchronously(forKeys: ["tracks", "duration"]) { [weak self] in
+  //     guard let strongSelf = self, !strongSelf.isDisposed else {
+  //       completion(nil)
+  //       return
+  //     }
+  //     var loadErr: NSError?
+  //     let status = asset.statusOfValue(forKey: "tracks", error: &loadErr)
+  //     guard status == .loaded, let vTrack = asset.tracks(withMediaType: .video).first else {
+  //       completion(nil)
+  //       return
+  //     }
+  //
+  //     let durMs = max(0, Int((CMTimeGetSeconds(asset.duration) * 1000.0).rounded()))
+  //     strongSelf.totalDurationMs = durMs
+  //     let transformed = vTrack.naturalSize.applying(vTrack.preferredTransform)
+  //     let widthPx = max(1, Int(abs(transformed.width).rounded()))
+  //     let heightPx = max(1, Int(abs(transformed.height).rounded()))
+  //     let hasAudioTrack = !asset.tracks(withMediaType: .audio).isEmpty
+  //
+  //     let outputAttrs: [String: Any] = [
+  //       kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+  //       kCVPixelBufferMetalCompatibilityKey as String: true,
+  //       kCVPixelBufferIOSurfacePropertiesKey as String: [:]
+  //     ]
+  //     let vOut = AVPlayerItemVideoOutput(pixelBufferAttributes: outputAttrs)
+  //     let item = AVPlayerItem(asset: asset)
+  //     item.add(vOut)
+  //
+  //     DispatchQueue.main.async {
+  //       guard let reg = strongSelf.registry, !strongSelf.isDisposed else {
+  //         completion(nil)
+  //         return
+  //       }
+  //       let pl = AVPlayer(playerItem: item)
+  //       strongSelf.videoOutput = vOut
+  //       strongSelf.playerItem = item
+  //       strongSelf.player = pl
+  //       let tid = reg.register(strongSelf)
+  //       strongSelf.textureId = tid
+  //
+  //       strongSelf.endObserver = NotificationCenter.default.addObserver(
+  //         forName: .AVPlayerItemDidPlayToEndTime,
+  //         object: item,
+  //         queue: .main
+  //       ) { [weak self] _ in
+  //         guard let innerSelf = self, !innerSelf.isDisposed else { return }
+  //         innerSelf.isPlaying = false
+  //         innerSelf.stopFrameTimer()
+  //         innerSelf.pullCurrentFrame(forceProgress: true)
+  //         innerSelf.onCompleted(innerSelf.textureId)
+  //       }
+  //
+  //       // Pull initial frame at t = 0 once item is ready
+  //       pl.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+  //         DispatchQueue.main.async {
+  //           self?.pullCurrentFrame(forceProgress: true)
+  //         }
+  //       }
+  //
+  //       completion([
+  //         "textureId": tid,
+  //         "durationMs": durMs,
+  //         "width": widthPx,
+  //         "height": heightPx,
+  //         "hasAudio": hasAudioTrack
+  //       ])
+  //     }
+  //   }
+  // }
   func prepare(completion: @escaping ([String: Any]?) -> Void) {
     let asset = AVURLAsset(url: videoURL)
-    asset.loadValuesAsynchronously(forKeys: ["tracks", "duration"]) { [weak self] in
+    Task { [weak self] in
       guard let strongSelf = self, !strongSelf.isDisposed else {
         completion(nil)
         return
       }
-      var loadErr: NSError?
-      let status = asset.statusOfValue(forKey: "tracks", error: &loadErr)
-      guard status == .loaded, let vTrack = asset.tracks(withMediaType: .video).first else {
-        completion(nil)
-        return
-      }
-
-      let durMs = max(0, Int((CMTimeGetSeconds(asset.duration) * 1000.0).rounded()))
-      strongSelf.totalDurationMs = durMs
-      let transformed = vTrack.naturalSize.applying(vTrack.preferredTransform)
-      let widthPx = max(1, Int(abs(transformed.width).rounded()))
-      let heightPx = max(1, Int(abs(transformed.height).rounded()))
-      let hasAudioTrack = !asset.tracks(withMediaType: .audio).isEmpty
-
-      let outputAttrs: [String: Any] = [
-        kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
-        kCVPixelBufferMetalCompatibilityKey as String: true,
-        kCVPixelBufferIOSurfacePropertiesKey as String: [:]
-      ]
-      let vOut = AVPlayerItemVideoOutput(pixelBufferAttributes: outputAttrs)
-      let item = AVPlayerItem(asset: asset)
-      item.add(vOut)
-
-      DispatchQueue.main.async {
-        guard let reg = strongSelf.registry, !strongSelf.isDisposed else {
+      do {
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        guard let vTrack = videoTracks.first, !strongSelf.isDisposed else {
           completion(nil)
           return
         }
-        let pl = AVPlayer(playerItem: item)
-        strongSelf.videoOutput = vOut
-        strongSelf.playerItem = item
-        strongSelf.player = pl
-        let tid = reg.register(strongSelf)
-        strongSelf.textureId = tid
+        let rawDuration = try await asset.load(.duration)
+        let natSize = try await vTrack.load(.naturalSize)
+        let prefTransform = try await vTrack.load(.preferredTransform)
+        let audioTracks = (try? await asset.loadTracks(withMediaType: .audio)) ?? []
 
-        strongSelf.endObserver = NotificationCenter.default.addObserver(
-          forName: .AVPlayerItemDidPlayToEndTime,
-          object: item,
-          queue: .main
-        ) { [weak self] _ in
-          guard let innerSelf = self, !innerSelf.isDisposed else { return }
-          innerSelf.isPlaying = false
-          innerSelf.stopFrameTimer()
-          innerSelf.pullCurrentFrame(forceProgress: true)
-          innerSelf.onCompleted(innerSelf.textureId)
-        }
+        let durMs = max(0, Int((CMTimeGetSeconds(rawDuration) * 1000.0).rounded()))
+        strongSelf.totalDurationMs = durMs
+        let transformed = natSize.applying(prefTransform)
+        let widthPx = max(1, Int(abs(transformed.width).rounded()))
+        let heightPx = max(1, Int(abs(transformed.height).rounded()))
+        let hasAudioTrack = !audioTracks.isEmpty
 
-        // Pull initial frame at t = 0 once item is ready
-        pl.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-          DispatchQueue.main.async {
-            self?.pullCurrentFrame(forceProgress: true)
+        let outputAttrs: [String: Any] = [
+          kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+          kCVPixelBufferMetalCompatibilityKey as String: true,
+          kCVPixelBufferIOSurfacePropertiesKey as String: [:]
+        ]
+        let vOut = AVPlayerItemVideoOutput(pixelBufferAttributes: outputAttrs)
+        let item = AVPlayerItem(asset: asset)
+        item.add(vOut)
+
+        DispatchQueue.main.async {
+          guard let reg = strongSelf.registry, !strongSelf.isDisposed else {
+            completion(nil)
+            return
           }
-        }
+          let pl = AVPlayer(playerItem: item)
+          strongSelf.videoOutput = vOut
+          strongSelf.playerItem = item
+          strongSelf.player = pl
+          let tid = reg.register(strongSelf)
+          strongSelf.textureId = tid
 
-        completion([
-          "textureId": tid,
-          "durationMs": durMs,
-          "width": widthPx,
-          "height": heightPx,
-          "hasAudio": hasAudioTrack
-        ])
+          strongSelf.endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+          ) { [weak self] _ in
+            guard let innerSelf = self, !innerSelf.isDisposed else { return }
+            innerSelf.isPlaying = false
+            innerSelf.stopFrameTimer()
+            innerSelf.pullCurrentFrame(forceProgress: true)
+            innerSelf.onCompleted(innerSelf.textureId)
+          }
+
+          // Pull initial frame at t = 0 once item is ready
+          pl.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            DispatchQueue.main.async {
+              self?.pullCurrentFrame(forceProgress: true)
+            }
+          }
+
+          completion([
+            "textureId": tid,
+            "durationMs": durMs,
+            "width": widthPx,
+            "height": heightPx,
+            "hasAudio": hasAudioTrack
+          ])
+        }
+      } catch {
+        completion(nil)
       }
     }
   }

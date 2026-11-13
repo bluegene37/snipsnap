@@ -497,25 +497,42 @@ class _GallerySidebarState extends State<GallerySidebar> {
 
             // Horizontal Captures List
             // Gene - Oct, 27, 2026: Only render the thumbnail list if isOpen is true.
+            // Gene - Nov, 13, 2026: Wrap expanded tray content in ClipRect + OverflowBox so 33 <-> 145px collapse/expand animations and short viewports never squish cards into a RenderFlex overflow.
             // Old implementation:
-            // Expanded(
-            //   child: items.isEmpty
+            // if (widget.isOpen)
+            //   Expanded(
+            //     child: filtered.isEmpty
+            //         ? Center(...)
+            //         : ListView.builder(...),
+            //   ),
             if (widget.isOpen)
               Expanded(
-                child: filtered.isEmpty
-                    ? Center(
-                        child: Text(
-                          widget.items.isEmpty
-                              ? 'No captures yet. Click "Snip" to start!'
-                              : 'No matching items in this filter.',
-                          textAlign: TextAlign.center,
-                          // Was a fixed Colors.white38 regardless of mode — same
-                          // pre-existing light-mode legibility bug as the close
-                          // button above (white38 on near-white is unreadable).
-                          style: TextStyle(color: t.inkMuted, fontSize: 13),
-                        ),
-                      )
-                    : ListView.builder(
+                child: ClipRect(
+                  child: LayoutBuilder(
+                    builder: (context, trayConstraints) {
+                      final trayHeight = trayConstraints.maxHeight < 112.0
+                          ? 112.0
+                          : trayConstraints.maxHeight;
+                      return OverflowBox(
+                        alignment: Alignment.topLeft,
+                        minWidth: trayConstraints.maxWidth,
+                        maxWidth: trayConstraints.maxWidth,
+                        minHeight: trayHeight,
+                        maxHeight: trayHeight,
+                        child: filtered.isEmpty
+                            ? Center(
+                                child: Text(
+                                  widget.items.isEmpty
+                                      ? 'No captures yet. Click "Snip" to start!'
+                                      : 'No matching items in this filter.',
+                                  textAlign: TextAlign.center,
+                                  // Was a fixed Colors.white38 regardless of mode — same
+                                  // pre-existing light-mode legibility bug as the close
+                                  // button above (white38 on near-white is unreadable).
+                                  style: TextStyle(color: t.inkMuted, fontSize: 13),
+                                ),
+                              )
+                            : ListView.builder(
                         scrollDirection: Axis.horizontal,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 10,
@@ -592,10 +609,15 @@ class _GallerySidebarState extends State<GallerySidebar> {
                                 onTap: () => widget.onSelectItem(item),
                                 child: Padding(
                                   padding: const EdgeInsets.all(5),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
+                                  // Gene - Nov, 13, 2026: Guard card footer with LayoutBuilder so tight vertical constraints never cause a Column RenderFlex overflow.
+                                  child: LayoutBuilder(
+                                    builder: (context, cardConstraints) {
+                                      final showFooter =
+                                          cardConstraints.maxHeight >= 36.0;
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
                                       // Thumbnail Image + Extension Pill Badge
                                       Expanded(
                                         child: Stack(
@@ -780,9 +802,10 @@ class _GallerySidebarState extends State<GallerySidebar> {
                                           ],
                                         ),
                                       ),
-                                      const SizedBox(height: 4),
-                                      // Title and delete button
-                                      Row(
+                                      if (showFooter) ...[
+                                        const SizedBox(height: 4),
+                                        // Title and delete button
+                                        Row(
                                         children: [
                                           Expanded(
                                             child: _editingItemId == item.id
@@ -962,7 +985,10 @@ class _GallerySidebarState extends State<GallerySidebar> {
                                           ),
                                         ],
                                       ),
+                                      ],
                                     ],
+                                  );
+                                    },
                                   ),
                                 ),
                               ),
@@ -970,6 +996,10 @@ class _GallerySidebarState extends State<GallerySidebar> {
                           );
                         },
                       ),
+                      );
+                    },
+                  ),
+                ),
               ),
           ],
         ),

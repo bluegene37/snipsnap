@@ -332,6 +332,75 @@ void _runStateTests(SnipThemeMode mode) {
       expect(toggleCount, 2);
     },
   );
+
+  // Gene - Nov, 13, 2026: Regression tests ensuring tray expand/collapse animation frames and tight external height constraints never cause RenderFlex overflow.
+  testWidgets(
+    '[$label] transitioning isOpen false -> true -> false steps through animation without RenderFlex overflow',
+    (tester) async {
+      final items = [_item('a'), _item('b')];
+      Widget buildHarness(bool open) => SnipThemeScope(
+        theme: SnipTheme.forMode(mode),
+        child: MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: GallerySidebar(
+                items: items,
+                activeItem: items.first,
+                onSelectItem: (_) {},
+                onDeleteItem: (_) {},
+                onClose: () {},
+                isOpen: open,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(buildHarness(false));
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(buildHarness(true));
+      for (final ms in [16, 16, 16, 32, 40, 80]) {
+        await tester.pump(Duration(milliseconds: ms));
+        expect(tester.takeException(), isNull);
+      }
+
+      await tester.pumpWidget(buildHarness(false));
+      for (final ms in [16, 16, 16, 32, 40, 80]) {
+        await tester.pump(Duration(milliseconds: ms));
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
+
+  testWidgets(
+    '[$label] tight height constraint on open tray never throws RenderFlex overflow',
+    (tester) async {
+      final items = [_item('a'), _item('b')];
+      await tester.pumpWidget(
+        SnipThemeScope(
+          theme: SnipTheme.forMode(mode),
+          child: MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                height: 55,
+                child: GallerySidebar(
+                  items: items,
+                  activeItem: items.first,
+                  onSelectItem: (_) {},
+                  onDeleteItem: (_) {},
+                  onClose: () {},
+                  isOpen: true,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 void main() {

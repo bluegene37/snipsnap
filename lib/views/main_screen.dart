@@ -1819,10 +1819,27 @@ class _MainScreenState extends State<MainScreen> {
       }
     }
 
+    // Gene - Nov, 13, 2026: Pass the selected display's Quartz region to startFullScreenRecording so secondary-monitor full-screen recordings stay on the chosen display.
+    // Old implementation:
+    // final bool started;
+    // if (req.fullScreen) {
+    //   started = await _recordingController.startFullScreenRecording(
+    //     countdownSeconds: 3,
+    //   );
+    // } else {
+    //   started = await _recordingController.startAreaRecording(
+    //     Rect.fromLTWH(req.x, req.y, req.width, req.height),
+    //     countdownSeconds: 3,
+    //   );
+    // }
     final bool started;
     if (req.fullScreen) {
+      final displayRegion = (req.width >= 10 && req.height >= 10)
+          ? Rect.fromLTWH(req.x, req.y, req.width, req.height)
+          : null;
       started = await _recordingController.startFullScreenRecording(
         countdownSeconds: 3,
+        displayRegion: displayRegion,
       );
     } else {
       started = await _recordingController.startAreaRecording(

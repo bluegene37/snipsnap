@@ -3315,16 +3315,45 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           std::string target = get_str("targetPath");
           std::string thumb = get_str("thumbnailPath");
           bool full_screen = get_bool("fullScreen", false);
-          int rx = full_screen ? ::GetSystemMetrics(SM_XVIRTUALSCREEN)
-                               : static_cast<int>(std::round(get_double("x")));
-          int ry = full_screen ? ::GetSystemMetrics(SM_YVIRTUALSCREEN)
-                               : static_cast<int>(std::round(get_double("y")));
-          int rw = full_screen
-                       ? ::GetSystemMetrics(SM_CXVIRTUALSCREEN)
-                       : static_cast<int>(std::round(get_double("width")));
-          int rh = full_screen
-                       ? ::GetSystemMetrics(SM_CYVIRTUALSCREEN)
-                       : static_cast<int>(std::round(get_double("height")));
+          // Gene - Nov, 13, 2026: Respect passed monitor rect or cursor's active monitor when starting full-screen recording on Windows.
+          // Old implementation:
+          // int rx = full_screen ? ::GetSystemMetrics(SM_XVIRTUALSCREEN)
+          //                      : static_cast<int>(std::round(get_double("x")));
+          // int ry = full_screen ? ::GetSystemMetrics(SM_YVIRTUALSCREEN)
+          //                      : static_cast<int>(std::round(get_double("y")));
+          // int rw = full_screen
+          //              ? ::GetSystemMetrics(SM_CXVIRTUALSCREEN)
+          //              : static_cast<int>(std::round(get_double("width")));
+          // int rh = full_screen
+          //              ? ::GetSystemMetrics(SM_CYVIRTUALSCREEN)
+          //              : static_cast<int>(std::round(get_double("height")));
+          int arg_x = static_cast<int>(std::round(get_double("x")));
+          int arg_y = static_cast<int>(std::round(get_double("y")));
+          int arg_w = static_cast<int>(std::round(get_double("width")));
+          int arg_h = static_cast<int>(std::round(get_double("height")));
+          int rx = arg_x;
+          int ry = arg_y;
+          int rw = arg_w;
+          int rh = arg_h;
+          if (full_screen && (arg_w < 10 || arg_h < 10)) {
+            POINT cursor_pt{};
+            MONITORINFO mi{};
+            mi.cbSize = sizeof(mi);
+            if (::GetCursorPos(&cursor_pt) &&
+                ::GetMonitorInfoW(
+                    ::MonitorFromPoint(cursor_pt, MONITOR_DEFAULTTONEAREST),
+                    &mi)) {
+              rx = mi.rcMonitor.left;
+              ry = mi.rcMonitor.top;
+              rw = mi.rcMonitor.right - mi.rcMonitor.left;
+              rh = mi.rcMonitor.bottom - mi.rcMonitor.top;
+            } else {
+              rx = ::GetSystemMetrics(SM_XVIRTUALSCREEN);
+              ry = ::GetSystemMetrics(SM_YVIRTUALSCREEN);
+              rw = ::GetSystemMetrics(SM_CXVIRTUALSCREEN);
+              rh = ::GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            }
+          }
           // Gene - Nov, 13, 2026: Default 60 FPS and forward mic device, system audio, cursor, click highlights, and countdown.
           // Old implementation:
           // int fps = static_cast<int>(get_double("fps", 30.0));
