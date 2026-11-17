@@ -6,6 +6,10 @@ import '../services/storage_service.dart';
 import '../utils/image_eviction.dart';
 import '../utils/snip_theme.dart';
 
+// Gene - Nov, 17, 2026: Default initial batch size and scroll-load increment for horizontal screenshot history pagination.
+const int kGalleryInitialBatchSize = 20;
+const int kGalleryBatchIncrement = 20;
+
 // Gene - Nov, 08, 2026: Added GalleryMediaFilter enum and upgraded GallerySidebar to StatefulWidget for All/Images/Videos filtering, video badges, and inline title rename.
 enum GalleryMediaFilter { all, images, videos }
 
@@ -34,6 +38,11 @@ class GallerySidebar extends StatefulWidget {
   final bool isOpen;
   final VoidCallback? onToggleCollapse;
 
+  // Gene - Nov, 17, 2026: Added initialBatchSize, batchIncrement, and onLoadMore for incremental scroll pagination.
+  final int initialBatchSize;
+  final int batchIncrement;
+  final VoidCallback? onLoadMore;
+
   // Gene - Oct, 27, 2026: Updated constructor to accept isOpen and onToggleCollapse.
   // Old implementation:
   // const GallerySidebar({
@@ -48,6 +57,24 @@ class GallerySidebar extends StatefulWidget {
   //   this.zoomScale = 1.0,
   //   this.onZoomScaleChanged,
   //   this.imageRevision = 0,
+  // });
+  // Gene - Nov, 17, 2026: Added initialBatchSize, batchIncrement, and onLoadMore parameters to GallerySidebar constructor.
+  // Old implementation:
+  // const GallerySidebar({
+  //   super.key,
+  //   required this.items,
+  //   required this.activeItem,
+  //   required this.onSelectItem,
+  //   required this.onDeleteItem,
+  //   required this.onClose,
+  //   this.onOpenLibraryLocation,
+  //   this.onRevealItemInFolder,
+  //   this.onRenameItem,
+  //   this.zoomScale = 1.0,
+  //   this.onZoomScaleChanged,
+  //   this.imageRevision = 0,
+  //   this.isOpen = true,
+  //   this.onToggleCollapse,
   // });
   const GallerySidebar({
     super.key,
@@ -64,6 +91,9 @@ class GallerySidebar extends StatefulWidget {
     this.imageRevision = 0,
     this.isOpen = true,
     this.onToggleCollapse,
+    this.initialBatchSize = kGalleryInitialBatchSize,
+    this.batchIncrement = kGalleryBatchIncrement,
+    this.onLoadMore,
   });
 
   @override
@@ -75,20 +105,124 @@ class _GallerySidebarState extends State<GallerySidebar> {
   String? _editingItemId;
   final TextEditingController _renameController = TextEditingController();
 
+  // Gene - Nov, 17, 2026: Scroll pagination state, memoized file existence map, and cached filtered item list.
+  final ScrollController _scrollController = ScrollController();
+  late int _visibleLimit;
+  final Map<String, bool> _fileExistsCache = <String, bool>{};
+  List<CaptureItem>? _cachedFilteredItems;
+  List<CaptureItem>? _lastItemsRef;
+  int? _lastItemsLength;
+  GalleryMediaFilter? _lastFilter;
+
+  @override
+  void initState() {
+    super.initState();
+    _visibleLimit = widget.initialBatchSize;
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void didUpdateWidget(covariant GallerySidebar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageRevision != widget.imageRevision &&
+        widget.activeItem != null) {
+      _fileExistsCache.remove(widget.activeItem!.filePath);
+      if (widget.activeItem!.thumbnailPath != null) {
+        _fileExistsCache.remove(widget.activeItem!.thumbnailPath);
+      }
+      _cachedFilteredItems = null;
+    }
+    if (oldWidget.items != widget.items ||
+        oldWidget.items.length != widget.items.length ||
+        oldWidget.activeItem != widget.activeItem) {
+      _cachedFilteredItems = null;
+    }
+  }
+
+  // Gene - Nov, 17, 2026: Dispose horizontal scroll controller alongside rename controller.
+  // Old implementation:
+  // @override
+  // void dispose() {
+  //   _renameController.dispose();
+  //   super.dispose();
+  // }
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _renameController.dispose();
     super.dispose();
   }
 
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    if (pos.pixels <= 0 || pos.pixels < pos.maxScrollExtent - 300) return;
+
+    final filtered = _filteredItems;
+    final total = filtered.length;
+    final currentVisible = _effectiveItemCount(filtered);
+    if (_visibleLimit < total || currentVisible < total) {
+      final base = _visibleLimit > currentVisible
+          ? _visibleLimit
+          : currentVisible;
+      setState(() {
+        _visibleLimit = (base + widget.batchIncrement).clamp(0, total);
+      });
+    }
+    if (_visibleLimit >= total) {
+      widget.onLoadMore?.call();
+    }
+  }
+
+  int _effectiveItemCount(List<CaptureItem> filtered) {
+    var limit = _visibleLimit;
+    if (widget.activeItem != null) {
+      final activeIdx = filtered.indexWhere(
+        (i) => i.id == widget.activeItem!.id,
+      );
+      if (activeIdx >= limit) {
+        limit = activeIdx + 1;
+      }
+    }
+    return filtered.length < limit ? filtered.length : limit;
+  }
+
+  bool _cachedFileExists(String? path) {
+    if (path == null || path.isEmpty) return false;
+    return _fileExistsCache.putIfAbsent(path, () => File(path).existsSync());
+  }
+
+  // Gene - Nov, 17, 2026: Cache filtered item list so frequent rebuilds during zoom/canvas drags do not reallocate.
+  // Old implementation:
+  // List<CaptureItem> get _filteredItems {
+  //   return switch (_filter) {
+  //     GalleryMediaFilter.all => widget.items,
+  //     GalleryMediaFilter.images =>
+  //       widget.items.where((i) => !i.isVideo).toList(),
+  //     GalleryMediaFilter.videos =>
+  //       widget.items.where((i) => i.isVideo).toList(),
+  //   };
+  // }
   List<CaptureItem> get _filteredItems {
-    return switch (_filter) {
+    if (_cachedFilteredItems != null &&
+        identical(_lastItemsRef, widget.items) &&
+        _lastItemsLength == widget.items.length &&
+        _lastFilter == _filter) {
+      return _cachedFilteredItems!;
+    }
+    final computed = switch (_filter) {
       GalleryMediaFilter.all => widget.items,
       GalleryMediaFilter.images =>
         widget.items.where((i) => !i.isVideo).toList(),
       GalleryMediaFilter.videos =>
         widget.items.where((i) => i.isVideo).toList(),
     };
+    _cachedFilteredItems = computed;
+    _lastItemsRef = widget.items;
+    _lastItemsLength = widget.items.length;
+    _lastFilter = _filter;
+    return computed;
   }
 
   String _formatDurationBadge(int? durationMs) {
@@ -106,10 +240,24 @@ class _GallerySidebarState extends State<GallerySidebar> {
     });
   }
 
+  // Gene - Nov, 17, 2026: Invalidate filtered list cache on inline rename so filtered tabs update immediately even when items is mutated in place.
+  // Old implementation:
+  // void _commitInlineRename(CaptureItem item) {
+  //   final trimmed = _renameController.text.trim();
+  //   setState(() {
+  //     _editingItemId = null;
+  //   });
+  //   if (trimmed.isNotEmpty && trimmed != item.title) {
+  //     widget.onRenameItem?.call(item, trimmed);
+  //   }
+  // }
   void _commitInlineRename(CaptureItem item) {
     final trimmed = _renameController.text.trim();
     setState(() {
       _editingItemId = null;
+      if (trimmed.isNotEmpty && trimmed != item.title) {
+        _cachedFilteredItems = null;
+      }
     });
     if (trimmed.isNotEmpty && trimmed != item.title) {
       widget.onRenameItem?.call(item, trimmed);
@@ -293,7 +441,19 @@ class _GallerySidebarState extends State<GallerySidebar> {
                           key: ValueKey('gallery-filter-${entry.$1.name}'),
                           borderRadius: BorderRadius.circular(5),
                           hoverColor: t.hoverFill,
-                          onTap: () => setState(() => _filter = entry.$1),
+                          // Gene - Nov, 17, 2026: Reset pagination window and scroll offset when switching media filter.
+                          // Old implementation:
+                          // onTap: () => setState(() => _filter = entry.$1),
+                          onTap: () {
+                            setState(() {
+                              _filter = entry.$1;
+                              _visibleLimit = widget.initialBatchSize;
+                              _cachedFilteredItems = null;
+                            });
+                            if (_scrollController.hasClients) {
+                              _scrollController.jumpTo(0.0);
+                            }
+                          },
                           child: DecoratedBox(
                             decoration: t.controlDecoration(
                               active: _filter == entry.$1,
@@ -536,12 +696,16 @@ class _GallerySidebarState extends State<GallerySidebar> {
                                 ),
                               )
                             : ListView.builder(
+                                // Gene - Nov, 17, 2026: Attached _scrollController and capped itemCount to _effectiveItemCount(filtered) for lazy pagination.
+                                controller: _scrollController,
                                 scrollDirection: Axis.horizontal,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 10,
                                   vertical: 8,
                                 ),
-                                itemCount: filtered.length,
+                                // Old implementation:
+                                // itemCount: filtered.length,
+                                itemCount: _effectiveItemCount(filtered),
                                 itemBuilder: (context, index) {
                                   final item = filtered[index];
                                   final isSelected =
@@ -552,12 +716,17 @@ class _GallerySidebarState extends State<GallerySidebar> {
                                           item.thumbnailPath!.isNotEmpty)
                                       ? item.thumbnailPath!
                                       : item.filePath;
+                                  // Gene - Nov, 17, 2026: Use memoized _cachedFileExists instead of synchronous File.existsSync() per item on every rebuild.
+                                  // Old implementation:
+                                  // final fileExists = !item.isVideo
+                                  //     ? File(displayPath).existsSync()
+                                  //     : (item.thumbnailPath != null &&
+                                  //           File(
+                                  //             item.thumbnailPath!,
+                                  //           ).existsSync());
                                   final fileExists = !item.isVideo
-                                      ? File(displayPath).existsSync()
-                                      : (item.thumbnailPath != null &&
-                                            File(
-                                              item.thumbnailPath!,
-                                            ).existsSync());
+                                      ? _cachedFileExists(displayPath)
+                                      : _cachedFileExists(item.thumbnailPath);
 
                                   /*
                       // The selected capture is a non-exclusive highlight

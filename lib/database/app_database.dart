@@ -192,6 +192,18 @@ class AppDatabase extends _$AppDatabase {
           ]))
           .get();
 
+  // Gene - Nov, 17, 2026: Added getCapturesPage and getAllAnnotations to support paginated history loading and eliminate N+1 startup annotation queries.
+  Future<List<Capture>> getCapturesPage({required int limit, int offset = 0}) =>
+      (select(captures)
+            ..orderBy([
+              (t) => OrderingTerm(
+                expression: t.createdAt,
+                mode: OrderingMode.desc,
+              ),
+            ])
+            ..limit(limit, offset: offset))
+          .get();
+
   Future<void> insertOrUpdateCapture(CapturesCompanion capture) =>
       into(captures).insertOnConflictUpdate(capture);
 
@@ -210,6 +222,14 @@ class AppDatabase extends _$AppDatabase {
               (t) => OrderingTerm(expression: t.zIndex),
               (t) => OrderingTerm(expression: t.createdAt),
             ]))
+          .get();
+
+  // Gene - Nov, 17, 2026: Batch query returning all annotation rows sorted by zIndex and createdAt for single-trip startup loading.
+  Future<List<DbAnnotation>> getAllAnnotations() =>
+      (select(annotations)..orderBy([
+            (t) => OrderingTerm(expression: t.zIndex),
+            (t) => OrderingTerm(expression: t.createdAt),
+          ]))
           .get();
 
   Future<void> saveAnnotationsForCapture(

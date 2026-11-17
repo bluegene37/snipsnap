@@ -208,10 +208,21 @@ class StorageService {
   static Future<List<CaptureItem>> loadHistory() async {
     final items = <CaptureItem>[];
     try {
+      // Gene - Nov, 17, 2026: Parallelize file-existence checks across all DB history items using Future.wait instead of sequential awaits.
+      // Old implementation:
+      // final dbItems = await DatabaseService.loadCapturesFromDb();
+      // for (final item in dbItems) {
+      //   if (await File(item.filePath).exists()) {
+      //     items.add(item);
+      //   }
+      // }
       final dbItems = await DatabaseService.loadCapturesFromDb();
-      for (final item in dbItems) {
-        if (await File(item.filePath).exists()) {
-          items.add(item);
+      final existsList = await Future.wait(
+        dbItems.map((item) => File(item.filePath).exists()),
+      );
+      for (var i = 0; i < dbItems.length; i++) {
+        if (existsList[i]) {
+          items.add(dbItems[i]);
         }
       }
 

@@ -54,6 +54,41 @@ CaptureItem _item(String id, {int width = 0, int height = 0}) => CaptureItem(
 //     ),
 //   );
 // }
+// Gene - Nov, 17, 2026: Added optional onLoadMore parameter to _pump for scroll pagination tests.
+// Old implementation:
+// Future<void> _pump(
+//   WidgetTester tester, {
+//   required SnipThemeMode mode,
+//   required List<CaptureItem> items,
+//   CaptureItem? activeItem,
+//   ValueChanged<CaptureItem>? onSelectItem,
+//   ValueChanged<CaptureItem>? onDeleteItem,
+//   double zoomScale = 1.0,
+//   ValueChanged<double>? onZoomScaleChanged,
+//   bool isOpen = true,
+//   VoidCallback? onToggleCollapse,
+// }) {
+//   return tester.pumpWidget(
+//     SnipThemeScope(
+//       theme: SnipTheme.forMode(mode),
+//       child: MaterialApp(
+//         home: Scaffold(
+//           body: GallerySidebar(
+//             items: items,
+//             activeItem: activeItem,
+//             onSelectItem: onSelectItem ?? (_) {},
+//             onDeleteItem: onDeleteItem ?? (_) {},
+//             onClose: () {},
+//             zoomScale: zoomScale,
+//             onZoomScaleChanged: onZoomScaleChanged,
+//             isOpen: isOpen,
+//             onToggleCollapse: onToggleCollapse,
+//           ),
+//         ),
+//       ),
+//     ),
+//   );
+// }
 Future<void> _pump(
   WidgetTester tester, {
   required SnipThemeMode mode,
@@ -65,6 +100,7 @@ Future<void> _pump(
   ValueChanged<double>? onZoomScaleChanged,
   bool isOpen = true,
   VoidCallback? onToggleCollapse,
+  VoidCallback? onLoadMore,
 }) {
   return tester.pumpWidget(
     SnipThemeScope(
@@ -81,6 +117,7 @@ Future<void> _pump(
             onZoomScaleChanged: onZoomScaleChanged,
             isOpen: isOpen,
             onToggleCollapse: onToggleCollapse,
+            onLoadMore: onLoadMore,
           ),
         ),
       ),
@@ -399,6 +436,91 @@ void _runStateTests(SnipThemeMode mode) {
         ),
       );
       expect(tester.takeException(), isNull);
+    },
+  );
+  // Gene - Nov, 17, 2026: Scroll pagination tests for initial batch limit, incremental right-edge loading, and activeItem reachability.
+  int? listChildCount(WidgetTester tester) {
+    final listView = tester.widget<ListView>(find.byType(ListView));
+    return (listView.childrenDelegate as SliverChildBuilderDelegate).childCount;
+  }
+
+  testWidgets(
+    '[$label] limits initial list count to kGalleryInitialBatchSize when given 50 items',
+    (tester) async {
+      final items = List.generate(50, (i) => _item('item_$i'));
+      await _pump(tester, mode: mode, items: items, activeItem: items.first);
+
+      expect(listChildCount(tester), kGalleryInitialBatchSize);
+      expect(find.text('Capture item_0'), findsOneWidget);
+      expect(find.text('Capture item_20'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    '[$label] scrolling right near the edge loads the next batch and eventually fires onLoadMore',
+    (tester) async {
+      final items = List.generate(50, (i) => _item('item_$i'));
+      var loadMoreCalls = 0;
+      await _pump(
+        tester,
+        mode: mode,
+        items: items,
+        activeItem: items.first,
+        onLoadMore: () => loadMoreCalls++,
+      );
+
+      expect(listChildCount(tester), kGalleryInitialBatchSize);
+      expect(loadMoreCalls, 0);
+
+      final listView = tester.widget<ListView>(find.byType(ListView));
+      final controller = listView.controller!;
+
+      // First scroll near right edge of the initial 20 items -> expands to 40.
+      controller.jumpTo(controller.position.maxScrollExtent - 50);
+      await tester.pump();
+
+      expect(
+        listChildCount(tester),
+        kGalleryInitialBatchSize + kGalleryBatchIncrement,
+      );
+      expect(loadMoreCalls, 0);
+
+      // Item 20 is now in the list and reachable before the next scroll threshold.
+      controller.jumpTo(20 * 158.0);
+      await tester.pump();
+      expect(find.text('Capture item_20'), findsOneWidget);
+      expect(
+        listChildCount(tester),
+        kGalleryInitialBatchSize + kGalleryBatchIncrement,
+      );
+
+      // Second scroll near right edge of the 40 items -> loads remaining 10 and calls onLoadMore.
+      controller.jumpTo(controller.position.maxScrollExtent - 50);
+      await tester.pump();
+
+      expect(listChildCount(tester), 50);
+      expect(loadMoreCalls, 1);
+
+      controller.jumpTo(controller.position.maxScrollExtent);
+      await tester.pump();
+      expect(find.text('Capture item_49'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    '[$label] activeItem beyond initialBatchSize expands effective item count so it is reachable',
+    (tester) async {
+      final items = List.generate(50, (i) => _item('item_$i'));
+      await _pump(tester, mode: mode, items: items, activeItem: items[35]);
+
+      expect(listChildCount(tester), 36);
+
+      final listView = tester.widget<ListView>(find.byType(ListView));
+      final controller = listView.controller!;
+      controller.jumpTo(controller.position.maxScrollExtent);
+      await tester.pump();
+
+      expect(find.text('Capture item_35'), findsOneWidget);
     },
   );
 }

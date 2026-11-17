@@ -30,29 +30,72 @@ class DatabaseService {
     _deletedDuringBulkSave.clear();
   }
 
-  /// Load all captures from Drift SQLite local DB
-  static Future<List<CaptureItem>> loadCapturesFromDb() async {
-    final rows = await db.getAllCaptures();
-    final items = <CaptureItem>[];
+  /// Load captures from Drift SQLite local DB (optionally paged via [limit]/[offset]).
+  // Gene - Nov, 17, 2026: Added optional limit/offset pagination and batched annotation loading into a single SQLite query to eliminate N+1 startup round-trips.
+  // Old implementation:
+  // static Future<List<CaptureItem>> loadCapturesFromDb() async {
+  //   final rows = await db.getAllCaptures();
+  //   final items = <CaptureItem>[];
+  //
+  //   for (final row in rows) {
+  //     final annRows = await db.getAnnotationsForCapture(row.id);
+  //     final parsed = _annotationsFor(annRows);
+  //
+  //     // Gene - Oct, 27, 2026: Updated CaptureItem loading to include video recording metadata from v6 schema.
+  //     // Old implementation:
+  //     // items.add(
+  //     //   CaptureItem(
+  //     //     id: row.id,
+  //     //     filePath: row.filePath,
+  //     //     title: row.title,
+  //     //     createdAt: row.createdAt,
+  //     //     width: row.width,
+  //     //     height: row.height,
+  //     //     annotations: parsed.annotations,
+  //     //     annotationsNeedConversion: parsed.needsConversion,
+  //     //   ),
+  //     // );
+  //     items.add(
+  //       CaptureItem(
+  //         id: row.id,
+  //         filePath: row.filePath,
+  //         title: row.title,
+  //         createdAt: row.createdAt,
+  //         width: row.width,
+  //         height: row.height,
+  //         annotations: parsed.annotations,
+  //         annotationsNeedConversion: parsed.needsConversion,
+  //         mediaType: CaptureMediaType.fromString(row.mediaType),
+  //         durationMs: row.durationMs,
+  //         hasAudio: row.hasAudio,
+  //         thumbnailPath: row.thumbnailPath,
+  //       ),
+  //     );
+  //   }
+  //   return items;
+  // }
+  static Future<List<CaptureItem>> loadCapturesFromDb({
+    int? limit,
+    int offset = 0,
+  }) async {
+    final rows = limit != null
+        ? await db.getCapturesPage(limit: limit, offset: offset)
+        : await db.getAllCaptures();
+    if (rows.isEmpty) return <CaptureItem>[];
 
+    final allAnnRows = await db.getAllAnnotations();
+    final annsByCaptureId = <String, List<DbAnnotation>>{};
+    for (final ann in allAnnRows) {
+      annsByCaptureId
+          .putIfAbsent(ann.captureId, () => <DbAnnotation>[])
+          .add(ann);
+    }
+
+    final items = <CaptureItem>[];
     for (final row in rows) {
-      final annRows = await db.getAnnotationsForCapture(row.id);
+      final annRows = annsByCaptureId[row.id] ?? const <DbAnnotation>[];
       final parsed = _annotationsFor(annRows);
 
-      // Gene - Oct, 27, 2026: Updated CaptureItem loading to include video recording metadata from v6 schema.
-      // Old implementation:
-      // items.add(
-      //   CaptureItem(
-      //     id: row.id,
-      //     filePath: row.filePath,
-      //     title: row.title,
-      //     createdAt: row.createdAt,
-      //     width: row.width,
-      //     height: row.height,
-      //     annotations: parsed.annotations,
-      //     annotationsNeedConversion: parsed.needsConversion,
-      //   ),
-      // );
       items.add(
         CaptureItem(
           id: row.id,
