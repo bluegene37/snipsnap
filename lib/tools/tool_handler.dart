@@ -56,6 +56,8 @@ abstract interface class ToolDelegate {
   bool get isGlobalFill;
   bool get isShiftDown;
   bool get isAltDown;
+  // Gene - Nov, 20, 2026: Live InteractiveViewer zoom scale so tool sampling and drag thresholds stay constant in screen pixels.
+  double get viewScale;
 
   void updateAnnotation(String id, Annotation updatedAnnotation);
   void pushAnnotationsState(List<Annotation> newAnnotations);
@@ -122,11 +124,21 @@ abstract class ToolHandler {
   /// horizontal line or a zero-height redaction bar has one degenerate axis and
   /// still has to commit. Per-tool `width >= n && height >= n` variants swallow
   /// exactly those.
+  // Gene - Nov, 20, 2026: Scale minimum committable drag threshold by 1 / viewScale so small screen gestures work cleanly while zoomed.
+  // Old implementation:
+  // @protected
+  // bool isCommittableDrag(Offset? start, Offset? end) {
+  //   if (start == null || end == null) return false;
+  //   final bounds = Rect.fromPoints(start, end);
+  //   return bounds.width >= 3 || bounds.height >= 3;
+  // }
   @protected
   bool isCommittableDrag(Offset? start, Offset? end) {
     if (start == null || end == null) return false;
     final bounds = Rect.fromPoints(start, end);
-    return bounds.width >= 3 || bounds.height >= 3;
+    final s = delegate.viewScale > 0 ? delegate.viewScale : 1.0;
+    final minExtent = 3.0 / s;
+    return bounds.width >= minExtent || bounds.height >= minExtent;
   }
 }
 

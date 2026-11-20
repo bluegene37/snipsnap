@@ -26,8 +26,13 @@ class PenToolHandler extends ToolHandler {
   void onPanUpdate(DragUpdateDetails details, Offset pos) {
     final current = delegate.currentAnnotation;
     if (current != null) {
+      // Gene - Nov, 20, 2026: Divide stroke sample spacing by viewScale for smooth curves when zoomed in.
+      // Old:
+      // if (_currentPoints.isEmpty ||
+      //     (pos - _currentPoints.last).distance >= 1.5) {
+      final s = delegate.viewScale > 0 ? delegate.viewScale : 1.0;
       if (_currentPoints.isEmpty ||
-          (pos - _currentPoints.last).distance >= 1.5) {
+          (pos - _currentPoints.last).distance >= 1.5 / s) {
         _currentPoints = [..._currentPoints, pos];
         final updated = current.copyWith(points: _currentPoints);
         delegate.onCurrentAnnotationChanged(updated);

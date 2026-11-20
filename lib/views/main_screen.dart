@@ -508,6 +508,8 @@ class _MainScreenState extends State<MainScreen> {
             fontSize: fontSize,
             borderRadius: borderRadius,
             blurStrength: blurStrength,
+            // Gene - Nov, 20, 2026: Compensate slider edits by live _zoomScale so resized/restyled items match screen units.
+            viewScale: _zoomScale,
           );
     });
 
@@ -1627,6 +1629,8 @@ class _MainScreenState extends State<MainScreen> {
           fontSize: style.fontSize,
           borderRadius: style.borderRadius,
           blurStrength: style.blurStrength,
+          // Gene - Nov, 20, 2026: Compensate inserted OCR text by live _zoomScale when zoomed on long captures.
+          viewScale: _zoomScale,
         );
 
     _onAnnotationAdded(annotation);

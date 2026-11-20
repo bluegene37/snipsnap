@@ -1135,6 +1135,46 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     baseMaxZoom: _maxZoom,
   );
 
+  // Gene - Nov, 20, 2026: Expose live zoom scale and canvas-to-viewport coordinate mapping helpers so tool sizes and chrome stay zoom-invariant.
+  double get _viewScale {
+    final s = _transformationController.value.getMaxScaleOnAxis();
+    return s > 1e-4 ? s : 1.0;
+  }
+
+  Offset _canvasToViewport(Offset canvasPoint, Matrix4 matrix) =>
+      MatrixUtils.transformPoint(
+        matrix,
+        Offset(canvasPoint.dx, canvasPoint.dy + 20.0),
+      );
+
+  Rect _canvasRectToViewport(Rect canvasRect, Matrix4 matrix) =>
+      Rect.fromPoints(
+        _canvasToViewport(canvasRect.topLeft, matrix),
+        _canvasToViewport(canvasRect.bottomRight, matrix),
+      );
+
+  void _notifySelectAnnotation(Annotation? canvasAnnotation) {
+    final cb = widget.onSelectAnnotation;
+    if (cb == null) return;
+    if (canvasAnnotation == null) {
+      cb(null);
+      return;
+    }
+    final s = _viewScale;
+    if ((s - 1.0).abs() < 1e-4) {
+      cb(canvasAnnotation);
+      return;
+    }
+    cb(
+      canvasAnnotation.copyWith(
+        strokeWidth: canvasAnnotation.strokeWidth * s,
+        fontSize: canvasAnnotation.fontSize * s,
+        borderRadius: canvasAnnotation.borderRadius * s,
+        blurStrength: canvasAnnotation.blurStrength * s,
+      ),
+    );
+  }
+
   void _reportEffectiveMaxZoomIfChanged() {
     final next = _effectiveMaxZoom;
     if ((next - _reportedMaxZoom).abs() > 0.01) {
@@ -1522,13 +1562,22 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   @override
   Annotation? hitTestAnnotation(Offset pos) {
     final canvasAnnotations = _canvasAnnotations;
+    final s = _viewScale;
+    // Gene - Nov, 20, 2026: Pass _viewScale into hit-testing & handle probing so selection feels identical at every zoom level.
+    // Precise geometry first: never pick a giant shape because its hollow
+    // center happens to enclose a stroke sitting inside it.
     for (int i = canvasAnnotations.length - 1; i >= 0; i--) {
-      if (AnnotationRenderer.hitTest(canvasAnnotations[i], pos)) {
+      if (AnnotationRenderer.hitTest(canvasAnnotations[i], pos, viewScale: s)) {
         return canvasAnnotations[i];
       }
     }
+    // Loose bounding-box fallback only if nothing was hit directly.
     for (int i = canvasAnnotations.length - 1; i >= 0; i--) {
-      if (AnnotationRenderer.hitTestBounds(canvasAnnotations[i], pos)) {
+      if (AnnotationRenderer.hitTestBounds(
+        canvasAnnotations[i],
+        pos,
+        viewScale: s,
+      )) {
         return canvasAnnotations[i];
       }
     }
@@ -1536,13 +1585,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   _AnnHandle _hitTestAnnotationHandles(Offset pos, Annotation ann) {
-    final bounds = AnnotationRenderer.selectionRect(ann);
+    final s = _viewScale;
+    final bounds = AnnotationRenderer.selectionRect(ann, viewScale: s);
     if (bounds == Rect.zero) return _AnnHandle.none;
 
     // Handles are drawn in the annotation's rotated frame, so the probe point
     // has to be rotated into that same frame before comparing distances.
     final local = AnnotationRenderer.toLocalSpace(ann, pos);
-    const r = AnnotationRenderer.handleHitRadius;
+    // Old: const r = AnnotationRenderer.handleHitRadius;
+    final r = AnnotationRenderer.handleHitRadius / s;
 
     // Curvature handle for Arrow
     if (ann.tool == CanvasTool.arrow &&
@@ -1550,12 +1601,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         ann.endPoint != null) {
       final curvePos =
           ann.controlPoint ?? ((ann.startPoint! + ann.endPoint!) / 2);
-      if ((local - curvePos).distance <= r + 4.0) return _AnnHandle.curve;
+      if ((local - curvePos).distance <= r + 4.0 / s) return _AnnHandle.curve;
     }
 
     final rotPos =
-        bounds.topCenter -
-        const Offset(0, AnnotationRenderer.rotationHandleGap);
+        bounds.topCenter - Offset(0, AnnotationRenderer.rotationHandleGap / s);
     if ((local - rotPos).distance <= r) {
       return _AnnHandle.rotate;
     }
@@ -1572,7 +1622,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       return _AnnHandle.bottomRight;
     }
 
-    if (AnnotationRenderer.hitTest(ann, pos)) {
+    if (AnnotationRenderer.hitTest(ann, pos, viewScale: s)) {
       return _AnnHandle.body;
     }
     return _AnnHandle.none;
@@ -1671,11 +1721,15 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   void _duplicateSelectedAnnotation() {
     final ann = _selectedAnnotation;
     if (ann == null) return;
-    const offset = Offset(16, 16);
+    // Gene - Nov, 20, 2026: Scale duplicate offset and selection scalar reporting by 1 / _viewScale.
+    // Old: const offset = Offset(16, 16);
+    final step = 20.0 / _viewScale;
+    final offset = Offset(step, step);
     final clone = ann.translated(offset).copyWith(id: _uuid.v4());
     _emitAnnotation(clone);
     setState(() => _selectedAnnotationId = clone.id);
-    widget.onSelectAnnotation?.call(clone);
+    // Old: widget.onSelectAnnotation?.call(clone);
+    _notifySelectAnnotation(clone);
   }
 
   void _nudgeSelectedAnnotation(Offset delta) {
@@ -1700,7 +1754,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// half the rect draggable at every size, and the cap only binds on small
   /// rects — a comfortable selection keeps the full 18px.
   _CropHandle _hitTestCropRect(Offset pos, Rect cropRect) {
-    const maxHandleRadius = 18.0;
+    // Gene - Nov, 20, 2026: Scale crop/floating-selection grab bands inversely with _viewScale so edges don't expand 12x when zoomed.
+    // Old: const maxHandleRadius = 18.0;
+    final maxHandleRadius = 18.0 / _viewScale;
     final bandX = math.min(maxHandleRadius, cropRect.width / 4);
     final bandY = math.min(maxHandleRadius, cropRect.height / 4);
     // Corners are round, so they answer to the tighter of the two.
@@ -1787,7 +1843,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         return;
     }
 
-    const minSize = 20.0;
+    // Gene - Nov, 20, 2026: Scale minimum crop box size by 1 / _viewScale so zoomed crops can target small elements.
+    // Old: const minSize = 20.0;
+    final minSize = 20.0 / _viewScale;
     if (right - left < minSize) {
       if (_currentCropHandle == _CropHandle.left ||
           _currentCropHandle == _CropHandle.topLeft ||
@@ -1892,8 +1950,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // Length from the change in the along-extent, one pixel for one pixel (see
     // the note below). Computed up front because a proportional mark's weight
     // is derived from it.
-    final oldRun = math.max(1.0, along(bounds) - origin.strokeWidth);
-    final newRun = math.max(1.0, oldRun + along(grown) - along(bounds));
+    // Gene - Nov, 20, 2026: Scale stroke-resize run/weight clamps by 1 / _viewScale so resizing stays smooth when zoomed in.
+    // Old:
+    // final oldRun = math.max(1.0, along(bounds) - origin.strokeWidth);
+    // final newRun = math.max(1.0, oldRun + along(grown) - along(bounds));
+    final s = _viewScale;
+    final oldRun = math.max(1.0 / s, along(bounds) - origin.strokeWidth);
+    final newRun = math.max(1.0 / s, oldRun + along(grown) - along(bounds));
     final alongFactor = (newRun / oldRun).clamp(0.05, 20.0);
     // The box change is what the pointer asked for; the stroke weight that
     // produces it is that divided by how fast this mark grows per unit of
@@ -1907,11 +1970,18 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final baseWeight = proportional
         ? origin.strokeWidth * alongFactor
         : origin.strokeWidth;
+    // Old:
+    // final width = fixedWeight
+    //     ? origin.strokeWidth
+    //     : (baseWeight + (across(grown) - across(bounds)) / perUnit).clamp(
+    //         _minStrokeWidth,
+    //         ceiling,
+    //       );
     final width = fixedWeight
         ? origin.strokeWidth
         : (baseWeight + (across(grown) - across(bounds)) / perUnit).clamp(
-            _minStrokeWidth,
-            ceiling,
+            _minStrokeWidth / s,
+            ceiling / s,
           );
 
     // Length follows the *change* in the box's along-extent, one pixel for one
@@ -2027,8 +2097,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           (handle == _AnnHandle.bottomRight || handle == _AnnHandle.topRight)
           ? totalDelta.dx
           : -totalDelta.dx;
+      // Gene - Nov, 20, 2026: Scale font resize range by 1 / _viewScale so zoomed badges don't jump to 8x viewScale.
+      // Old: fontSize: (origin.fontSize + grow * 0.4).clamp(8.0, 120.0),
+      final s = _viewScale;
       return origin.copyWith(
-        fontSize: (origin.fontSize + grow * 0.4).clamp(8.0, 120.0),
+        fontSize: (origin.fontSize + grow * 0.4).clamp(8.0 / s, 120.0 / s),
       );
     }
 
@@ -2165,14 +2238,28 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   @override
   Color get activeColor => widget.activeColor;
 
+  // Gene - Nov, 20, 2026: Expose zoom-compensated scalar dimensions so newly drawn annotations appear identically sized on screen at any zoom level.
+  // Old:
+  // @override
+  // double get strokeWidth => widget.strokeWidth;
+  // @override
+  // double get fontSize => widget.fontSize;
+  // ...
+  // @override
+  // double get blurStrength => widget.blurStrength;
+  // @override
+  // double get borderRadius => widget.borderRadius;
   @override
-  double get strokeWidth => widget.strokeWidth;
+  double get viewScale => _viewScale;
+
+  @override
+  double get strokeWidth => widget.strokeWidth / _viewScale;
 
   @override
   double get opacity => widget.opacity;
 
   @override
-  double get fontSize => widget.fontSize;
+  double get fontSize => widget.fontSize / _viewScale;
 
   @override
   bool get isFilled => widget.isFilled;
@@ -2187,10 +2274,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   int get stepCounter => widget.stepCounter;
 
   @override
-  double get blurStrength => widget.blurStrength;
+  double get blurStrength => widget.blurStrength / _viewScale;
 
   @override
-  double get borderRadius => widget.borderRadius;
+  double get borderRadius => widget.borderRadius / _viewScale;
 
   @override
   ShapeKind get shapeKind => widget.shapeKind;
@@ -2246,7 +2333,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final added = _justAddedAnnotation;
     _justAddedAnnotation = null;
     if (id != null && added != null && added.id == id) {
-      widget.onSelectAnnotation?.call(added);
+      // Gene - Nov, 20, 2026: Convert newly added annotation scalars back to screen pixels before updating property sliders.
+      // Old: widget.onSelectAnnotation?.call(added);
+      _notifySelectAnnotation(added);
     }
   }
 
@@ -2314,21 +2403,33 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// typed something, which happens in `_commitInlineText`, long after the
   /// gesture ended.
   Annotation _buildAnnotationForTool(CanvasTool tool, Offset pos) {
+    // Gene - Nov, 20, 2026: Scale inline-text scalar properties by 1 / _viewScale so newly typed text matches screen size when zoomed.
+    final s = _viewScale;
     return Annotation(
       id: _uuid.v4(),
       tool: tool,
       color: widget.activeColor,
       backgroundColor: widget.textBackgroundColor,
       fillColor: widget.fillColor,
-      strokeWidth: widget.strokeWidth,
+      // Old:
+      // strokeWidth: widget.strokeWidth,
+      // opacity: widget.opacity,
+      // fontSize: widget.fontSize,
+      // fill: widget.isFilled,
+      // borderRadius: widget.borderRadius,
+      // shapeKind: widget.shapeKind,
+      // lineStyle: widget.lineStyle,
+      // blurType: widget.blurType,
+      // blurStrength: widget.blurStrength,
+      strokeWidth: widget.strokeWidth / s,
       opacity: widget.opacity,
-      fontSize: widget.fontSize,
+      fontSize: widget.fontSize / s,
       fill: widget.isFilled,
-      borderRadius: widget.borderRadius,
+      borderRadius: widget.borderRadius / s,
       shapeKind: widget.shapeKind,
       lineStyle: widget.lineStyle,
       blurType: widget.blurType,
-      blurStrength: widget.blurStrength,
+      blurStrength: widget.blurStrength / s,
       hasShadow: widget.hasShadow,
       isDoubleArrow: widget.isDoubleArrow,
       startPoint: pos,
@@ -2465,7 +2566,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           _isDraggingAnnotation = true;
           _currentAnnHandle = _AnnHandle.body;
         });
-        widget.onSelectAnnotation?.call(hit);
+        // Gene - Nov, 20, 2026: Report screen-space scalars via _notifySelectAnnotation so sliders match screen size.
+        // Old: widget.onSelectAnnotation?.call(hit);
+        _notifySelectAnnotation(hit);
         return;
       }
 
@@ -2489,7 +2592,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         _isDraggingAnnotation = true;
         _currentAnnHandle = _AnnHandle.body;
       });
-      widget.onSelectAnnotation?.call(hit);
+      // Old: widget.onSelectAnnotation?.call(hit);
+      _notifySelectAnnotation(hit);
       return;
     }
 
@@ -2572,7 +2676,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
             right += totalDelta.dx;
           default:
         }
-        const minSize = 10.0;
+        // Gene - Nov, 20, 2026: Scale minimum floating selection extent by 1 / _viewScale.
+        // Old: const minSize = 10.0;
+        final minSize = 10.0 / _viewScale;
         if (right - left < minSize) {
           if (_currentSelectionHandle == _CropHandle.left ||
               _currentSelectionHandle == _CropHandle.topLeft ||
@@ -2698,7 +2804,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     if (widget.activeTool == CanvasTool.select && _selectionMarquee != null) {
       final marquee = _selectionMarquee!;
-      if (marquee.width >= 5 && marquee.height >= 5) {
+      // Gene - Nov, 20, 2026: Scale marquee minimum threshold by 1 / _viewScale.
+      // Old: if (marquee.width >= 5 && marquee.height >= 5) {
+      final minMarquee = 5.0 / _viewScale;
+      if (marquee.width >= minMarquee && marquee.height >= minMarquee) {
         setState(() {
           _floatingSelectionRect = marquee;
           _floatingSelectionOriginRect = marquee;
@@ -2728,13 +2837,16 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         _currentAnnHandle = _AnnHandle.none;
         _gestureOrigin = null;
       });
-      if (settled != null) widget.onSelectAnnotation?.call(settled);
+      // Old: if (settled != null) widget.onSelectAnnotation?.call(settled);
+      if (settled != null) _notifySelectAnnotation(settled);
       return;
     }
 
     if (widget.activeTool == CanvasTool.crop) {
       final rect = _activeCropRect;
-      if (rect == null || rect.width < 15 || rect.height < 15) {
+      // Old: if (rect == null || rect.width < 15 || rect.height < 15) {
+      final minCrop = 15.0 / _viewScale;
+      if (rect == null || rect.width < minCrop || rect.height < minCrop) {
         // Back to the default box, so the next drag draws rather than moves.
         setState(() {
           _activeCropRect = _imageRect;
@@ -2773,9 +2885,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// Double clicks are detected by hand
   bool _consumeDoubleTap(Offset pos) {
     final now = DateTime.now();
+    // Gene - Nov, 20, 2026: Keep double-tap threshold constant in screen pixels and normalize selection scalar notifications.
+    // Old: (pos - _lastTapPos).distance < 12;
     final isDouble =
         now.difference(_lastTapAt) < const Duration(milliseconds: 350) &&
-        (pos - _lastTapPos).distance < 12;
+        (pos - _lastTapPos).distance < 12.0 / _viewScale;
     _lastTapAt = isDouble ? DateTime.fromMillisecondsSinceEpoch(0) : now;
     _lastTapPos = pos;
     return isDouble;
@@ -2798,7 +2912,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       }
       if (hit != null) {
         setState(() => _selectedAnnotationId = hit.id);
-        widget.onSelectAnnotation?.call(hit);
+        // Old: widget.onSelectAnnotation?.call(hit);
+        _notifySelectAnnotation(hit);
       } else {
         setState(() => _selectedAnnotationId = null);
         widget.onSelectAnnotation?.call(null);
@@ -2810,7 +2925,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       // Double-click a text callout to edit it in place.
       if (hit != null && hit.tool == CanvasTool.text) {
         setState(() => _selectedAnnotationId = hit.id);
-        widget.onSelectAnnotation?.call(hit);
+        // Old: widget.onSelectAnnotation?.call(hit);
+        _notifySelectAnnotation(hit);
         _startInlineTextEdit(hit.startPoint ?? pos, existing: hit);
         return;
       }
@@ -2826,7 +2942,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     if (hit != null) {
       setState(() => _selectedAnnotationId = hit.id);
-      widget.onSelectAnnotation?.call(hit);
+      // Old: widget.onSelectAnnotation?.call(hit);
+      _notifySelectAnnotation(hit);
       return;
     }
 
@@ -2892,7 +3009,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       ).copyWith(text: text, endPoint: null);
       _emitAnnotation(annotation);
       setState(() => _selectedAnnotationId = annotation.id);
-      widget.onSelectAnnotation?.call(annotation);
+      // Gene - Nov, 20, 2026: Report screen-space scalars via _notifySelectAnnotation.
+      // Old: widget.onSelectAnnotation?.call(annotation);
+      _notifySelectAnnotation(annotation);
     }
     _focusNode.requestFocus();
   }
@@ -3490,19 +3609,22 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     };
     final nudge = nudges[key];
     if (nudge != null) {
+      // Gene - Nov, 20, 2026: Scale arrow-key nudges by 1 / _viewScale so selections nudge 1 screen pixel (10 with Shift).
+      // Old: nudge * (_isShiftDown ? 10.0 : 1.0)
+      final screenStep = (_isShiftDown ? 10.0 : 1.0) / _viewScale;
       if (_floatingSelectionRect != null) {
         if (!_hasExtractedSelection) {
           _extractFloatingSelection();
         }
         setState(() {
           _floatingSelectionRect = _floatingSelectionRect!.shift(
-            nudge * (_isShiftDown ? 10.0 : 1.0),
+            nudge * screenStep,
           );
         });
         return KeyEventResult.handled;
       }
       if (_selectedAnnotationId != null) {
-        _nudgeSelectedAnnotation(nudge * (_isShiftDown ? 10.0 : 1.0));
+        _nudgeSelectedAnnotation(nudge * screenStep);
         return KeyEventResult.handled;
       }
       if (_canPanView) {
@@ -3742,10 +3864,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     }
 
     final t = SnipTheme.of(context);
-    final selected = _selectedAnnotation;
-    final selectedBounds = selected != null
-        ? AnnotationRenderer.selectionRect(selected)
-        : Rect.zero;
+    // Gene - Nov, 20, 2026: Floating UI chrome overlays moved to viewport-space outside InteractiveViewer so they never scale with zoom.
+    // Old:
+    // final selected = _selectedAnnotation;
+    // final selectedBounds = selected != null
+    //     ? AnnotationRenderer.selectionRect(selected)
+    //     : Rect.zero;
     // Resolved once. `imageRect` walks to the render object and refits the
     // bitmap on every read, and this build asked for it seven times a frame.
     final imageRect = _imageRect;
@@ -4041,6 +4165,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                             painter: _ActiveOverlayPainter(
                                               pixelScale: projection.scale,
                                               patchImages: _patchImages,
+                                              transformationController:
+                                                  _transformationController,
                                               currentAnnotation:
                                                   _currentAnnotation,
                                               selectedAnnotation:
@@ -4070,6 +4196,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                 child: CustomPaint(
                                   painter: _FloatingSelectionPainter(
                                     theme: t,
+                                    transformationController:
+                                        _transformationController,
                                     marqueeRect: _selectionMarquee,
                                     floatingRect: _floatingSelectionRect,
                                     floatingImage: _floatingSelectionUiImage,
@@ -4081,14 +4209,17 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                             ),
                           ],
 
+                          // Gene - Nov, 20, 2026: Zoom-invariant crop painter + viewport-space floating overlays moved outside InteractiveViewer.
                           if (_activeCropRect != null &&
-                              _activeCropRect!.width > 10 &&
-                              _activeCropRect!.height > 10) ...[
+                              _activeCropRect!.width > 0.5 &&
+                              _activeCropRect!.height > 0.5) ...[
                             Positioned.fill(
                               child: IgnorePointer(
                                 child: CustomPaint(
                                   painter: _CropOverlayPainter(
                                     theme: t,
+                                    transformationController:
+                                        _transformationController,
                                     cropRect: _activeCropRect!,
                                     imageRect: imageRect,
                                     nativeImageSize: nativeImageSize,
@@ -4096,64 +4227,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                 ),
                               ),
                             ),
-                            _buildCropActionBar(),
                           ],
-
-                          if (selectedBounds != Rect.zero)
-                            _buildDeleteChip(selectedBounds),
-
-                          // Inline on-canvas text editing overlay
-                          if (_inlineTextPos != null) _buildInlineTextEditor(),
-
-                          // OCR region marquee, drawn while the drag is live —
-                          // the affordance telling the user exactly what is
-                          // about to be OCR'd, so (like the crop and
-                          // floating-selection boundaries) it is a primary
-                          // interactive affordance over arbitrary screenshot
-                          // content, not app-panel chrome. A single
-                          // `t.border` hairline is the PANEL token — nowhere
-                          // near ink/onActive's near-black/near-white
-                          // extremes — and would nearly vanish against the
-                          // common case of a light-grey app UI or document
-                          // region. Paired ink/onActive instead, same as the
-                          // other boundary marks: an outer onActive ring
-                          // (inflated 1px) behind an inner ink ring.
-                          if (widget.activeTool == CanvasTool.ocr &&
-                              _ocrRegion != null) ...[
-                            Positioned.fromRect(
-                              rect: _ocrRegion!.inflate(1.0),
-                              child: IgnorePointer(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: t.onActive,
-                                      width: 2.2,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Positioned.fromRect(
-                              rect: _ocrRegion!,
-                              child: IgnorePointer(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color: t.ink.withValues(alpha: 0.1),
-                                    border: Border.all(
-                                      color: t.ink,
-                                      width: 1.4,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-
-                          // Eyedropper magnifier loupe HUD
-                          if (widget.activeTool == CanvasTool.colorPicker &&
-                              _hoverPos != null &&
-                              _hoverColor != null)
-                            _buildMagnifierLoupe(),
                         ],
                       ),
                     ),
@@ -4161,12 +4235,130 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 ),
               ),
             ),
+            // Gene - Nov, 20, 2026: Interactive viewport-space tool chrome (Crop bar, Delete chip, Inline text box, OCR marquee, Color loupe) rendered outside InteractiveViewer.
+            Positioned.fill(child: _buildViewportToolOverlays(t)),
             // Gene - Nov, 20, 2026: Interactive overlay scrollbars & compact Fit / 1:1 pill for long/panoramic captures.
             if (_baseImage != null)
               Positioned.fill(child: _buildPanoramicNavigationHud(t)),
           ],
         ),
       ),
+    );
+  }
+
+  // Gene - Nov, 20, 2026: Render interactive tool chrome overlays in viewport space outside InteractiveViewer so buttons/editors stay crisp 1x size at any zoom level.
+  Widget _buildViewportToolOverlays(SnipTheme t) {
+    final hasAnyOverlay =
+        _activeCropRect != null ||
+        _selectedAnnotation != null ||
+        _inlineTextPos != null ||
+        (widget.activeTool == CanvasTool.ocr && _ocrRegion != null) ||
+        (widget.activeTool == CanvasTool.colorPicker &&
+            _hoverPos != null &&
+            _hoverColor != null);
+    if (!hasAnyOverlay) return const SizedBox.shrink();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportSize = constraints.biggest;
+        if (viewportSize.isEmpty) return const SizedBox.shrink();
+        return ValueListenableBuilder<Matrix4>(
+          valueListenable: _transformationController,
+          builder: (context, matrix, _) {
+            final rawScale = matrix.getMaxScaleOnAxis();
+            final s = rawScale > 1e-4 ? rawScale : 1.0;
+
+            final selected = _selectedAnnotation;
+            Annotation? selectedCanvasAnn;
+            double? inlineFontSize;
+            if (_inlineTextPos != null && _editingAnnotationId != null) {
+              for (final ann in _canvasAnnotations) {
+                if (ann.id == _editingAnnotationId) {
+                  inlineFontSize = (ann.fontSize * s).clamp(8.0, 160.0);
+                  break;
+                }
+              }
+            }
+            if (selected != null && selected.id != _editingAnnotationId) {
+              final projection = _projectionFor(_canvasSize);
+              selectedCanvasAnn = selected.mappedToCanvasSpace(projection);
+            }
+
+            Rect? vpCropRect;
+            if (_activeCropRect != null &&
+                _activeCropRect!.width > 10.0 / s &&
+                _activeCropRect!.height > 10.0 / s) {
+              vpCropRect = _canvasRectToViewport(_activeCropRect!, matrix);
+            }
+
+            Rect? vpSelectedBounds;
+            if (selectedCanvasAnn != null) {
+              final rawBounds = AnnotationRenderer.selectionRect(
+                selectedCanvasAnn,
+                viewScale: s,
+              );
+              if (rawBounds != Rect.zero) {
+                final projected = _canvasRectToViewport(rawBounds, matrix);
+                if (projected.overlaps(Offset.zero & viewportSize)) {
+                  vpSelectedBounds = projected;
+                }
+              }
+            }
+
+            return Stack(
+              children: [
+                if (widget.activeTool == CanvasTool.ocr &&
+                    _ocrRegion != null) ...[
+                  () {
+                    final vpOcr = _canvasRectToViewport(_ocrRegion!, matrix);
+                    return Positioned.fromRect(
+                      rect: vpOcr.inflate(1.0),
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: t.onActive, width: 2.2),
+                          ),
+                        ),
+                      ),
+                    );
+                  }(),
+                  () {
+                    final vpOcr = _canvasRectToViewport(_ocrRegion!, matrix);
+                    return Positioned.fromRect(
+                      rect: vpOcr,
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: t.ink.withValues(alpha: 0.1),
+                            border: Border.all(color: t.ink, width: 1.4),
+                          ),
+                        ),
+                      ),
+                    );
+                  }(),
+                ],
+                if (vpCropRect != null)
+                  _buildCropActionBar(vpCropRect, viewportSize),
+                if (vpSelectedBounds != null)
+                  _buildDeleteChip(vpSelectedBounds, viewportSize),
+                if (_inlineTextPos != null)
+                  _buildInlineTextEditor(
+                    _canvasToViewport(_inlineTextPos!, matrix),
+                    viewportSize,
+                    inlineFontSize ?? widget.fontSize,
+                  ),
+                if (widget.activeTool == CanvasTool.colorPicker &&
+                    _hoverPos != null &&
+                    _hoverColor != null)
+                  _buildMagnifierLoupe(
+                    _canvasToViewport(_hoverPos!, matrix),
+                    viewportSize,
+                  ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -4619,26 +4811,29 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     });
   }
 
-  Widget _buildCropActionBar() {
+  // Gene - Nov, 20, 2026: Position crop action bar cleanly in viewport coordinates so it never scales or clips off-screen when zoomed.
+  // Old: Widget _buildCropActionBar() {
+  Widget _buildCropActionBar(Rect cropRect, Size size) {
     final t = SnipTheme.of(context);
-    final cropRect = _activeCropRect!;
-    final size = _canvasSize;
+    final rawCropRect = _activeCropRect;
+    if (rawCropRect == null) return const SizedBox.shrink();
 
     double barTop = cropRect.bottom + 14;
-    if (barTop > size.height - 50) {
-      barTop = math.max(12, cropRect.top - 48);
-      if (barTop < 12) barTop = math.max(12, cropRect.bottom - 48);
+    if (barTop > size.height - 92) {
+      barTop = math.max(12, cropRect.top - 86);
+      if (barTop < 12) barTop = math.max(12, cropRect.bottom - 86);
     }
-    final barLeft = (cropRect.center.dx - 110)
-        .clamp(12.0, math.max(12.0, size.width - 260))
+    barTop = barTop.clamp(12.0, math.max(12.0, size.height - 92)).toDouble();
+    final barLeft = (cropRect.center.dx - 125)
+        .clamp(12.0, math.max(12.0, size.width - 272))
         .toDouble();
 
     final imageRect = _imageRect;
     final isExpanded =
-        cropRect.left < imageRect.left - 1 ||
-        cropRect.top < imageRect.top - 1 ||
-        cropRect.right > imageRect.right + 1 ||
-        cropRect.bottom > imageRect.bottom + 1;
+        rawCropRect.left < imageRect.left - 1 ||
+        rawCropRect.top < imageRect.top - 1 ||
+        rawCropRect.right > imageRect.right + 1 ||
+        rawCropRect.bottom > imageRect.bottom + 1;
 
     return Positioned(
       left: barLeft,
@@ -4786,11 +4981,19 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     );
   }
 
-  Widget _buildDeleteChip(Rect selectedBounds) {
+  // Gene - Nov, 20, 2026: Render Delete chip, Inline text editor, and Magnifier loupe in viewport coordinates.
+  // Old: Widget _buildDeleteChip(Rect selectedBounds) {
+  Widget _buildDeleteChip(Rect selectedBounds, Size viewportSize) {
     final t = SnipTheme.of(context);
+    final left = (selectedBounds.topRight.dx - 10)
+        .clamp(4.0, math.max(4.0, viewportSize.width - 28.0))
+        .toDouble();
+    final top = (selectedBounds.topRight.dy - 14)
+        .clamp(4.0, math.max(4.0, viewportSize.height - 28.0))
+        .toDouble();
     return Positioned(
-      left: math.max(0, selectedBounds.topRight.dx - 10),
-      top: math.max(0, selectedBounds.topRight.dy - 14),
+      left: left,
+      top: top,
       child: Tooltip(
         message: 'Delete selected annotation (Delete / Backspace)',
         child: Material(
@@ -4810,9 +5013,13 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     );
   }
 
-  Widget _buildInlineTextEditor() {
-    final pos = _inlineTextPos;
-    if (pos == null) return const SizedBox.shrink();
+  // Old: Widget _buildInlineTextEditor() {
+  Widget _buildInlineTextEditor(
+    Offset vpPos,
+    Size viewportSize,
+    double editorFontSize,
+  ) {
+    if (_inlineTextPos == null) return const SizedBox.shrink();
 
     final t = SnipTheme.of(context);
     final showBg =
@@ -4837,9 +5044,16 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // documented approximation Task 5 used elsewhere for chrome sitting on
     // unknowable image content, and is exact whenever showBg is false.
 
+    final left = (vpPos.dx - 8)
+        .clamp(10.0, math.max(10.0, viewportSize.width - 160.0))
+        .toDouble();
+    final top = (vpPos.dy - 6)
+        .clamp(10.0, math.max(10.0, viewportSize.height - 60.0))
+        .toDouble();
+
     return Positioned(
-      left: math.max(10, pos.dx - 8),
-      top: math.max(10, pos.dy - 6),
+      left: left,
+      top: top,
       child: Material(
         color: Colors.transparent,
         child: Container(
@@ -4871,7 +5085,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
               keyboardType: TextInputType.multiline,
               style: TextStyle(
                 color: widget.activeColor,
-                fontSize: widget.fontSize,
+                fontSize: editorFontSize,
                 fontWeight: FontWeight.w600,
                 height: 1.25,
               ),
@@ -4891,13 +5105,16 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     );
   }
 
-  Widget _buildMagnifierLoupe() {
+  // Old: Widget _buildMagnifierLoupe() {
+  Widget _buildMagnifierLoupe(Offset vpPos, Size size) {
     final t = SnipTheme.of(context);
-    final pos = _hoverPos;
     final color = _hoverColor;
     final pixelPos = _hoverPixelPos;
     final cached = _cachedSourceImage;
-    if (pos == null || color == null || pixelPos == null || cached == null) {
+    if (_hoverPos == null ||
+        color == null ||
+        pixelPos == null ||
+        cached == null) {
       return const SizedBox.shrink();
     }
 
@@ -4906,11 +5123,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final rgb =
         'RGB(${(color.r * 255).round()}, ${(color.g * 255).round()}, ${(color.b * 255).round()})';
 
-    final size = _canvasSize;
-    double left = pos.dx + 20;
-    double top = pos.dy - 120;
-    if (left + 120 > size.width) left = pos.dx - 120;
-    if (top < 10) top = pos.dy + 25;
+    double left = vpPos.dx + 20;
+    double top = vpPos.dy - 120;
+    if (left + 120 > size.width) left = vpPos.dx - 120;
+    if (top < 10) top = vpPos.dy + 25;
 
     return Positioned(
       left: left.clamp(10.0, math.max(10.0, size.width - 130)),
@@ -5066,16 +5282,22 @@ class _CropOverlayPainter extends CustomPainter {
   final Rect imageRect;
   final Size? nativeImageSize;
   final SnipTheme theme;
+  // Gene - Nov, 20, 2026: Repaint directly from transformationController so crop borders, handles, and pill badge stay 1x screen size when zoomed.
+  final TransformationController transformationController;
 
   _CropOverlayPainter({
     required this.theme,
+    required this.transformationController,
     required this.cropRect,
     required this.imageRect,
     this.nativeImageSize,
-  });
+  }) : super(repaint: transformationController);
 
   @override
   void paint(Canvas canvas, Size size) {
+    final rawS = transformationController.value.getMaxScaleOnAxis();
+    final s = rawS > 1e-4 ? rawS : 1.0;
+    if (cropRect.width * s <= 10 || cropRect.height * s <= 10) return;
     // 1. Dimming mask on outside of cropRect. `SnipTheme.scrim` is
     // deliberately mode-invariant — see its own doc comment — so the mask
     // never flips polarity in dark mode.
@@ -5126,46 +5348,38 @@ class _CropOverlayPainter extends CustomPainter {
         imageRect,
         Paint()
           ..color = theme.onActive
-          ..strokeWidth = 2.2
+          ..strokeWidth = 2.2 / s
           ..style = PaintingStyle.stroke,
       );
       canvas.drawRect(
         imageRect,
         Paint()
           ..color = theme.ink
-          ..strokeWidth = 1.0
+          ..strokeWidth = 1.0 / s
           ..style = PaintingStyle.stroke,
       );
     }
 
-    // 4. Crop border. Skeleton has no accent hue left to guarantee this reads
-    // against arbitrary screenshot content, so it is drawn as a matched
-    // ink/onActive pair — a lighter halo behind a darker line, or the
-    // reverse in dark mode — so at least one of the two always contrasts
-    // with whatever is underneath.
+    // 4. Crop border.
     canvas.drawRect(
       cropRect,
       Paint()
         ..color = theme.onActive
-        ..strokeWidth = 3.4
+        ..strokeWidth = 3.4 / s
         ..style = PaintingStyle.stroke,
     );
     canvas.drawRect(
       cropRect,
       Paint()
         ..color = theme.ink
-        ..strokeWidth = 1.8
+        ..strokeWidth = 1.8 / s
         ..style = PaintingStyle.stroke,
     );
 
-    // 5. Rule-of-thirds guides — a purely decorative composition aid, not an
-    // affordance the user must be able to see and act on (unlike the crop
-    // border, handles, and the boundary stroke above, all of which are now
-    // paired). Kept as a fixed, low-alpha literal on purpose: reviewed and
-    // accepted as low-stakes.
+    // 5. Rule-of-thirds guides
     final guidePaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.28)
-      ..strokeWidth = 1.0;
+      ..strokeWidth = 1.0 / s;
     for (int i = 1; i < 3; i++) {
       final dx = cropRect.left + cropRect.width * i / 3;
       final dy = cropRect.top + cropRect.height * i / 3;
@@ -5181,14 +5395,8 @@ class _CropOverlayPainter extends CustomPainter {
       );
     }
 
-    // 6. 8 Square handles. A physical drop shadow (literal, not themed — it
-    // is a depth cue, not a state signal) plus an ink fill ringed in the
-    // opposite mark tone (onActive), so the ring always contrasts with its
-    // own fill regardless of mode — the same guaranteed-contrast pairing
-    // `SnipTheme.ringOn` documents, applied at draw time since a plain
-    // `ink` handle over a screenshot close to `ink`'s own tone is exactly
-    // the invisible-handle bug this pairing avoids.
-    const handleSize = 9.0;
+    // 6. 8 Square handles scaled inversely with live zoom.
+    final handleSize = 9.0 / s;
     void drawSquareHandle(Offset center) {
       final rect = Rect.fromCenter(
         center: center,
@@ -5196,7 +5404,7 @@ class _CropOverlayPainter extends CustomPainter {
         height: handleSize,
       );
       canvas.drawRect(
-        rect.shift(const Offset(0, 1)),
+        rect.shift(Offset(0, 1.0 / s)),
         Paint()..color = Colors.black45,
       );
       canvas.drawRect(rect, Paint()..color = theme.ink);
@@ -5204,7 +5412,7 @@ class _CropOverlayPainter extends CustomPainter {
         rect,
         Paint()
           ..color = theme.onActive
-          ..strokeWidth = 1.2
+          ..strokeWidth = 1.2 / s
           ..style = PaintingStyle.stroke,
       );
     }
@@ -5222,8 +5430,7 @@ class _CropOverlayPainter extends CustomPainter {
       drawSquareHandle(c);
     }
 
-    // 7. Dimensions badge — the same "ink mark plate, onActive knockout
-    // text" pattern used elsewhere for chrome badges.
+    // 7. Dimensions badge kept constant 1:1 size in screen pixels.
     int pixelW = cropRect.width.round();
     int pixelH = cropRect.height.round();
     if (nativeImageSize != null && imageRect.width > 0) {
@@ -5246,12 +5453,15 @@ class _CropOverlayPainter extends CustomPainter {
 
     final badgeCenter = Offset(
       cropRect.center.dx,
-      math.max(16, cropRect.top - 16),
+      math.max(16.0 / s, cropRect.top - 16.0 / s),
     );
+    canvas.save();
+    canvas.translate(badgeCenter.dx, badgeCenter.dy);
+    if ((s - 1.0).abs() > 1e-4) canvas.scale(1.0 / s);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(
-          center: badgeCenter,
+          center: Offset.zero,
           width: tp.width + 12,
           height: tp.height + 6,
         ),
@@ -5259,7 +5469,8 @@ class _CropOverlayPainter extends CustomPainter {
       ),
       Paint()..color = theme.ink,
     );
-    tp.paint(canvas, badgeCenter - Offset(tp.width / 2, tp.height / 2));
+    tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+    canvas.restore();
   }
 
   static void _drawCheckerboardGrid(Canvas canvas, Rect rect, SnipTheme theme) {
@@ -5291,30 +5502,36 @@ class _CropOverlayPainter extends CustomPainter {
   bool shouldRepaint(covariant _CropOverlayPainter oldDelegate) =>
       oldDelegate.cropRect != cropRect ||
       oldDelegate.imageRect != imageRect ||
-      oldDelegate.theme != theme;
+      oldDelegate.theme != theme ||
+      oldDelegate.transformationController != transformationController;
 }
 
 class _FloatingSelectionPainter extends CustomPainter {
   final SnipTheme theme;
+  final TransformationController transformationController;
   final Rect? marqueeRect;
   final Rect? floatingRect;
   final ui.Image? floatingImage;
   final Size? nativeImageSize;
   final Rect? imageRect;
 
+  // Gene - Nov, 20, 2026: Listen to transformationController so marquee/floating selection borders, dashes, handles, and pill badge stay constant screen size.
   _FloatingSelectionPainter({
     required this.theme,
+    required this.transformationController,
     this.marqueeRect,
     this.floatingRect,
     this.floatingImage,
     this.nativeImageSize,
     this.imageRect,
-  });
+  }) : super(repaint: transformationController);
 
   @override
   void paint(Canvas canvas, Size size) {
+    final rawS = transformationController.value.getMaxScaleOnAxis();
+    final s = rawS > 1e-4 ? rawS : 1.0;
     final rect = floatingRect ?? marqueeRect;
-    if (rect == null || rect.width < 1 || rect.height < 1) return;
+    if (rect == null || rect.width < 1.0 / s || rect.height < 1.0 / s) return;
 
     // 1. If we have a floating extracted bitmap, render it
     if (floatingImage != null && floatingRect != null) {
@@ -5339,28 +5556,22 @@ class _FloatingSelectionPainter extends CustomPainter {
       );
     }
 
-    // 2. Dashed Marquee / Selection Boundary Border. Skeleton has no accent
-    // hue to guarantee this reads against arbitrary screenshot content, so —
-    // like the crop border — it is a matched ink/onActive pair rather than a
-    // single mark that could blend into similarly-toned image content.
+    // 2. Dashed Marquee / Selection Boundary Border.
     final borderPaint = Paint()
       ..color = theme.ink
-      ..strokeWidth = 1.6
+      ..strokeWidth = 1.6 / s
       ..style = PaintingStyle.stroke;
 
     final echoBorderPaint = Paint()
       ..color = theme.onActive
-      ..strokeWidth = 1.6
+      ..strokeWidth = 1.6 / s
       ..style = PaintingStyle.stroke;
 
-    _drawDashedRect(canvas, rect, borderPaint, echoBorderPaint);
+    _drawDashedRect(canvas, rect, borderPaint, echoBorderPaint, s);
 
-    // 3. 8 Resize Handles — same physical-shadow + ink-fill + onActive-ring
-    // treatment as the crop overlay's handles, for the same reason: these
-    // are grabbable marks over arbitrary image content, not chrome over our
-    // own panel background.
+    // 3. 8 Resize Handles
     if (floatingRect != null) {
-      const handleSize = 9.0;
+      final handleSize = 9.0 / s;
       void drawSquareHandle(Offset center) {
         final hRect = Rect.fromCenter(
           center: center,
@@ -5368,7 +5579,7 @@ class _FloatingSelectionPainter extends CustomPainter {
           height: handleSize,
         );
         canvas.drawRect(
-          hRect.shift(const Offset(0, 1)),
+          hRect.shift(Offset(0, 1.0 / s)),
           Paint()..color = Colors.black38,
         );
         canvas.drawRect(hRect, Paint()..color = theme.ink);
@@ -5376,7 +5587,7 @@ class _FloatingSelectionPainter extends CustomPainter {
           hRect,
           Paint()
             ..color = theme.onActive
-            ..strokeWidth = 1.4
+            ..strokeWidth = 1.4 / s
             ..style = PaintingStyle.stroke,
         );
       }
@@ -5395,7 +5606,7 @@ class _FloatingSelectionPainter extends CustomPainter {
       }
     }
 
-    // 4. Dimensions Pill Badge — ink mark plate, onActive knockout text.
+    // 4. Dimensions Pill Badge
     int pixelW = rect.width.round();
     int pixelH = rect.height.round();
     if (nativeImageSize != null && imageRect != null && imageRect!.width > 0) {
@@ -5416,11 +5627,14 @@ class _FloatingSelectionPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
     )..layout();
 
-    final badgeCenter = Offset(rect.center.dx, rect.top - 16);
+    final badgeCenter = Offset(rect.center.dx, rect.top - 16.0 / s);
+    canvas.save();
+    canvas.translate(badgeCenter.dx, badgeCenter.dy);
+    if ((s - 1.0).abs() > 1e-4) canvas.scale(1.0 / s);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromCenter(
-          center: badgeCenter,
+          center: Offset.zero,
           width: tp.width + 12,
           height: tp.height + 6,
         ),
@@ -5428,7 +5642,8 @@ class _FloatingSelectionPainter extends CustomPainter {
       ),
       Paint()..color = theme.ink,
     );
-    tp.paint(canvas, badgeCenter - Offset(tp.width / 2, tp.height / 2));
+    tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+    canvas.restore();
   }
 
   void _drawDashedRect(
@@ -5436,9 +5651,11 @@ class _FloatingSelectionPainter extends CustomPainter {
     Rect rect,
     Paint paint,
     Paint shadowPaint,
+    double scale,
   ) {
-    const dashWidth = 5.0;
-    const dashSpace = 4.0;
+    final dashWidth = 5.0 / scale;
+    final dashSpace = 4.0 / scale;
+    final shift = Offset(0.5 / scale, 0.5 / scale);
 
     void drawDashedLine(Offset start, Offset end) {
       final dx = end.dx - start.dx;
@@ -5458,11 +5675,7 @@ class _FloatingSelectionPainter extends CustomPainter {
         if (draw) {
           final p1 = Offset(start.dx + ux * current, start.dy + uy * current);
           final p2 = Offset(p1.dx + ux * length, p1.dy + uy * length);
-          canvas.drawLine(
-            p1 + const Offset(0.5, 0.5),
-            p2 + const Offset(0.5, 0.5),
-            shadowPaint,
-          );
+          canvas.drawLine(p1 + shift, p2 + shift, shadowPaint);
           canvas.drawLine(p1, p2, paint);
         }
         current += length;
@@ -5485,7 +5698,8 @@ class _FloatingSelectionPainter extends CustomPainter {
       oldDelegate.floatingImage != floatingImage ||
       oldDelegate.nativeImageSize != nativeImageSize ||
       oldDelegate.imageRect != imageRect ||
-      oldDelegate.theme != theme;
+      oldDelegate.theme != theme ||
+      oldDelegate.transformationController != transformationController;
 }
 
 // Gene - Nov, 20, 2026: Split monolithic _AnnotationPainter into _CommittedAnnotationsPainter (cached GPU layer) and _ActiveOverlayPainter (120fps live interaction layer).
@@ -5619,19 +5833,24 @@ class _ActiveOverlayPainter extends CustomPainter {
   final Map<String, ui.Image> patchImages;
   final double pixelScale;
   final bool showHud;
+  // Gene - Nov, 20, 2026: Repaint on pan/zoom without rebuilding canvas so selection chrome & HUD stay constant screen pixels at 120fps.
+  final TransformationController transformationController;
 
   _ActiveOverlayPainter({
     required this.pixelScale,
     required this.patchImages,
+    required this.transformationController,
     this.currentAnnotation,
     this.selectedAnnotation,
     this.baseImage,
     this.showHud = false,
-  });
+  }) : super(repaint: transformationController);
 
   @override
   void paint(Canvas canvas, Size size) {
     if (currentAnnotation == null && selectedAnnotation == null) return;
+    final rawS = transformationController.value.getMaxScaleOnAxis();
+    final viewScale = rawS > 1e-4 ? rawS : 1.0;
 
     if (currentAnnotation != null) {
       final image = baseImage;
@@ -5652,14 +5871,28 @@ class _ActiveOverlayPainter extends CustomPainter {
     }
 
     if (selectedAnnotation != null) {
-      AnnotationRenderer.paintSelection(canvas, selectedAnnotation!);
+      AnnotationRenderer.paintSelection(
+        canvas,
+        selectedAnnotation!,
+        viewScale: viewScale,
+      );
       if (showHud) {
-        AnnotationRenderer.paintMeasurementHud(canvas, selectedAnnotation!);
+        AnnotationRenderer.paintMeasurementHud(
+          canvas,
+          selectedAnnotation!,
+          viewScale: viewScale,
+          pixelScale: pixelScale,
+        );
       }
     }
 
     if (showHud && currentAnnotation != null) {
-      AnnotationRenderer.paintMeasurementHud(canvas, currentAnnotation!);
+      AnnotationRenderer.paintMeasurementHud(
+        canvas,
+        currentAnnotation!,
+        viewScale: viewScale,
+        pixelScale: pixelScale,
+      );
     }
   }
 
@@ -5670,6 +5903,7 @@ class _ActiveOverlayPainter extends CustomPainter {
         oldDelegate.pixelScale != pixelScale ||
         oldDelegate.showHud != showHud ||
         oldDelegate.baseImage != baseImage ||
+        oldDelegate.transformationController != transformationController ||
         !identical(oldDelegate.patchImages, patchImages);
   }
 }

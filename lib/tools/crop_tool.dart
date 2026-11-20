@@ -42,7 +42,11 @@ class CropToolHandler extends ToolHandler {
   void onPanEnd(DragEndDetails details) {
     if (delegate.currentAnnotation != null) {
       final rect = delegate.activeCropRect;
-      if (rect != null && rect.width >= 15 && rect.height >= 15) {
+      // Gene - Nov, 20, 2026: Divide minimum crop size threshold by viewScale so fine crops work when zoomed in.
+      // Old: if (rect != null && rect.width >= 15 && rect.height >= 15) {
+      final s = delegate.viewScale > 0 ? delegate.viewScale : 1.0;
+      final minDim = 15.0 / s;
+      if (rect != null && rect.width >= minDim && rect.height >= minDim) {
         delegate.onCurrentAnnotationChanged(null);
       } else {
         // Too small to be a deliberate crop — drop the rect entirely so the

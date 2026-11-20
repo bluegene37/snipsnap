@@ -6,9 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
+import 'package:snipsnap/models/annotation.dart';
 import 'package:snipsnap/services/native/rust_image_core.dart';
+import 'package:snipsnap/utils/canvas_projection.dart';
 import 'package:snipsnap/utils/constants.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
+import 'package:snipsnap/views/components/annotation_renderer.dart';
 import 'package:snipsnap/views/editor_canvas.dart';
 
 import 'support/base_image_settle.dart';
@@ -497,5 +500,257 @@ void main() {
       expect(blurBuf[(3 * 8 + 3) * 4], lessThan(240));
       expect(blurBuf[0], 0);
     });
+  });
+
+  group('Zoom-Invariant Tool Sizing & Chrome', () {
+    late Directory tempDir;
+    late String tallPngPath;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('snipsnap_zoom_tools_');
+      tallPngPath = '${tempDir.path}/tall_800x9000.png';
+      final tall = img.Image(width: 800, height: 9000);
+      img.fill(tall, color: img.ColorRgba8(245, 245, 250, 255));
+      File(tallPngPath).writeAsBytesSync(img.encodePng(tall, level: 1));
+    });
+
+    tearDown(() {
+      if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+    });
+
+    test('Annotation.withCanvasSpaceScalars compensates by viewScale', () {
+      final projection = CanvasProjection(
+        imageSize: const Size(1000, 9000),
+        canvasSize: const Size(1200, 760),
+      );
+      final base = Annotation(
+        id: 't1',
+        tool: CanvasTool.pen,
+        color: const Color(0xFFFF0000),
+        strokeWidth: 1,
+        fontSize: 1,
+      );
+
+      final zoomed = base.withCanvasSpaceScalars(
+        projection,
+        strokeWidth: 4.0,
+        fontSize: 18.0,
+        viewScale: projection.scale,
+      );
+      expect(zoomed.strokeWidth, closeTo(4.0, 0.01));
+      expect(zoomed.fontSize, closeTo(18.0, 0.01));
+
+      final unzoomed = base.withCanvasSpaceScalars(
+        projection,
+        strokeWidth: 4.0,
+        fontSize: 18.0,
+      );
+      expect(unzoomed.strokeWidth, closeTo(4.0 * projection.scale, 0.01));
+      expect(unzoomed.fontSize, closeTo(18.0 * projection.scale, 0.01));
+    });
+
+    test(
+      'AnnotationRenderer scales heads, caps, selection bounds, and hit-tests cleanly when zoomed',
+      () {
+        final zoomedArrow = Annotation(
+          id: 'a1',
+          tool: CanvasTool.arrow,
+          color: const Color(0xFF000000),
+          strokeWidth: 4.0 / 12.0,
+          startPoint: const Offset(100, 100),
+          endPoint: const Offset(200, 100),
+        );
+        final head = AnnotationRenderer.arrowHead(zoomedArrow);
+        expect(head.length, closeTo(16.0 / 12.0, 0.01));
+
+        final zoomedRuler = Annotation(
+          id: 'r1',
+          tool: CanvasTool.ruler,
+          color: const Color(0xFF000000),
+          strokeWidth: 3.0 / 12.0,
+          startPoint: const Offset(100, 100),
+          endPoint: const Offset(200, 100),
+        );
+        expect(
+          AnnotationRenderer.rulerCapHalf(zoomedRuler),
+          closeTo(0.875, 0.01),
+        );
+
+        final box = Annotation(
+          id: 's1',
+          tool: CanvasTool.shape,
+          color: const Color(0xFF000000),
+          strokeWidth: 2.0 / 12.0,
+          startPoint: const Offset(100, 100),
+          endPoint: const Offset(110, 110),
+        );
+        final selRect = AnnotationRenderer.selectionRect(box, viewScale: 12.0);
+        expect(selRect.width, closeTo(10.0 + 16.0 / 12.0, 0.01));
+
+        final line = Annotation(
+          id: 'l1',
+          tool: CanvasTool.line,
+          color: const Color(0xFF000000),
+          strokeWidth: 2.0 / 12.0,
+          startPoint: const Offset(100, 100),
+          endPoint: const Offset(150, 100),
+        );
+        // 5 canvas units = 60 screen px at 12x -> miss at 12x, hit at 1x.
+        expect(
+          AnnotationRenderer.hitTest(
+            line,
+            const Offset(125, 105),
+            viewScale: 12.0,
+          ),
+          isFalse,
+        );
+        expect(
+          AnnotationRenderer.hitTest(
+            line,
+            const Offset(125, 105),
+            viewScale: 1.0,
+          ),
+          isTrue,
+        );
+        expect(
+          AnnotationRenderer.hitTest(
+            line,
+            const Offset(125, 100.5),
+            viewScale: 12.0,
+          ),
+          isTrue,
+        );
+      },
+    );
+
+    testWidgets(
+      'drawing Arrow, StepMarker, and Pen on auto-zoomed tall image keeps screen-constant size and keeps Delete chip outside InteractiveViewer',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(1200, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+
+        Future<({List<Annotation> added, Annotation? selected})> runDraw({
+          required CanvasTool tool,
+          required Future<void> Function() action,
+        }) async {
+          final added = <Annotation>[];
+          Annotation? selected;
+          var annotations = <Annotation>[];
+          final repaintKey = GlobalKey();
+          late StateSetter hostSetState;
+
+          await tester.runAsync(() async {
+            await tester.pumpWidget(
+              SnipThemeScope(
+                theme: SnipTheme.forMode(SnipThemeMode.dark),
+                child: MaterialApp(
+                  home: Scaffold(
+                    body: StatefulBuilder(
+                      builder: (context, setState) {
+                        hostSetState = setState;
+                        return SizedBox(
+                          width: 1200,
+                          height: 800,
+                          child: EditorCanvas(
+                            imagePath: tallPngPath,
+                            annotations: annotations,
+                            activeTool: tool,
+                            activeColor: const Color(0xFFEF4444),
+                            strokeWidth: 4.0,
+                            fontSize: 18.0,
+                            isFilled: false,
+                            stepCounter: 1,
+                            onAnnotationAdded: (ann) {
+                              added.add(ann);
+                              hostSetState(() {
+                                annotations = [...annotations, ann];
+                              });
+                            },
+                            onSelectAnnotation: (ann) => selected = ann,
+                            onStepCounterIncremented: (_) {},
+                            repaintBoundaryKey: repaintKey,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            );
+            await settleBaseImage(tester);
+          });
+          await tester.pumpAndSettle();
+
+          expect(_scale(tester), greaterThan(4.0));
+          await action();
+          await tester.pumpAndSettle();
+          return (added: added, selected: selected);
+        }
+
+        // 1. Arrow: strokeWidth matches 4.0px screen size instead of 4 * 11.84 = 47px,
+        // sliders receive ~4.0 back, and Delete chip sits outside InteractiveViewer.
+        final arrowRes = await runDraw(
+          tool: CanvasTool.arrow,
+          action: () async {
+            final gesture = await tester.startGesture(
+              const Offset(500, 300),
+              kind: PointerDeviceKind.mouse,
+            );
+            await tester.pump(const Duration(milliseconds: 16));
+            await gesture.moveTo(const Offset(700, 380));
+            await tester.pump(const Duration(milliseconds: 16));
+            await gesture.up();
+            await tester.pumpAndSettle();
+
+            expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+            expect(
+              find.descendant(
+                of: find.byType(InteractiveViewer),
+                matching: find.byIcon(Icons.close_rounded),
+              ),
+              findsNothing,
+              reason:
+                  'Delete chip must live in viewport space outside InteractiveViewer',
+            );
+          },
+        );
+        expect(arrowRes.added, hasLength(1));
+        expect(arrowRes.added.single.strokeWidth, closeTo(4.0, 0.25));
+        expect(arrowRes.selected, isNotNull);
+        expect(arrowRes.selected!.strokeWidth, closeTo(4.0, 0.25));
+
+        // 2. Step Marker: fontSize stays ~18px instead of blowing up to ~213px.
+        final stepRes = await runDraw(
+          tool: CanvasTool.stepMarker,
+          action: () async {
+            await tester.tapAt(const Offset(600, 400));
+            await tester.pumpAndSettle();
+          },
+        );
+        expect(stepRes.added, hasLength(1));
+        expect(stepRes.added.single.fontSize, closeTo(18.0, 0.5));
+
+        // 3. Pen: 30 screen-px drag samples densely (>= 4 points) and stays ~4.0px wide.
+        final penRes = await runDraw(
+          tool: CanvasTool.pen,
+          action: () async {
+            final gesture = await tester.startGesture(
+              const Offset(580, 350),
+              kind: PointerDeviceKind.mouse,
+            );
+            await tester.pump(const Duration(milliseconds: 16));
+            for (var i = 1; i <= 6; i++) {
+              await gesture.moveTo(Offset(580 + i * 5.0, 350));
+              await tester.pump(const Duration(milliseconds: 16));
+            }
+            await gesture.up();
+            await tester.pumpAndSettle();
+          },
+        );
+        expect(penRes.added, hasLength(1));
+        expect(penRes.added.single.strokeWidth, closeTo(4.0, 0.25));
+        expect(penRes.added.single.points.length, greaterThanOrEqualTo(4));
+      },
+    );
   });
 }

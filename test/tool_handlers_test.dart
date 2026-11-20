@@ -68,6 +68,9 @@ class MockToolDelegate implements ToolDelegate {
   bool isShiftDown = false;
   @override
   bool isAltDown = false;
+  // Gene - Nov, 20, 2026: Added viewScale for ToolDelegate zoom-invariance support.
+  @override
+  double viewScale = 1.0;
 
   @override
   List<Annotation> get annotations => addedAnnotations;

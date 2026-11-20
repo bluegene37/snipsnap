@@ -37,6 +37,10 @@ class _RecordingDelegate implements ToolDelegate {
     selectedId = id;
   }
 
+  // Gene - Nov, 20, 2026: Explicit viewScale getter matching ToolDelegate contract.
+  @override
+  double get viewScale => 1.0;
+
   // Everything below is unused by FillToolHandler.
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

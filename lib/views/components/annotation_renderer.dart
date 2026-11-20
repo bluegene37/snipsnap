@@ -35,15 +35,20 @@ class AnnotationRenderer {
   /// length — as this used to, at half the arrow's span — left the head frozen
   /// while the shaft went on thickening, until the body was wider than the
   /// point it was supposed to be attached to.
+  // Gene - Nov, 20, 2026: Proportional arrow head & ruler cap floors so zoomed-in strokes don't keep giant 1x minimum dimensions.
+  static double _safeScale(double s) => s > 1e-4 ? s : 1.0;
+
   static ({double length, double halfWidth}) arrowHead(Annotation ann) {
     final start = ann.startPoint;
     final end = ann.endPoint;
     if (start == null || end == null) return (length: 0, halfWidth: 0);
 
-    var length = math.max(
-      arrowHeadMinLength,
-      ann.strokeWidth * arrowHeadLengthMultiplier,
-    );
+    // Old:
+    // var length = math.max(
+    //   arrowHeadMinLength,
+    //   ann.strokeWidth * arrowHeadLengthMultiplier,
+    // );
+    var length = math.max(0.5, ann.strokeWidth * arrowHeadLengthMultiplier);
     var halfWidth = length * arrowHeadAspect;
 
     final maxLength = (end - start).distance * 0.8;
@@ -61,8 +66,11 @@ class AnnotationRenderer {
   static const double rulerCapMultiplier = 3.5;
   static const double rulerMinCapHalf = 6.0;
 
+  // Old:
+  // static double rulerCapHalf(Annotation ann) =>
+  //     math.max(rulerMinCapHalf, ann.strokeWidth * rulerCapMultiplier);
   static double rulerCapHalf(Annotation ann) =>
-      math.max(rulerMinCapHalf, ann.strokeWidth * rulerCapMultiplier);
+      math.max(0.5, ann.strokeWidth * rulerCapMultiplier);
 
   /// How much a mark's extent *across* its own axis grows per unit of stroke
   /// weight.
@@ -153,7 +161,9 @@ class AnnotationRenderer {
         final capHalf = rulerCapHalf(ann);
         final span = ann.endPoint! - ann.startPoint!;
         final length = span.distance;
-        final normal = length < 1
+        // Gene - Nov, 20, 2026: Lower minimum ruler length guard for zoomed-in precision.
+        // Old: final normal = length < 1
+        final normal = length < 0.05
             ? const Offset(0, 1)
             : Offset(-span.dy / length, span.dx / length);
         final corners = [
@@ -186,12 +196,29 @@ class AnnotationRenderer {
 
       case CanvasTool.text:
         if (ann.startPoint == null || ann.text == null) return Rect.zero;
-        final tp = _layoutText(ann);
+        // Gene - Nov, 20, 2026: Use crisp micro-text layout and proportional padding for zoomed-in text boxes.
+        // Old:
+        // final tp = _layoutText(ann);
+        // return Rect.fromLTWH(
+        //   ann.startPoint!.dx - _textPadX,
+        //   ann.startPoint!.dy - _textPadY,
+        //   tp.width + _textPadX * 2,
+        //   tp.height + _textPadY * 2,
+        // );
+        final laidOut = _layoutCrispText(
+          text: ann.text!,
+          color: ann.color,
+          fontSize: ann.fontSize,
+          fontWeight: FontWeight.w600,
+          height: 1.25,
+        );
+        final padX = _textPadXFor(ann);
+        final padY = _textPadYFor(ann);
         return Rect.fromLTWH(
-          ann.startPoint!.dx - _textPadX,
-          ann.startPoint!.dy - _textPadY,
-          tp.width + _textPadX * 2,
-          tp.height + _textPadY * 2,
+          ann.startPoint!.dx - padX,
+          ann.startPoint!.dy - padY,
+          laidOut.size.width + padX * 2,
+          laidOut.size.height + padY * 2,
         );
 
       default:
@@ -276,10 +303,17 @@ class AnnotationRenderer {
   }
 
   /// Bounds of the selection frame drawn around [ann].
-  static Rect selectionRect(Annotation ann) {
+  // Gene - Nov, 20, 2026: Scale selection inset and hit-testing tolerance inversely with viewScale so handles & hit-boxes stay constant screen size.
+  // Old:
+  // static Rect selectionRect(Annotation ann) {
+  //   final raw = boundingRect(ann);
+  //   if (raw == Rect.zero) return Rect.zero;
+  //   return raw.inflate(selectionInset);
+  // }
+  static Rect selectionRect(Annotation ann, {double viewScale = 1.0}) {
     final raw = boundingRect(ann);
     if (raw == Rect.zero) return Rect.zero;
-    return raw.inflate(selectionInset);
+    return raw.inflate(selectionInset / _safeScale(viewScale));
   }
 
   /// Maps a canvas point into the annotation's own un-rotated coordinate space
@@ -314,14 +348,26 @@ class AnnotationRenderer {
   /// Loose fallback used when nothing was hit precisely: the whole (rotated)
   /// bounding box counts. Lets users grab a large hollow rectangle by clicking
   /// inside it when there is nothing underneath to select instead.
-  static bool hitTestBounds(Annotation ann, Offset canvasPoint) {
+  // Gene - Nov, 20, 2026: Divide hitPadding by viewScale so hit-testing matches constant screen pixels at every zoom level.
+  static bool hitTestBounds(
+    Annotation ann,
+    Offset canvasPoint, {
+    double viewScale = 1.0,
+  }) {
     final rect = boundingRect(ann);
     if (rect == Rect.zero) return false;
-    return rect.inflate(hitPadding).contains(toLocalSpace(ann, canvasPoint));
+    final pad = hitPadding / _safeScale(viewScale);
+    return rect.inflate(pad).contains(toLocalSpace(ann, canvasPoint));
   }
 
-  static bool hitTest(Annotation ann, Offset canvasPoint) {
+  static bool hitTest(
+    Annotation ann,
+    Offset canvasPoint, {
+    double viewScale = 1.0,
+  }) {
     final point = toLocalSpace(ann, canvasPoint);
+    final s = _safeScale(viewScale);
+    final pad = hitPadding / s;
 
     switch (ann.tool) {
       case CanvasTool.shape:
@@ -331,9 +377,9 @@ class AnnotationRenderer {
         // to whatever sits underneath (Figma/Snagit behaviour).
         if (ann.fill) {
           return shapePath(ann).contains(point) ||
-              _isNearShapeOutline(ann, point);
+              _isNearShapeOutline(ann, point, viewScale: s);
         }
-        return _isNearShapeOutline(ann, point);
+        return _isNearShapeOutline(ann, point, viewScale: s);
 
       case CanvasTool.crop:
       case CanvasTool.blur:
@@ -344,12 +390,12 @@ class AnnotationRenderer {
         return Rect.fromPoints(
           ann.startPoint!,
           ann.endPoint!,
-        ).inflate(hitPadding).contains(point);
+        ).inflate(pad).contains(point);
 
       case CanvasTool.arrow:
         if (ann.startPoint == null || ann.endPoint == null) return false;
         if (ann.controlPoint != null) {
-          final tolerance = ann.strokeWidth / 2 + hitPadding;
+          final tolerance = ann.strokeWidth / 2 + pad;
           Offset prev = ann.startPoint!;
           const steps = 16;
           for (int i = 1; i <= steps; i++) {
@@ -368,18 +414,18 @@ class AnnotationRenderer {
           return false;
         }
         return _distanceToSegment(point, ann.startPoint!, ann.endPoint!) <=
-            (ann.strokeWidth / 2 + hitPadding);
+            (ann.strokeWidth / 2 + pad);
 
       case CanvasTool.line:
       case CanvasTool.ruler:
         if (ann.startPoint == null || ann.endPoint == null) return false;
         return _distanceToSegment(point, ann.startPoint!, ann.endPoint!) <=
-            (ann.strokeWidth / 2 + hitPadding);
+            (ann.strokeWidth / 2 + pad);
 
       case CanvasTool.pen:
       case CanvasTool.highlight:
         if (ann.points.isEmpty) return false;
-        final tolerance = ann.strokeWidth / 2 + hitPadding;
+        final tolerance = ann.strokeWidth / 2 + pad;
         if (ann.points.length == 1) {
           return (point - ann.points.first).distance <= tolerance;
         }
@@ -393,16 +439,15 @@ class AnnotationRenderer {
 
       case CanvasTool.stepMarker:
         if (ann.startPoint == null) return false;
-        return (point - ann.startPoint!).distance <=
-            (_stepRadius(ann) + hitPadding);
+        return (point - ann.startPoint!).distance <= (_stepRadius(ann) + pad);
 
       case CanvasTool.text:
         final rect = boundingRect(ann);
-        return rect != Rect.zero && rect.inflate(hitPadding).contains(point);
+        return rect != Rect.zero && rect.inflate(pad).contains(point);
 
       default:
         final rect = boundingRect(ann);
-        return rect != Rect.zero && rect.inflate(hitPadding).contains(point);
+        return rect != Rect.zero && rect.inflate(pad).contains(point);
     }
   }
 
@@ -410,11 +455,16 @@ class AnnotationRenderer {
   ///
   /// Walks the path metrics and measures against the flattened segments, so it
   /// works for every shape kind including stars and speech bubbles.
-  static bool _isNearShapeOutline(Annotation ann, Offset point) {
+  static bool _isNearShapeOutline(
+    Annotation ann,
+    Offset point, {
+    double viewScale = 1.0,
+  }) {
     final path = shapePath(ann);
     if (path.getBounds().isEmpty) return false;
 
-    final tolerance = ann.strokeWidth / 2 + hitPadding;
+    final pad = hitPadding / _safeScale(viewScale);
+    final tolerance = ann.strokeWidth / 2 + pad;
     // Cheap rejection before the (more expensive) per-segment walk.
     if (!path.getBounds().inflate(tolerance).contains(point)) return false;
 
@@ -423,7 +473,7 @@ class AnnotationRenderer {
       // Sample densely enough that curves stay within tolerance.
       final steps = math.max(
         16,
-        (metric.length / math.max(2.0, tolerance / 2)).ceil(),
+        (metric.length / math.max(0.2, tolerance / 2)).ceil(),
       );
       Offset? previous;
       for (int i = 0; i <= steps; i++) {
@@ -466,6 +516,68 @@ class AnnotationRenderer {
 
   static const double _textPadX = 8.0;
   static const double _textPadY = 5.0;
+
+  // Gene - Nov, 20, 2026: Scale text box padding & lay out small zoomed-in fonts at 16pt before canvas.scale so glyphs stay crisp.
+  static double _textPadXFor(Annotation ann) => ann.fontSize >= 16.0
+      ? _textPadX
+      : math.min(_textPadX, ann.fontSize * 0.44);
+  static double _textPadYFor(Annotation ann) => ann.fontSize >= 16.0
+      ? _textPadY
+      : math.min(_textPadY, ann.fontSize * 0.28);
+
+  static ({TextPainter tp, double scale, Size size}) _layoutCrispText({
+    required String text,
+    required Color color,
+    required double fontSize,
+    required FontWeight fontWeight,
+    double? height,
+    bool hasShadows = false,
+  }) {
+    final safeFont = fontSize.clamp(0.5, 240.0);
+    if (safeFont >= 16.0) {
+      final tp = _cachedTextPainter(
+        text: text,
+        color: color,
+        fontSize: safeFont,
+        fontWeight: fontWeight,
+        height: height,
+        hasShadows: hasShadows,
+      );
+      return (tp: tp, scale: 1.0, size: Size(tp.width, tp.height));
+    }
+    const baseSize = 16.0;
+    final scale = safeFont / baseSize;
+    final tp = _cachedTextPainter(
+      text: text,
+      color: color,
+      fontSize: baseSize,
+      fontWeight: fontWeight,
+      height: height,
+      hasShadows: hasShadows,
+    );
+    return (
+      tp: tp,
+      scale: scale,
+      size: Size(tp.width * scale, tp.height * scale),
+    );
+  }
+
+  static void _paintCrispText(
+    Canvas canvas,
+    TextPainter tp,
+    Offset origin,
+    double scale,
+  ) {
+    if ((scale - 1.0).abs() <= 1e-4) {
+      tp.paint(canvas, origin);
+      return;
+    }
+    canvas.save();
+    canvas.translate(origin.dx, origin.dy);
+    canvas.scale(scale);
+    tp.paint(canvas, Offset.zero);
+    canvas.restore();
+  }
 
   // Gene - Nov, 20, 2026: Bounded LRU TextPainter cache (128 entries) to eliminate repeated paragraph shaping on paint/hit-test frames.
   static const int _maxTextCacheEntries = 128;
@@ -543,16 +655,17 @@ class AnnotationRenderer {
   //   tp.layout();
   //   return tp;
   // }
-  static TextPainter _layoutText(Annotation ann) {
-    return _cachedTextPainter(
-      text: ann.text ?? '',
-      color: ann.color,
-      fontSize: ann.fontSize,
-      fontWeight: FontWeight.w600,
-      height: 1.25,
-      textAlign: TextAlign.left,
-    );
-  }
+  // Gene - Nov, 20, 2026: Replaced _layoutText with _layoutCrispText (keeps old code commented per policy).
+  // static TextPainter _layoutText(Annotation ann) {
+  //   return _cachedTextPainter(
+  //     text: ann.text ?? '',
+  //     color: ann.color,
+  //     fontSize: ann.fontSize,
+  //     fontWeight: FontWeight.w600,
+  //     height: 1.25,
+  //     textAlign: TextAlign.left,
+  //   );
+  // }
 
   // ---------------------------------------------------------------------------
   // Painting
@@ -688,19 +801,30 @@ class AnnotationRenderer {
       draw();
       return;
     }
-    final layerBounds = boundingRect(ann).inflate(ann.strokeWidth + 12);
+    // Gene - Nov, 20, 2026: Scale drop shadow blur/offset down on thin zoomed-in strokes.
+    // Old:
+    // final layerBounds = boundingRect(ann).inflate(ann.strokeWidth + 12);
+    // ... ImageFilter.blur(sigmaX: 2.5, sigmaY: 2.5) ...
+    // canvas.translate(0, 1.5);
+    final shadowScale = (ann.strokeWidth / 4.0).clamp(0.05, 1.0);
+    final layerBounds = boundingRect(
+      ann,
+    ).inflate(ann.strokeWidth + 12.0 * shadowScale);
     // Re-draw the shape through a black-tinted blurred layer to produce a
     // cheap drop shadow that keeps markup readable over busy screenshots.
     canvas.saveLayer(
       layerBounds,
       Paint()
-        ..imageFilter = ui.ImageFilter.blur(sigmaX: 2.5, sigmaY: 2.5)
+        ..imageFilter = ui.ImageFilter.blur(
+          sigmaX: 2.5 * shadowScale,
+          sigmaY: 2.5 * shadowScale,
+        )
         ..colorFilter = ColorFilter.mode(
           Colors.black.withValues(alpha: 0.42 * ann.opacity),
           BlendMode.srcIn,
         ),
     );
-    canvas.translate(0, 1.5);
+    canvas.translate(0, 1.5 * shadowScale);
     draw();
     canvas.restore();
     draw();
@@ -781,8 +905,12 @@ class AnnotationRenderer {
     final distance = (p2 - p1).distance;
     if (distance == 0) return;
     final direction = (p2 - p1) / distance;
-    final dashWidth = math.max(6.0, paint.strokeWidth * 2.5);
-    final dashSpace = math.max(4.0, paint.strokeWidth * 1.8);
+    // Gene - Nov, 20, 2026: Lower dash floors so thin zoomed dashed lines stay proportional.
+    // Old:
+    // final dashWidth = math.max(6.0, paint.strokeWidth * 2.5);
+    // final dashSpace = math.max(4.0, paint.strokeWidth * 1.8);
+    final dashWidth = math.max(0.2, paint.strokeWidth * 2.5);
+    final dashSpace = math.max(0.15, paint.strokeWidth * 1.8);
 
     double travelled = 0.0;
     while (travelled < distance) {
@@ -809,7 +937,9 @@ class AnnotationRenderer {
     final start = ann.startPoint;
     final end = ann.endPoint;
     if (start == null || end == null) return;
-    if ((end - start).distance < 0.5) return;
+    // Gene - Nov, 20, 2026: Lower minimum arrow span and curved head floor for zoomed-in precision.
+    // Old: if ((end - start).distance < 0.5) return;
+    if ((end - start).distance < 0.05) return;
 
     final paint = _strokePaint(ann);
     final strokeW = ann.strokeWidth;
@@ -823,16 +953,17 @@ class AnnotationRenderer {
     if (cp != null) {
       // Curved Bezier arrow
       final endTangent = (end - cp);
-      final endAngle = endTangent.distance > 0.1
+      final endAngle = endTangent.distance > 0.05
           ? math.atan2(endTangent.dy, endTangent.dx)
           : math.atan2(end.dy - start.dy, end.dx - start.dx);
 
       final startTangent = (start - cp);
-      final startAngle = startTangent.distance > 0.1
+      final startAngle = startTangent.distance > 0.05
           ? math.atan2(startTangent.dy, startTangent.dx)
           : math.atan2(start.dy - end.dy, start.dx - end.dx);
 
-      final headLength = math.max(12.0, strokeW * 4.0);
+      // Old: final headLength = math.max(12.0, strokeW * 4.0);
+      final headLength = math.max(0.5, strokeW * 4.0);
       final headHalfWidth = headLength * 0.45;
 
       Path headPath(Offset tip, double angle) {
@@ -1077,8 +1208,12 @@ class AnnotationRenderer {
 
   /// Dashes an arbitrary path by walking its metrics.
   static void _drawDashedPath2(Canvas canvas, Path source, Paint paint) {
-    final dashWidth = math.max(6.0, paint.strokeWidth * 2.5);
-    final dashSpace = math.max(4.0, paint.strokeWidth * 1.8);
+    // Gene - Nov, 20, 2026: Lower dash floors so thin zoomed dashed lines stay proportional.
+    // Old:
+    // final dashWidth = math.max(6.0, paint.strokeWidth * 2.5);
+    // final dashSpace = math.max(4.0, paint.strokeWidth * 1.8);
+    final dashWidth = math.max(0.2, paint.strokeWidth * 2.5);
+    final dashSpace = math.max(0.15, paint.strokeWidth * 1.8);
     for (final metric in source.computeMetrics()) {
       double distance = 0.0;
       while (distance < metric.length) {
@@ -1113,7 +1248,9 @@ class AnnotationRenderer {
 
     final paint = _strokePaint(ann);
     final length = (end - start).distance;
-    if (length < 1) return;
+    // Gene - Nov, 20, 2026: Scale ruler min span, tick intervals (image pixels), tick stroke, and badge size proportionally.
+    // Old: if (length < 1) return;
+    if (length < 0.05) return;
 
     final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
     final normal = Offset(-math.sin(angle), math.cos(angle));
@@ -1124,26 +1261,31 @@ class AnnotationRenderer {
     canvas.drawLine(start - normal * capHalf, start + normal * capHalf, paint);
     canvas.drawLine(end - normal * capHalf, end + normal * capHalf, paint);
 
-    // Ruler ticks every 10 px, taller every 50 px.
+    // Ruler ticks every 10 image px, taller every 50 image px.
     final direction = (end - start) / length;
     final tickPaint = Paint()
       ..color = paint.color.withValues(alpha: paint.color.a * 0.85)
-      ..strokeWidth = math.max(1.0, ann.strokeWidth * 0.6)
+      ..strokeWidth = math.max(0.1, ann.strokeWidth * 0.6)
       ..strokeCap = StrokeCap.butt;
-    for (double d = 10; d < length; d += 10) {
-      final isMajor = (d % 50).abs() < 0.001;
+    final tickStep = 10.0 / math.max(1.0, pixelScale);
+    int tickIdx = 1;
+    while (tickIdx * tickStep < length && tickIdx < 2000) {
+      final isMajor = tickIdx % 5 == 0;
       final tickLen = isMajor ? capHalf * 0.75 : capHalf * 0.4;
-      final p = start + direction * d;
+      final p = start + direction * (tickIdx * tickStep);
       canvas.drawLine(p, p + normal * tickLen, tickPaint);
+      tickIdx++;
     }
 
+    final badgeScale = math.min(1.0, ann.strokeWidth / 2.0).clamp(0.04, 1.0);
     _drawBadge(
       canvas,
       center:
           Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2) -
-          normal * (capHalf + 12),
+          normal * (capHalf + 12.0 * badgeScale),
       text: rulerLabel(ann, pixelScale),
       background: _applyOpacity(ann.color, ann.opacity),
+      scale: badgeScale,
     );
   }
 
@@ -1152,20 +1294,8 @@ class AnnotationRenderer {
     required Offset center,
     required String text,
     required Color background,
+    double scale = 1.0,
   }) {
-    // Gene - Nov, 20, 2026: Use cached TextPainter layout for ruler/HUD badges.
-    // Old implementation:
-    // final tp = TextPainter(
-    //   text: TextSpan(
-    //     text: text,
-    //     style: const TextStyle(
-    //       color: Colors.white,
-    //       fontSize: 11,
-    //       fontWeight: FontWeight.bold,
-    //     ),
-    //   ),
-    //   textDirection: TextDirection.ltr,
-    // )..layout();
     final tp = _cachedTextPainter(
       text: text,
       color: Colors.white,
@@ -1173,9 +1303,14 @@ class AnnotationRenderer {
       fontWeight: FontWeight.bold,
     );
 
+    final s = _safeScale(scale);
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    if ((s - 1.0).abs() > 1e-4) canvas.scale(s);
+
     final rect = RRect.fromRectAndRadius(
       Rect.fromCenter(
-        center: center,
+        center: Offset.zero,
         width: tp.width + 14,
         height: tp.height + 7,
       ),
@@ -1187,7 +1322,8 @@ class AnnotationRenderer {
         ..color = background
         ..isAntiAlias = true,
     );
-    tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
+    tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+    canvas.restore();
   }
 
   // --- Blur / pixelate ------------------------------------------------------
@@ -1203,11 +1339,14 @@ class AnnotationRenderer {
   }) {
     if (ann.startPoint == null || ann.endPoint == null) return;
     final rect = Rect.fromPoints(ann.startPoint!, ann.endPoint!);
-    if (rect.width < 1 || rect.height < 1) return;
+    // Gene - Nov, 20, 2026: Lower min blur span & proportional corner radius for zoomed captures.
+    // Old: if (rect.width < 1 || rect.height < 1) return;
+    if (rect.width < 0.05 || rect.height < 0.05) return;
 
+    final defaultRadius = math.min(4.0, rect.shortestSide * 0.15);
     final rrect = RRect.fromRectAndRadius(
       rect,
-      Radius.circular(ann.borderRadius > 0 ? ann.borderRadius : 4),
+      Radius.circular(ann.borderRadius > 0 ? ann.borderRadius : defaultRadius),
     );
 
     // Solid Blackout Redaction Bar (Security Standard for Passwords / PII)
@@ -1314,7 +1453,9 @@ class AnnotationRenderer {
     ui.Image baseImage,
     Rect imageRect,
   ) {
-    final block = ann.blurStrength.clamp(2.0, 60.0);
+    // Gene - Nov, 20, 2026: Allow sub-pixel canvas block sizes so pixelated blur stays crisp on long zoomed captures.
+    // Old: final block = ann.blurStrength.clamp(2.0, 60.0);
+    final block = ann.blurStrength.clamp(0.05, 60.0);
     final scaleX = baseImage.width / imageRect.width;
     final scaleY = baseImage.height / imageRect.height;
 
@@ -1383,12 +1524,24 @@ class AnnotationRenderer {
     final radius = _stepRadius(ann);
     final color = _applyOpacity(ann.color, ann.opacity);
 
+    // Gene - Nov, 20, 2026: Scale badge shadow, border ring, and crisp number typography proportionally on small zoomed step markers.
+    // Old:
+    // canvas.drawCircle(
+    //   center + const Offset(0, 2),
+    //   radius,
+    //   Paint()
+    //     ..color = Colors.black.withValues(alpha: 0.30 * ann.opacity)
+    //     ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+    // );
     canvas.drawCircle(
-      center + const Offset(0, 2),
+      center + Offset(0, radius * 0.12),
       radius,
       Paint()
         ..color = Colors.black.withValues(alpha: 0.30 * ann.opacity)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+        ..maskFilter = MaskFilter.blur(
+          BlurStyle.normal,
+          math.max(0.2, radius * 0.25),
+        ),
     );
 
     canvas.drawCircle(
@@ -1403,46 +1556,33 @@ class AnnotationRenderer {
       radius,
       Paint()
         ..color = Colors.white.withValues(alpha: 0.92 * ann.opacity)
-        ..strokeWidth = math.max(1.5, radius * 0.12)
+        // Old: ..strokeWidth = math.max(1.5, radius * 0.12)
+        ..strokeWidth = math.max(0.1, radius * 0.12)
         ..style = PaintingStyle.stroke
         ..isAntiAlias = true,
     );
 
-    // Gene - Nov, 20, 2026: Use cached TextPainter layout for step marker badges.
-    // Old implementation:
-    // final tp = TextPainter(
-    //   text: TextSpan(
-    //     text: '$step',
-    //     style: TextStyle(
-    //       color: Colors.white.withValues(alpha: ann.opacity),
-    //       fontSize:
-    //           (radius *
-    //                   (step >= 100
-    //                       ? 0.72
-    //                       : step >= 10
-    //                       ? 0.88
-    //                       : 1.05))
-    //               .clamp(8.0, 60.0),
-    //       fontWeight: FontWeight.bold,
-    //     ),
-    //   ),
-    //   textDirection: TextDirection.ltr,
-    // )..layout();
-    final tp = _cachedTextPainter(
+    final targetFont =
+        (radius *
+                (step >= 100
+                    ? 0.72
+                    : step >= 10
+                    ? 0.88
+                    : 1.05))
+            .clamp(0.5, 60.0);
+    final laidOut = _layoutCrispText(
       text: '$step',
       color: Colors.white.withValues(alpha: ann.opacity),
-      fontSize:
-          (radius *
-                  (step >= 100
-                      ? 0.72
-                      : step >= 10
-                      ? 0.88
-                      : 1.05))
-              .clamp(8.0, 60.0),
+      fontSize: targetFont,
       fontWeight: FontWeight.bold,
     );
 
-    tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
+    _paintCrispText(
+      canvas,
+      laidOut.tp,
+      center - Offset(laidOut.size.width / 2, laidOut.size.height / 2),
+      laidOut.scale,
+    );
   }
 
   // --- Text -----------------------------------------------------------------
@@ -1454,30 +1594,17 @@ class AnnotationRenderer {
     final showBg =
         ann.fill && ann.backgroundColor != null && ann.backgroundColor!.a > 0;
 
-    // Gene - Nov, 20, 2026: Use cached TextPainter layout for text annotations.
-    // Old implementation:
-    // final tp = TextPainter(
-    //   text: TextSpan(
-    //     text: ann.text,
-    //     style: TextStyle(
-    //       color: _applyOpacity(ann.color, ann.opacity),
-    //       fontSize: ann.fontSize,
-    //       fontWeight: FontWeight.w600,
-    //       height: 1.25,
-    //       shadows: (showBg && !ann.hasShadow)
-    //           ? null
-    //           : const [
-    //               Shadow(
-    //                 color: Color(0xB3000000),
-    //                 offset: Offset(0, 1),
-    //                 blurRadius: 4,
-    //               ),
-    //             ],
-    //     ),
-    //   ),
-    //   textDirection: TextDirection.ltr,
-    // )..layout();
-    final tp = _cachedTextPainter(
+    // Gene - Nov, 20, 2026: Render small zoomed-in text via crisp scaled layout + proportional padding & shadow.
+    // Old:
+    // final tp = _cachedTextPainter(
+    //   text: ann.text!,
+    //   color: _applyOpacity(ann.color, ann.opacity),
+    //   fontSize: ann.fontSize,
+    //   fontWeight: FontWeight.w600,
+    //   height: 1.25,
+    //   hasShadows: !(showBg && !ann.hasShadow),
+    // );
+    final laidOut = _layoutCrispText(
       text: ann.text!,
       color: _applyOpacity(ann.color, ann.opacity),
       fontSize: ann.fontSize,
@@ -1487,21 +1614,27 @@ class AnnotationRenderer {
     );
 
     if (showBg) {
+      final padX = _textPadXFor(ann);
+      final padY = _textPadYFor(ann);
       final bgRect = RRect.fromRectAndRadius(
         Rect.fromLTWH(
-          position.dx - _textPadX,
-          position.dy - _textPadY,
-          tp.width + _textPadX * 2,
-          tp.height + _textPadY * 2,
+          position.dx - padX,
+          position.dy - padY,
+          laidOut.size.width + padX * 2,
+          laidOut.size.height + padY * 2,
         ),
         Radius.circular(ann.borderRadius.clamp(0.0, 32.0)),
       );
 
       if (ann.hasShadow) {
+        final bgShadowScale = (ann.fontSize / 18.0).clamp(0.05, 1.0);
         final shadowPaint = Paint()
           ..color = Colors.black.withValues(alpha: 0.35 * ann.opacity)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-        canvas.drawRRect(bgRect.shift(const Offset(0, 2)), shadowPaint);
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, 4.0 * bgShadowScale);
+        canvas.drawRRect(
+          bgRect.shift(Offset(0, 2.0 * bgShadowScale)),
+          shadowPaint,
+        );
       }
 
       canvas.drawRRect(
@@ -1512,15 +1645,21 @@ class AnnotationRenderer {
       );
     }
 
-    tp.paint(canvas, position);
+    _paintCrispText(canvas, laidOut.tp, position, laidOut.scale);
   }
 
   // ---------------------------------------------------------------------------
   // Selection chrome (screen only — never part of an export)
   // ---------------------------------------------------------------------------
 
-  static void paintSelection(Canvas canvas, Annotation ann) {
-    final bounds = selectionRect(ann);
+  // Gene - Nov, 20, 2026: Scale selection chrome & HUD badges by 1 / viewScale so handles and borders stay crisp constant screen pixels at every zoom level.
+  static void paintSelection(
+    Canvas canvas,
+    Annotation ann, {
+    double viewScale = 1.0,
+  }) {
+    final s = _safeScale(viewScale);
+    final bounds = selectionRect(ann, viewScale: s);
     if (bounds == Rect.zero) return;
 
     final rotated = ann.rotation != 0.0;
@@ -1533,10 +1672,10 @@ class AnnotationRenderer {
     }
 
     canvas.drawRRect(
-      RRect.fromRectAndRadius(bounds, const Radius.circular(6)),
+      RRect.fromRectAndRadius(bounds, Radius.circular(6.0 / s)),
       Paint()
         ..color = AppDefaults.defaultColor
-        ..strokeWidth = 1.5
+        ..strokeWidth = 1.5 / s
         ..style = PaintingStyle.stroke,
     );
 
@@ -1545,30 +1684,32 @@ class AnnotationRenderer {
       ..style = PaintingStyle.fill;
     final handleBorder = Paint()
       ..color = AppDefaults.defaultColor
-      ..strokeWidth = 2.0
+      ..strokeWidth = 2.0 / s
       ..style = PaintingStyle.stroke;
 
+    final cornerRadius = 4.5 / s;
     for (final c in [
       bounds.topLeft,
       bounds.topRight,
       bounds.bottomLeft,
       bounds.bottomRight,
     ]) {
-      canvas.drawCircle(c, 4.5, handleFill);
-      canvas.drawCircle(c, 4.5, handleBorder);
+      canvas.drawCircle(c, cornerRadius, handleFill);
+      canvas.drawCircle(c, cornerRadius, handleBorder);
     }
 
     final topCenter = bounds.topCenter;
-    final rotHandle = topCenter - const Offset(0, rotationHandleGap);
+    final rotHandle = topCenter - Offset(0, rotationHandleGap / s);
     canvas.drawLine(
       topCenter,
       rotHandle,
       Paint()
         ..color = AppDefaults.defaultColor
-        ..strokeWidth = 1.5,
+        ..strokeWidth = 1.5 / s,
     );
-    canvas.drawCircle(rotHandle, 5.5, handleFill);
-    canvas.drawCircle(rotHandle, 5.5, handleBorder);
+    final rotRadius = 5.5 / s;
+    canvas.drawCircle(rotHandle, rotRadius, handleFill);
+    canvas.drawCircle(rotHandle, rotRadius, handleBorder);
 
     // Render curvature handle for Arrows (Shottr/Snagit style)
     if (ann.tool == CanvasTool.arrow &&
@@ -1583,22 +1724,23 @@ class AnnotationRenderer {
           curveHandlePos,
           Paint()
             ..color = const Color(0xFFF59E0B).withValues(alpha: 0.6)
-            ..strokeWidth = 1.2,
+            ..strokeWidth = 1.2 / s,
         );
       }
+      final curveRadius = 6.0 / s;
       canvas.drawCircle(
         curveHandlePos,
-        6.0,
+        curveRadius,
         Paint()
           ..color = const Color(0xFFF59E0B)
           ..style = PaintingStyle.fill,
       );
       canvas.drawCircle(
         curveHandlePos,
-        6.0,
+        curveRadius,
         Paint()
           ..color = Colors.white
-          ..strokeWidth = 2.0
+          ..strokeWidth = 2.0 / s
           ..style = PaintingStyle.stroke,
       );
     }
@@ -1608,29 +1750,38 @@ class AnnotationRenderer {
 
   /// Live size/angle readout shown while drawing or transforming, like the
   /// dimension HUD in Snagit and Shottr.
-  static void paintMeasurementHud(Canvas canvas, Annotation ann) {
+  static void paintMeasurementHud(
+    Canvas canvas,
+    Annotation ann, {
+    double viewScale = 1.0,
+    double pixelScale = 1.0,
+  }) {
+    final pScale = _safeScale(pixelScale);
     final String label;
     switch (ann.tool) {
       case CanvasTool.shape || CanvasTool.blur:
         final r = boundingRect(ann);
-        if (r.width < 2 && r.height < 2) return;
-        label = '${r.width.round()} × ${r.height.round()}';
+        if (r.width * pScale < 2 && r.height * pScale < 2) return;
+        label =
+            '${(r.width * pScale).round()} × ${(r.height * pScale).round()}';
       case CanvasTool.line || CanvasTool.arrow:
         if (ann.startPoint == null || ann.endPoint == null) return;
         final d = (ann.endPoint! - ann.startPoint!);
-        if (d.distance < 2) return;
+        if (d.distance * pScale < 2) return;
         final deg = (math.atan2(d.dy, d.dx) * 180 / math.pi);
-        label = '${d.distance.round()} px  ${deg.round()}°';
+        label = '${(d.distance * pScale).round()} px  ${deg.round()}°';
       default:
         return;
     }
 
+    final s = _safeScale(viewScale);
     final bounds = boundingRect(ann);
     _drawBadge(
       canvas,
-      center: Offset(bounds.center.dx, bounds.top - 16),
+      center: Offset(bounds.center.dx, bounds.top - 16.0 / s),
       text: label,
       background: AppDefaults.defaultColor,
+      scale: 1.0 / s,
     );
   }
 }

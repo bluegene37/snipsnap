@@ -232,16 +232,37 @@ class Annotation {
   /// A null [p] means the projection is degenerate and no canvas unit can be
   /// converted. The stored values are then left untouched: refusing the edit is
   /// recoverable, writing canvas numbers into image-space storage is not.
+  // Gene - Nov, 20, 2026: Compensate canvas-space scalars by viewScale so slider edits on zoomed captures keep uniform screen size.
+  // Old implementation:
+  // Annotation withCanvasSpaceScalars(
+  //   CanvasProjection? p, {
+  //   double? strokeWidth,
+  //   double? fontSize,
+  //   double? borderRadius,
+  //   double? blurStrength,
+  // }) {
+  //   if (p == null || !p.isValid) return this;
+  //   double? toImage(double? canvasValue) =>
+  //       canvasValue == null ? null : p.toImageLength(canvasValue);
+  //   return copyWith(
+  //     strokeWidth: toImage(strokeWidth),
+  //     fontSize: toImage(fontSize),
+  //     borderRadius: toImage(borderRadius),
+  //     blurStrength: toImage(blurStrength),
+  //   );
+  // }
   Annotation withCanvasSpaceScalars(
     CanvasProjection? p, {
     double? strokeWidth,
     double? fontSize,
     double? borderRadius,
     double? blurStrength,
+    double viewScale = 1.0,
   }) {
     if (p == null || !p.isValid) return this;
+    final s = viewScale > 0 ? viewScale : 1.0;
     double? toImage(double? canvasValue) =>
-        canvasValue == null ? null : p.toImageLength(canvasValue);
+        canvasValue == null ? null : p.toImageLength(canvasValue / s);
     return copyWith(
       strokeWidth: toImage(strokeWidth),
       fontSize: toImage(fontSize),
