@@ -190,3 +190,118 @@ class ImageStitcher {
     return -1; // No confident match found
   }
 }
+
+// Gene - Nov, 20, 2026: O(N) strip accumulator for Dart scrolling fallback (keeps only tail slices until final assembly instead of reallocating full canvas every frame).
+class StitchStripSession {
+  final ImageStitcher stitcher;
+  final List<img.Image> _strips = [];
+  img.Image? _tailFrame;
+  int _cumulativeHeight = 0;
+
+  StitchStripSession({ImageStitcher? stitcher})
+    : stitcher = stitcher ?? ImageStitcher();
+
+  int get cumulativeHeight => _cumulativeHeight;
+  int get width => _tailFrame?.width ?? 0;
+  img.Image? get tailFrame => _tailFrame;
+
+  StitchResult pushFrame(img.Image newFrame) {
+    if (_tailFrame == null) {
+      _strips.add(newFrame);
+      _tailFrame = newFrame;
+      _cumulativeHeight = newFrame.height;
+      return StitchResult(
+        shiftY: 0,
+        cumulativeHeight: _cumulativeHeight,
+        isDuplicate: false,
+        isMatchValid: true,
+        confidence: 1.0,
+      );
+    }
+
+    if (_cumulativeHeight >= stitcher.maxCumulativeHeight) {
+      return StitchResult(
+        shiftY: 0,
+        cumulativeHeight: _cumulativeHeight,
+        isDuplicate: true,
+        isMatchValid: false,
+        confidence: 0.0,
+      );
+    }
+
+    final shift = ImageStitcher.findVerticalShift(
+      base: _tailFrame!,
+      next: newFrame,
+      ignoreRightMargin: stitcher.scrollbarIgnoreMargin,
+      maxError: stitcher.maxMatchError,
+    );
+
+    if (shift == 0) {
+      return StitchResult(
+        shiftY: 0,
+        cumulativeHeight: _cumulativeHeight,
+        isDuplicate: true,
+        isMatchValid: true,
+        confidence: 1.0,
+      );
+    }
+    if (shift < 0) {
+      return StitchResult(
+        shiftY: 0,
+        cumulativeHeight: _cumulativeHeight,
+        isDuplicate: false,
+        isMatchValid: false,
+        confidence: 0.0,
+      );
+    }
+
+    appendShiftSlice(frame: newFrame, shiftY: shift);
+    return StitchResult(
+      shiftY: shift,
+      cumulativeHeight: _cumulativeHeight,
+      isDuplicate: false,
+      isMatchValid: true,
+      confidence: 1.0,
+    );
+  }
+
+  void appendShiftSlice({required img.Image frame, required int shiftY}) {
+    if (_tailFrame == null) {
+      pushFrame(frame);
+      return;
+    }
+    final available = stitcher.maxCumulativeHeight - _cumulativeHeight;
+    final actualShift = math.min(shiftY, available);
+    if (actualShift <= 0) return;
+    _strips.add(
+      img.copyCrop(
+        frame,
+        x: 0,
+        y: frame.height - actualShift,
+        width: frame.width,
+        height: actualShift,
+      ),
+    );
+    _tailFrame = frame;
+    _cumulativeHeight += actualShift;
+  }
+
+  img.Image? assemble() {
+    if (_strips.isEmpty) return null;
+    if (_strips.length == 1) return _strips.first;
+    final first = _strips.first;
+    final out = img.Image(width: first.width, height: _cumulativeHeight);
+    var dstY = 0;
+    for (final strip in _strips) {
+      img.compositeImage(out, strip, dstX: 0, dstY: dstY);
+      dstY += strip.height;
+    }
+    return out;
+  }
+
+  void clear() {
+    _strips.clear();
+    _tailFrame = null;
+    _cumulativeHeight = 0;
+  }
+}

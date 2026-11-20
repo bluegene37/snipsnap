@@ -26,6 +26,59 @@ import 'components/annotation_renderer.dart';
 Uint8List _encodePngFast(img.Image image) =>
     Uint8List.fromList(img.encodePng(image, level: 1));
 
+// Gene - Nov, 20, 2026: Fit-to-width top-aligned (or fit-to-height left-aligned) initial viewport transform for tall/wide scrolling captures, capped at 1:1 native pixels.
+Matrix4? computeInitialPanoramicTransform({
+  required Size viewportSize,
+  required Size imageSize,
+  double minZoom = 0.2,
+  double maxZoom = 4.0,
+}) {
+  if (viewportSize.isEmpty || imageSize.isEmpty) return null;
+  if (viewportSize.width <= 0 ||
+      viewportSize.height <= 0 ||
+      imageSize.width <= 0 ||
+      imageSize.height <= 0) {
+    return null;
+  }
+
+  final fitScale = math.min(
+    viewportSize.width / imageSize.width,
+    viewportSize.height / imageSize.height,
+  );
+  if (fitScale <= 0) return null;
+
+  final nativeCap = fitScale < 1.0 ? (1.0 / fitScale) : 1.0;
+  final upperScale = math.min(nativeCap, maxZoom);
+
+  final aspectHOverW = imageSize.height / imageSize.width;
+  if (aspectHOverW > 2.2) {
+    final renderedW = imageSize.width * fitScale;
+    if (renderedW <= 0) return null;
+    final desired = (viewportSize.width * 0.92) / renderedW;
+    final scale = math.min(desired, upperScale).clamp(minZoom, maxZoom);
+    if (scale <= 1.02) return null;
+    final tx = (viewportSize.width - viewportSize.width * scale) / 2.0;
+    return Matrix4.identity()
+      ..translateByDouble(tx, 0.0, 0.0, 1.0)
+      ..scaleByDouble(scale, scale, scale, 1.0);
+  }
+
+  final aspectWOverH = imageSize.width / imageSize.height;
+  if (aspectWOverH > 3.0) {
+    final renderedH = imageSize.height * fitScale;
+    if (renderedH <= 0) return null;
+    final desired = (viewportSize.height * 0.90) / renderedH;
+    final scale = math.min(desired, upperScale).clamp(minZoom, maxZoom);
+    if (scale <= 1.02) return null;
+    final ty = (viewportSize.height - viewportSize.height * scale) / 2.0;
+    return Matrix4.identity()
+      ..translateByDouble(0.0, ty, 0.0, 1.0)
+      ..scaleByDouble(scale, scale, scale, 1.0);
+  }
+
+  return null;
+}
+
 class EditorCanvas extends StatefulWidget {
   final String? imagePath;
   final List<Annotation> annotations;
@@ -265,6 +318,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   final FocusNode _focusNode = FocusNode(debugLabel: 'EditorCanvas');
   bool _fileExists = false;
   late TransformationController _transformationController;
+  // Gene - Nov, 20, 2026: Track which capture path has already received panoramic initial zoom so user pan/zoom is never overwritten.
+  String? _autoZoomAppliedForPath;
 
   /// Marks the zoom viewport so pointer positions can be resolved against it.
   final GlobalKey _viewportKey = GlobalKey();
@@ -286,6 +341,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   ui.Image? _baseImage;
   img.Image? _cachedSourceImage;
   int _baseImageToken = 0;
+  // Gene - Nov, 20, 2026: Track active lazy-decode token instead of a boolean so capture switches never stall behind an older decode isolate.
+  // Old implementation:
+  // bool _isDecodingSourceImage = false;
+  int? _decodingSourceToken;
 
   /// When the parent was last told a write could not be placed. See
   /// [_reportUnplaceableEdit].
@@ -533,6 +592,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       if (widget.activeTool == CanvasTool.crop) {
         _ensureCropRectInitialized();
       }
+      // Gene - Nov, 20, 2026: Pre-decode img.Image lazily only when switching to a pixel-sampling tool.
+      if (_toolNeedsPixelBuffer(widget.activeTool)) {
+        unawaited(_ensureSourceImageDecoded());
+      }
     }
   }
 
@@ -555,6 +618,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   ///   the new capture through the previous one's geometry (and, at a different
   ///   aspect ratio, through its letterbox).
   void _discardStateForPreviousCapture(String? previousPath) {
+    _autoZoomAppliedForPath = null;
     _liveAnnotations = null;
     if (_hasExtractedSelection) {
       // Fire-and-forget, like the tool-change path: the paste is a file write
@@ -701,28 +765,104 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       // this is the only other moment it can succeed.
       _ensureCropRectInitialized();
       if (image != null) {
+        final resolvedSize = Size(
+          image.width.toDouble(),
+          image.height.toDouble(),
+        );
         // After the setState, never during it: the listener drives the
         // parent's own setState.
-        widget.onImageSizeResolved?.call(
-          path,
-          Size(image.width.toDouble(), image.height.toDouble()),
-        );
+        widget.onImageSizeResolved?.call(path, resolvedSize);
+
+        // Gene - Nov, 20, 2026: Auto fit-to-width top-aligned (or fit-to-height left-aligned) initial view for tall/wide scrolling captures.
+        if (_autoZoomAppliedForPath != path) {
+          _autoZoomAppliedForPath = path;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || widget.imagePath != path) return;
+            final viewport = _viewportSize;
+            if (viewport.isEmpty) return;
+            if ((_transformationController.value.getMaxScaleOnAxis() - 1.0)
+                    .abs() >
+                0.01) {
+              return;
+            }
+            final initialTransform = computeInitialPanoramicTransform(
+              viewportSize: viewport,
+              imageSize: resolvedSize,
+              minZoom: _minZoom,
+              maxZoom: _maxZoom,
+            );
+            if (initialTransform != null) {
+              _setTransform(initialTransform);
+              _notifyZoom();
+            }
+          });
+        }
       }
-      unawaited(
-        compute(img.decodeImage, bytes)
-            .then((decodedImg) {
-              if (mounted && token == _baseImageToken) {
-                _cachedSourceImage = decodedImg;
-              }
-            })
-            .catchError((Object e) {
-              debugPrint('Background img.decodeImage note: $e');
-            }),
-      );
+      // Gene - Nov, 20, 2026: Replaced eager compute(img.decodeImage) on every capture switch with lazy on-demand _ensureSourceImageDecoded().
+      // Old implementation:
+      // unawaited(
+      //   compute(img.decodeImage, bytes)
+      //       .then((decodedImg) {
+      //         if (mounted && token == _baseImageToken) {
+      //           _cachedSourceImage = decodedImg;
+      //         }
+      //       })
+      //       .catchError((Object e) {
+      //         debugPrint('Background img.decodeImage note: $e');
+      //       }),
+      // );
+      if (_toolNeedsPixelBuffer(widget.activeTool)) {
+        unawaited(_ensureSourceImageDecoded(preloadedBytes: bytes));
+      }
     } catch (e) {
       // A failed load keeps the previous bitmap on screen; without at least a
       // log line that failure is completely invisible.
       debugPrint('SnipSnap base image load failed for $path: $e');
+    }
+  }
+
+  // Gene - Nov, 20, 2026: Lazy on-demand pixel-buffer decode helper; avoids ~60MB RAM & ~500ms CPU per capture load when only viewing/drawing vectors.
+  bool _toolNeedsPixelBuffer(CanvasTool tool) =>
+      tool == CanvasTool.colorPicker ||
+      tool == CanvasTool.fill ||
+      tool == CanvasTool.select;
+
+  // Gene - Nov, 20, 2026: Token-guarded lazy on-demand pixel-buffer decode so switching captures never blocks on stale isolates.
+  // Old implementation:
+  // Future<void> _ensureSourceImageDecoded({Uint8List? preloadedBytes}) async {
+  //   if (_cachedSourceImage != null || _isDecodingSourceImage) return;
+  //   final path = widget.imagePath;
+  //   if (path == null) return;
+  //   final token = _baseImageToken;
+  //   _isDecodingSourceImage = true;
+  //   try {
+  //     ...
+  //   } finally {
+  //     _isDecodingSourceImage = false;
+  //   }
+  // }
+  Future<void> _ensureSourceImageDecoded({Uint8List? preloadedBytes}) async {
+    final token = _baseImageToken;
+    if (_cachedSourceImage != null || _decodingSourceToken == token) return;
+    final path = widget.imagePath;
+    if (path == null) return;
+    _decodingSourceToken = token;
+    try {
+      final bytes = preloadedBytes ?? await File(path).readAsBytes();
+      if (!mounted || token != _baseImageToken) return;
+      final decodedImg = await compute(img.decodeImage, bytes);
+      if (mounted && token == _baseImageToken && decodedImg != null) {
+        _cachedSourceImage = decodedImg;
+        if (widget.activeTool == CanvasTool.colorPicker) {
+          setState(() {});
+        }
+      }
+    } catch (e) {
+      debugPrint('Lazy img.decodeImage note: $e');
+    } finally {
+      if (_decodingSourceToken == token) {
+        _decodingSourceToken = null;
+      }
     }
   }
 
@@ -3150,7 +3290,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     if (widget.activeTool == CanvasTool.colorPicker) {
       final cached = _cachedSourceImage;
-      if (cached != null) {
+      // Gene - Nov, 20, 2026: Trigger lazy pixel decode on hover if colorPicker is active and buffer is not yet loaded.
+      if (cached == null) {
+        unawaited(_ensureSourceImageDecoded());
+      } else {
         final pixelPos = _canvasPointToImagePixel(
           pos,
           cached.width,
@@ -3330,46 +3473,60 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                           // while `RawImage` re-fitted to the new one, so the
                           // checkerboard slid out from under the screenshot
                           // and showed as a transparent band beside it.
+                          // Gene - Nov, 20, 2026: Isolated static checkerboard, static base RawImage, committed annotations layer, and active interaction layer into separate RepaintBoundaries for 120fps drawing without re-rasterizing the 5K screenshot or committed markup on every pointer move.
+                          // Old implementation:
+                          // Positioned.fill(
+                          //   child: LayoutBuilder(
+                          //     builder: (context, constraints) { ... },
+                          //   ),
+                          // ),
+                          // RawImage(
+                          //   image: _baseImage,
+                          //   fit: BoxFit.contain,
+                          //   filterQuality: FilterQuality.medium,
+                          // ),
                           Positioned.fill(
-                            child: LayoutBuilder(
-                              builder: (context, constraints) {
-                                final rect = RenderService.imageRectInCanvas(
-                                  imageSize: _imageSize,
-                                  canvasSize: constraints.biggest,
-                                );
-                                if (rect.isEmpty) {
-                                  return const SizedBox.shrink();
-                                }
-                                // `imageRectInCanvas` always centres the fitted
-                                // rect, so Center reproduces its offset without
-                                // repeating the arithmetic.
-                                return Center(
-                                  child: SizedBox(
-                                    width: rect.width,
-                                    height: rect.height,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(
-                                              alpha: t.isDark ? 0.35 : 0.08,
+                            child: RepaintBoundary(
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final rect = RenderService.imageRectInCanvas(
+                                    imageSize: _imageSize,
+                                    canvasSize: constraints.biggest,
+                                  );
+                                  if (rect.isEmpty) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  // `imageRectInCanvas` always centres the fitted
+                                  // rect, so Center reproduces its offset without
+                                  // repeating the arithmetic.
+                                  return Center(
+                                    child: SizedBox(
+                                      width: rect.width,
+                                      height: rect.height,
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(
+                                                alpha: t.isDark ? 0.35 : 0.08,
+                                              ),
+                                              blurRadius: 10,
+                                              offset: const Offset(0, 3),
                                             ),
-                                            blurRadius: 10,
-                                            offset: const Offset(0, 3),
-                                          ),
-                                        ],
-                                      ),
-                                      child: ClipRect(
-                                        child: CustomPaint(
-                                          painter: _SteadyCheckerboardPainter(
-                                            theme: t,
+                                          ],
+                                        ),
+                                        child: ClipRect(
+                                          child: CustomPaint(
+                                            painter: _SteadyCheckerboardPainter(
+                                              theme: t,
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                                );
-                              },
+                                  );
+                                },
+                              ),
                             ),
                           ),
 
@@ -3379,10 +3536,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                           // the visible flash on fill/crop/undo. `_baseImage`
                           // swaps atomically inside setState, so the old
                           // frame stays up until the new one is ready.
-                          RawImage(
-                            image: _baseImage,
-                            fit: BoxFit.contain,
-                            filterQuality: FilterQuality.medium,
+                          RepaintBoundary(
+                            child: RawImage(
+                              image: _baseImage,
+                              fit: BoxFit.contain,
+                              filterQuality: FilterQuality.medium,
+                            ),
                           ),
 
                           // Annotations + live preview + selection chrome.
@@ -3401,6 +3560,20 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                 final projection = _projectionFor(
                                   constraints.biggest,
                                 );
+                                final canvasAnnotations = _canvasAnnotationsFor(
+                                  projection,
+                                );
+                                Annotation? selectedCanvasAnn;
+                                if (_selectedAnnotationId != null &&
+                                    _selectedAnnotationId !=
+                                        _editingAnnotationId) {
+                                  for (final ann in canvasAnnotations) {
+                                    if (ann.id == _selectedAnnotationId) {
+                                      selectedCanvasAnn = ann;
+                                      break;
+                                    }
+                                  }
+                                }
                                 return MouseRegion(
                                   cursor: _cursor,
                                   onHover: (e) =>
@@ -3439,24 +3612,61 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                     onPanUpdate: _onPanUpdate,
                                     onPanEnd: _onPanEnd,
                                     onTapUp: _onTapUp,
-                                    child: CustomPaint(
-                                      painter: _AnnotationPainter(
-                                        annotations: _canvasAnnotationsFor(
-                                          projection,
+                                    // Old implementation:
+                                    // child: CustomPaint(
+                                    //   painter: _AnnotationPainter(
+                                    //     annotations: _canvasAnnotationsFor(
+                                    //       projection,
+                                    //     ),
+                                    //     pixelScale: projection.scale,
+                                    //     patchImages: _patchImages,
+                                    //     currentAnnotation: _currentAnnotation,
+                                    //     selectedAnnotationId:
+                                    //         _selectedAnnotationId,
+                                    //     editingAnnotationId:
+                                    //         _editingAnnotationId,
+                                    //     baseImage: _baseImage,
+                                    //     showHud:
+                                    //         _currentAnnotation != null ||
+                                    //         _isResizingAnnotation ||
+                                    //         _isDraggingAnnotation,
+                                    //   ),
+                                    // ),
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        RepaintBoundary(
+                                          child: CustomPaint(
+                                            painter:
+                                                _CommittedAnnotationsPainter(
+                                                  annotations:
+                                                      canvasAnnotations,
+                                                  pixelScale: projection.scale,
+                                                  patchImages: _patchImages,
+                                                  editingAnnotationId:
+                                                      _editingAnnotationId,
+                                                  baseImage: _baseImage,
+                                                ),
+                                          ),
                                         ),
-                                        pixelScale: projection.scale,
-                                        patchImages: _patchImages,
-                                        currentAnnotation: _currentAnnotation,
-                                        selectedAnnotationId:
-                                            _selectedAnnotationId,
-                                        editingAnnotationId:
-                                            _editingAnnotationId,
-                                        baseImage: _baseImage,
-                                        showHud:
-                                            _currentAnnotation != null ||
-                                            _isResizingAnnotation ||
-                                            _isDraggingAnnotation,
-                                      ),
+                                        RepaintBoundary(
+                                          child: CustomPaint(
+                                            painter: _ActiveOverlayPainter(
+                                              pixelScale: projection.scale,
+                                              patchImages: _patchImages,
+                                              currentAnnotation:
+                                                  _currentAnnotation,
+                                              selectedAnnotation:
+                                                  selectedCanvasAnn,
+                                              baseImage: _baseImage,
+                                              showHud:
+                                                  _currentAnnotation != null ||
+                                                  _isResizingAnnotation ||
+                                                  _isDraggingAnnotation,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 );
@@ -4660,39 +4870,98 @@ class _FloatingSelectionPainter extends CustomPainter {
       oldDelegate.theme != theme;
 }
 
-class _AnnotationPainter extends CustomPainter {
+// Gene - Nov, 20, 2026: Split monolithic _AnnotationPainter into _CommittedAnnotationsPainter (cached GPU layer) and _ActiveOverlayPainter (120fps live interaction layer).
+// Old implementation:
+// class _AnnotationPainter extends CustomPainter {
+//   final List<Annotation> annotations;
+//   final Annotation? currentAnnotation;
+//   final String? selectedAnnotationId;
+//   final String? editingAnnotationId;
+//   final ui.Image? baseImage;
+//   final bool showHud;
+//   final Map<String, ui.Image> patchImages;
+//   final double pixelScale;
+//
+//   _AnnotationPainter({
+//     required this.annotations,
+//     required this.pixelScale,
+//     required this.patchImages,
+//     this.currentAnnotation,
+//     this.selectedAnnotationId,
+//     this.editingAnnotationId,
+//     this.baseImage,
+//     this.showHud = false,
+//   });
+//
+//   @override
+//   void paint(Canvas canvas, Size size) {
+//     final image = baseImage;
+//     final imageRect = image == null
+//         ? null
+//         : RenderService.imageRectInCanvas(
+//             imageSize: Size(image.width.toDouble(), image.height.toDouble()),
+//             canvasSize: size,
+//           );
+//
+//     final visibleAnnotations = editingAnnotationId != null
+//         ? annotations.where((a) => a.id != editingAnnotationId).toList()
+//         : annotations;
+//
+//     AnnotationRenderer.paintAll(
+//       canvas,
+//       [...visibleAnnotations, ?currentAnnotation],
+//       baseImage: image,
+//       imageRect: imageRect,
+//       pixelScale: pixelScale,
+//       patchImages: patchImages,
+//     );
+//
+//     if (selectedAnnotationId != null &&
+//         selectedAnnotationId != editingAnnotationId) {
+//       for (final ann in annotations) {
+//         if (ann.id == selectedAnnotationId) {
+//           AnnotationRenderer.paintSelection(canvas, ann);
+//           if (showHud) AnnotationRenderer.paintMeasurementHud(canvas, ann);
+//           break;
+//         }
+//       }
+//     }
+//
+//     if (showHud && currentAnnotation != null) {
+//       AnnotationRenderer.paintMeasurementHud(canvas, currentAnnotation!);
+//     }
+//   }
+//
+//   @override
+//   bool shouldRepaint(covariant _AnnotationPainter oldDelegate) {
+//     return !listEquals(oldDelegate.annotations, annotations) ||
+//         oldDelegate.pixelScale != pixelScale ||
+//         oldDelegate.currentAnnotation != currentAnnotation ||
+//         oldDelegate.selectedAnnotationId != selectedAnnotationId ||
+//         oldDelegate.editingAnnotationId != editingAnnotationId ||
+//         oldDelegate.baseImage != baseImage ||
+//         oldDelegate.showHud != showHud ||
+//         !identical(oldDelegate.patchImages, patchImages);
+//   }
+// }
+
+class _CommittedAnnotationsPainter extends CustomPainter {
   final List<Annotation> annotations;
-  final Annotation? currentAnnotation;
-  final String? selectedAnnotationId;
   final String? editingAnnotationId;
   final ui.Image? baseImage;
-  final bool showHud;
-
-  /// Decoded pixels for every `CanvasTool.imagePatch` annotation, keyed by id.
-  /// Owned by the State — see `_syncPatchImages` — because painting is
-  /// synchronous and decoding is not.
   final Map<String, ui.Image> patchImages;
-
-  /// Image pixels per canvas unit, for the ruler's measurement readout. The
-  /// painter cannot derive it — the State owns the projection — so it is passed
-  /// in from `build`.
   final double pixelScale;
 
-  _AnnotationPainter({
+  _CommittedAnnotationsPainter({
     required this.annotations,
     required this.pixelScale,
     required this.patchImages,
-    this.currentAnnotation,
-    this.selectedAnnotationId,
     this.editingAnnotationId,
     this.baseImage,
-    this.showHud = false,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Blur regions resample the real screenshot pixels, so the on-screen result
-    // is identical to what the exporter writes to disk.
     final image = baseImage;
     final imageRect = image == null
         ? null
@@ -4707,21 +4976,67 @@ class _AnnotationPainter extends CustomPainter {
 
     AnnotationRenderer.paintAll(
       canvas,
-      [...visibleAnnotations, ?currentAnnotation],
+      visibleAnnotations,
       baseImage: image,
       imageRect: imageRect,
       pixelScale: pixelScale,
       patchImages: patchImages,
     );
+  }
 
-    if (selectedAnnotationId != null &&
-        selectedAnnotationId != editingAnnotationId) {
-      for (final ann in annotations) {
-        if (ann.id == selectedAnnotationId) {
-          AnnotationRenderer.paintSelection(canvas, ann);
-          if (showHud) AnnotationRenderer.paintMeasurementHud(canvas, ann);
-          break;
-        }
+  @override
+  bool shouldRepaint(covariant _CommittedAnnotationsPainter oldDelegate) {
+    return !listEquals(oldDelegate.annotations, annotations) ||
+        oldDelegate.pixelScale != pixelScale ||
+        oldDelegate.editingAnnotationId != editingAnnotationId ||
+        oldDelegate.baseImage != baseImage ||
+        !identical(oldDelegate.patchImages, patchImages);
+  }
+}
+
+class _ActiveOverlayPainter extends CustomPainter {
+  final Annotation? currentAnnotation;
+  final Annotation? selectedAnnotation;
+  final ui.Image? baseImage;
+  final Map<String, ui.Image> patchImages;
+  final double pixelScale;
+  final bool showHud;
+
+  _ActiveOverlayPainter({
+    required this.pixelScale,
+    required this.patchImages,
+    this.currentAnnotation,
+    this.selectedAnnotation,
+    this.baseImage,
+    this.showHud = false,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (currentAnnotation == null && selectedAnnotation == null) return;
+
+    if (currentAnnotation != null) {
+      final image = baseImage;
+      final imageRect = image == null
+          ? null
+          : RenderService.imageRectInCanvas(
+              imageSize: Size(image.width.toDouble(), image.height.toDouble()),
+              canvasSize: size,
+            );
+      AnnotationRenderer.paintAll(
+        canvas,
+        [currentAnnotation!],
+        baseImage: image,
+        imageRect: imageRect,
+        pixelScale: pixelScale,
+        patchImages: patchImages,
+      );
+    }
+
+    if (selectedAnnotation != null) {
+      AnnotationRenderer.paintSelection(canvas, selectedAnnotation!);
+      if (showHud) {
+        AnnotationRenderer.paintMeasurementHud(canvas, selectedAnnotation!);
       }
     }
 
@@ -4731,16 +5046,12 @@ class _AnnotationPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _AnnotationPainter oldDelegate) {
-    return !listEquals(oldDelegate.annotations, annotations) ||
+  bool shouldRepaint(covariant _ActiveOverlayPainter oldDelegate) {
+    return oldDelegate.currentAnnotation != currentAnnotation ||
+        oldDelegate.selectedAnnotation != selectedAnnotation ||
         oldDelegate.pixelScale != pixelScale ||
-        oldDelegate.currentAnnotation != currentAnnotation ||
-        oldDelegate.selectedAnnotationId != selectedAnnotationId ||
-        oldDelegate.editingAnnotationId != editingAnnotationId ||
-        oldDelegate.baseImage != baseImage ||
         oldDelegate.showHud != showHud ||
-        // Identity: the State swaps in a whole new map when a decode lands, so
-        // a changed reference is exactly "some patch bitmap is new".
+        oldDelegate.baseImage != baseImage ||
         !identical(oldDelegate.patchImages, patchImages);
   }
 }

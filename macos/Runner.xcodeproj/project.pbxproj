@@ -32,6 +32,7 @@
 		A1B2C3D12B00000100AA0002 /* OcrPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D02B00000100AA0001 /* OcrPlugin.swift */; };
 		B1B2C3D12B00000100AA0002 /* CapturePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B2C3D02B00000100AA0001 /* CapturePlugin.swift */; };
 		C166868A8F1E829BF1079928 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 39BFA34738A02201E5BC5083 /* Pods_Runner.framework */; };
+		D1B2C3D12B00000100AA0002 /* ScrollingCaptureEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B2C3D02B00000100AA0001 /* ScrollingCaptureEngine.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -93,6 +94,8 @@
 		A5B3740E88E8EC2804E98E37 /* Pods_RunnerTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RunnerTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1B2C3D02B00000100AA0001 /* CapturePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePlugin.swift; sourceTree = "<group>"; };
 		C605410AA39420B0DE6AB1A3 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
+		D1B2C3D02B00000100AA0001 /* ScrollingCaptureEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollingCaptureEngine.swift; sourceTree = "<group>"; };
+		D1B2C3D22B00000100AA0003 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
 		D9CA8F2F7801B17568DE5F66 /* Pods-RunnerTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.release.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -187,6 +190,8 @@
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				A1B2C3D02B00000100AA0001 /* OcrPlugin.swift */,
 				B1B2C3D02B00000100AA0001 /* CapturePlugin.swift */,
+				D1B2C3D02B00000100AA0001 /* ScrollingCaptureEngine.swift */,
+				D1B2C3D22B00000100AA0003 /* Runner-Bridging-Header.h */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
 				33E51914231749380026EE4D /* Release.entitlements */,
 				33CC11242044D66E0003C045 /* Resources */,
@@ -244,6 +249,7 @@
 			buildConfigurationList = 33CC10FB2044A3C60003C045 /* Build configuration list for PBXNativeTarget "Runner" */;
 			buildPhases = (
 				701B39F7499673FC2E037F1B /* [CP] Check Pods Manifest.lock */,
+				D1B2C3D32B00000100AA0004 /* Build Rust snipsnap_core */,
 				33CC10E92044A3C60003C045 /* Sources */,
 				33CC10EA2044A3C60003C045 /* Frameworks */,
 				33CC10EB2044A3C60003C045 /* Resources */,
@@ -437,6 +443,26 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
+		D1B2C3D32B00000100AA0004 /* Build Rust snipsnap_core */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Rust snipsnap_core";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/libsnipsnap_core.a",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "bash \"$SRCROOT/../scripts/build_rust_macos.sh\"\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -455,6 +481,7 @@
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				A1B2C3D12B00000100AA0002 /* OcrPlugin.swift in Sources */,
 				B1B2C3D12B00000100AA0002 /* CapturePlugin.swift in Sources */,
+				D1B2C3D12B00000100AA0002 /* ScrollingCaptureEngine.swift in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
 			);
@@ -593,12 +620,26 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = T7LB768N2Z;
+				/* Gene - Nov, 20, 2026: Link Rust snipsnap_core staticlib from BUILT_PRODUCTS_DIR and Swift bridging header. */
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../native/snipsnap_core/include",
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lsnipsnap_core",
+				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Profile;
@@ -728,12 +769,26 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = T7LB768N2Z;
+				/* Gene - Nov, 20, 2026: Link Rust snipsnap_core staticlib from BUILT_PRODUCTS_DIR and Swift bridging header. */
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../native/snipsnap_core/include",
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lsnipsnap_core",
+				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 			};
@@ -750,12 +805,26 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = T7LB768N2Z;
 				ENABLE_HARDENED_RUNTIME = YES;
+				/* Gene - Nov, 20, 2026: Link Rust snipsnap_core staticlib from BUILT_PRODUCTS_DIR and Swift bridging header. */
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../native/snipsnap_core/include",
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(BUILT_PRODUCTS_DIR)",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lsnipsnap_core",
+				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;

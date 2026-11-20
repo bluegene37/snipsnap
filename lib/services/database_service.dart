@@ -74,6 +74,49 @@ class DatabaseService {
   //   }
   //   return items;
   // }
+  // Gene - Nov, 20, 2026: Fetch only annotations belonging to the loaded page when limit is provided, and add loadCaptureByIdFromDb.
+  // Old implementation:
+  // static Future<List<CaptureItem>> loadCapturesFromDb({
+  //   int? limit,
+  //   int offset = 0,
+  // }) async {
+  //   final rows = limit != null
+  //       ? await db.getCapturesPage(limit: limit, offset: offset)
+  //       : await db.getAllCaptures();
+  //   if (rows.isEmpty) return <CaptureItem>[];
+  //
+  //   final allAnnRows = await db.getAllAnnotations();
+  //   final annsByCaptureId = <String, List<DbAnnotation>>{};
+  //   for (final ann in allAnnRows) {
+  //     annsByCaptureId
+  //         .putIfAbsent(ann.captureId, () => <DbAnnotation>[])
+  //         .add(ann);
+  //   }
+  //
+  //   final items = <CaptureItem>[];
+  //   for (final row in rows) {
+  //     final annRows = annsByCaptureId[row.id] ?? const <DbAnnotation>[];
+  //     final parsed = _annotationsFor(annRows);
+  //
+  //     items.add(
+  //       CaptureItem(
+  //         id: row.id,
+  //         filePath: row.filePath,
+  //         title: row.title,
+  //         createdAt: row.createdAt,
+  //         width: row.width,
+  //         height: row.height,
+  //         annotations: parsed.annotations,
+  //         annotationsNeedConversion: parsed.needsConversion,
+  //         mediaType: CaptureMediaType.fromString(row.mediaType),
+  //         durationMs: row.durationMs,
+  //         hasAudio: row.hasAudio,
+  //         thumbnailPath: row.thumbnailPath,
+  //       ),
+  //     );
+  //   }
+  //   return items;
+  // }
   static Future<List<CaptureItem>> loadCapturesFromDb({
     int? limit,
     int offset = 0,
@@ -83,7 +126,9 @@ class DatabaseService {
         : await db.getAllCaptures();
     if (rows.isEmpty) return <CaptureItem>[];
 
-    final allAnnRows = await db.getAllAnnotations();
+    final allAnnRows = limit != null
+        ? await db.getAnnotationsForCaptureIds(rows.map((r) => r.id).toList())
+        : await db.getAllAnnotations();
     final annsByCaptureId = <String, List<DbAnnotation>>{};
     for (final ann in allAnnRows) {
       annsByCaptureId
@@ -91,29 +136,52 @@ class DatabaseService {
           .add(ann);
     }
 
-    final items = <CaptureItem>[];
-    for (final row in rows) {
-      final annRows = annsByCaptureId[row.id] ?? const <DbAnnotation>[];
-      final parsed = _annotationsFor(annRows);
+    return [for (final row in rows) _captureItemFromRow(row, annsByCaptureId)];
+  }
 
-      items.add(
-        CaptureItem(
-          id: row.id,
-          filePath: row.filePath,
-          title: row.title,
-          createdAt: row.createdAt,
-          width: row.width,
-          height: row.height,
-          annotations: parsed.annotations,
-          annotationsNeedConversion: parsed.needsConversion,
-          mediaType: CaptureMediaType.fromString(row.mediaType),
-          durationMs: row.durationMs,
-          hasAudio: row.hasAudio,
-          thumbnailPath: row.thumbnailPath,
-        ),
-      );
+  static Future<CaptureItem?> loadCaptureByIdFromDb(String id) async {
+    final row = await db.getCaptureById(id);
+    if (row == null) return null;
+    final annRows = await db.getAnnotationsForCapture(row.id);
+    return _captureItemFromRow(row, {row.id: annRows});
+  }
+
+  // Gene - Nov, 20, 2026: Lightweight filePath/thumbnailPath query so background orphan file adoption never reads annotation rows or patchBytes BLOBs.
+  static Future<({Set<String> filePaths, Set<String> thumbnailPaths})>
+  loadKnownCapturePaths() async {
+    final rows = await db.getAllCapturePathsAndThumbnails();
+    final filePaths = <String>{};
+    final thumbnailPaths = <String>{};
+    for (final r in rows) {
+      filePaths.add(r.filePath);
+      final thumb = r.thumbnailPath;
+      if (thumb != null && thumb.isNotEmpty) {
+        thumbnailPaths.add(thumb);
+      }
     }
-    return items;
+    return (filePaths: filePaths, thumbnailPaths: thumbnailPaths);
+  }
+
+  static CaptureItem _captureItemFromRow(
+    Capture row,
+    Map<String, List<DbAnnotation>> annsByCaptureId,
+  ) {
+    final annRows = annsByCaptureId[row.id] ?? const <DbAnnotation>[];
+    final parsed = _annotationsFor(annRows);
+    return CaptureItem(
+      id: row.id,
+      filePath: row.filePath,
+      title: row.title,
+      createdAt: row.createdAt,
+      width: row.width,
+      height: row.height,
+      annotations: parsed.annotations,
+      annotationsNeedConversion: parsed.needsConversion,
+      mediaType: CaptureMediaType.fromString(row.mediaType),
+      durationMs: row.durationMs,
+      hasAudio: row.hasAudio,
+      thumbnailPath: row.thumbnailPath,
+    );
   }
 
   /// Annotations for one capture, paired with whether any of them still hold

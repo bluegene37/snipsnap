@@ -204,18 +204,112 @@ class StorageService {
     }
   }
 
+  // Gene - Nov, 20, 2026: Added paginated loadHistoryPage and adoptOrphanedFilesInDirectory for fast non-blocking startup; refactored loadHistory to reuse adoptOrphanedFilesInDirectory.
+  static Future<({List<CaptureItem> items, int dbCount, bool hasMore})>
+  loadHistoryPage({int limit = 30, int offset = 0}) async {
+    final items = <CaptureItem>[];
+    try {
+      final dbItems = await DatabaseService.loadCapturesFromDb(
+        limit: limit,
+        offset: offset,
+      );
+      if (dbItems.isEmpty) {
+        return (items: items, dbCount: 0, hasMore: false);
+      }
+      final existsList = await Future.wait(
+        dbItems.map((item) => File(item.filePath).exists()),
+      );
+      for (var i = 0; i < dbItems.length; i++) {
+        if (existsList[i]) {
+          items.add(dbItems[i]);
+        }
+      }
+      return (
+        items: items,
+        dbCount: dbItems.length,
+        hasMore: dbItems.length >= limit,
+      );
+    } catch (e) {
+      debugPrint('SnipSnap loadHistoryPage error: $e');
+      return (items: items, dbCount: 0, hasMore: false);
+    }
+  }
+
+  /// Scans the SnipSnap/Captures directory for image/video files not yet
+  /// tracked in [knownPaths] (skipping hidden files and [knownThumbnails])
+  /// and registers them in SQLite.
+  static Future<List<CaptureItem>> adoptOrphanedFilesInDirectory({
+    required Set<String> knownPaths,
+    required Set<String> knownThumbnails,
+  }) async {
+    final adopted = <CaptureItem>[];
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final snapDir = Directory(p.join(docsDir.path, 'SnipSnap', 'Captures'));
+      if (!await snapDir.exists()) return adopted;
+
+      final files = await snapDir.list().toList();
+      for (final f in files) {
+        if (f is File &&
+            (f.path.endsWith('.png') ||
+                f.path.endsWith('.jpg') ||
+                f.path.endsWith('.jpeg') ||
+                f.path.endsWith('.mp4'))) {
+          final baseName = p.basename(f.path);
+          if (baseName.startsWith('.') ||
+              baseName.startsWith('rec_thumb_') ||
+              knownThumbnails.contains(f.path)) {
+            continue;
+          }
+          if (!knownPaths.contains(f.path)) {
+            final isVideo = f.path.endsWith('.mp4');
+            if (isVideo && !await _isFinalizedMp4File(f)) {
+              continue;
+            }
+            final stat = await f.stat();
+            int w = 0;
+            int h = 0;
+            if (!isVideo) {
+              final dims = await ImageHeaderParser.readDimensions(f.path);
+              if (dims != null) {
+                w = dims.width;
+                h = dims.height;
+              }
+            }
+            final prefix = isVideo ? 'Recording' : 'Snap';
+            final newItem = CaptureItem(
+              id: '${stat.modified.millisecondsSinceEpoch}_${p.basename(f.path)}',
+              filePath: f.path,
+              title:
+                  '$prefix ${stat.modified.hour.toString().padLeft(2, '0')}:${stat.modified.minute.toString().padLeft(2, '0')}:${stat.modified.second.toString().padLeft(2, '0')}',
+              createdAt: stat.modified,
+              width: w,
+              height: h,
+              mediaType: isVideo
+                  ? CaptureMediaType.video
+                  : CaptureMediaType.image,
+            );
+            adopted.add(newItem);
+            knownPaths.add(f.path);
+            await DatabaseService.saveCaptureToDb(newItem);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('SnipSnap orphan scan error: $e');
+    }
+    return adopted;
+  }
+
   /// Load persistent capture history from Drift SQLite local database
+  // Old implementation:
+  // static Future<List<CaptureItem>> loadHistory() async {
+  //   ... full inline directory scan ...
+  // }
   static Future<List<CaptureItem>> loadHistory() async {
     final items = <CaptureItem>[];
     try {
       // Gene - Nov, 17, 2026: Parallelize file-existence checks across all DB history items using Future.wait instead of sequential awaits.
-      // Old implementation:
-      // final dbItems = await DatabaseService.loadCapturesFromDb();
-      // for (final item in dbItems) {
-      //   if (await File(item.filePath).exists()) {
-      //     items.add(item);
-      //   }
-      // }
       final dbItems = await DatabaseService.loadCapturesFromDb();
       final existsList = await Future.wait(
         dbItems.map((item) => File(item.filePath).exists()),
@@ -227,118 +321,16 @@ class StorageService {
       }
 
       // Also scan directory for any existing images not yet in Drift DB
-      final docsDir = await getApplicationDocumentsDirectory();
-      final snapDir = Directory(p.join(docsDir.path, 'SnipSnap', 'Captures'));
-      if (await snapDir.exists()) {
-        final existingPaths = items.map((i) => i.filePath).toSet();
-        // Gene - Nov, 13, 2026: Track known video thumbnails and ignore hidden subfolders (.thumbnails, .originals) and rec_thumb_* files so video thumbnails are never adopted as standalone screenshots.
-        final knownThumbnails = items
-            .map((i) => i.thumbnailPath)
-            .whereType<String>()
-            .toSet();
-        final files = await snapDir.list().toList();
-        for (final f in files) {
-          // Gene - Oct, 27, 2026: Supported adopting existing .mp4 video captures from the storage directory alongside images.
-          // Old implementation:
-          // if (f is File &&
-          //     (f.path.endsWith('.png') ||
-          //         f.path.endsWith('.jpg') ||
-          //         f.path.endsWith('.jpeg'))) {
-          //   if (!existingPaths.contains(f.path)) {
-          //     final stat = await f.stat();
-          //     int w = 0;
-          //     int h = 0;
-          //     try {
-          //       final decoded = await compute(
-          //         img.decodeImage,
-          //         await f.readAsBytes(),
-          //       );
-          //       if (decoded != null) {
-          //         w = decoded.width;
-          //         h = decoded.height;
-          //       }
-          //     } catch (e) {
-          //       debugPrint('SnipSnap dimension read error: $e');
-          //     }
-          //     final newItem = CaptureItem(
-          //       id: '${stat.modified.millisecondsSinceEpoch}_${p.basename(f.path)}',
-          //       filePath: f.path,
-          //       title:
-          //           'Snap ${stat.modified.hour.toString().padLeft(2, '0')}:${stat.modified.minute.toString().padLeft(2, '0')}:${stat.modified.second.toString().padLeft(2, '0')}',
-          //       createdAt: stat.modified,
-          //       width: w,
-          //       height: h,
-          //     );
-          //     items.add(newItem);
-          //     await DatabaseService.saveCaptureToDb(newItem);
-          //   }
-          // }
-          if (f is File &&
-              (f.path.endsWith('.png') ||
-                  f.path.endsWith('.jpg') ||
-                  f.path.endsWith('.jpeg') ||
-                  f.path.endsWith('.mp4'))) {
-            final baseName = p.basename(f.path);
-            if (baseName.startsWith('.') ||
-                baseName.startsWith('rec_thumb_') ||
-                knownThumbnails.contains(f.path)) {
-              continue;
-            }
-            if (!existingPaths.contains(f.path)) {
-              final isVideo = f.path.endsWith('.mp4');
-              // Gene - Nov, 13, 2026: Skip unfinalized MP4 files (e.g., AVAssetWriter mdat size=0 with no moov) when scanning disk.
-              if (isVideo && !await _isFinalizedMp4File(f)) {
-                continue;
-              }
-              final stat = await f.stat();
-              int w = 0;
-              int h = 0;
-              // Gene - Nov, 08, 2026: Replaced full-bitmap compute(img.decodeImage) with ImageHeaderParser.readDimensions (<0.1ms header read).
-              // Old implementation:
-              // if (!isVideo) {
-              //   try {
-              //     // Off the UI isolate, like every other decode in the app: this
-              //     // loop runs at startup over every file in the library folder,
-              //     // and a pure-Dart PNG decode of a Retina capture is long
-              //     // enough to be seen as a freeze once there are a few of them.
-              //     final decoded = await compute(
-              //       img.decodeImage,
-              //       await f.readAsBytes(),
-              //     );
-              //     if (decoded != null) {
-              //       w = decoded.width;
-              //       h = decoded.height;
-              //     }
-              //   } catch (e) {
-              //     debugPrint('SnipSnap dimension read error: $e');
-              //   }
-              // }
-              if (!isVideo) {
-                final dims = await ImageHeaderParser.readDimensions(f.path);
-                if (dims != null) {
-                  w = dims.width;
-                  h = dims.height;
-                }
-              }
-              final prefix = isVideo ? 'Recording' : 'Snap';
-              final newItem = CaptureItem(
-                id: '${stat.modified.millisecondsSinceEpoch}_${p.basename(f.path)}',
-                filePath: f.path,
-                title:
-                    '$prefix ${stat.modified.hour.toString().padLeft(2, '0')}:${stat.modified.minute.toString().padLeft(2, '0')}:${stat.modified.second.toString().padLeft(2, '0')}',
-                createdAt: stat.modified,
-                width: w,
-                height: h,
-                mediaType: isVideo
-                    ? CaptureMediaType.video
-                    : CaptureMediaType.image,
-              );
-              items.add(newItem);
-              await DatabaseService.saveCaptureToDb(newItem);
-            }
-          }
-        }
-      }
+      final existingPaths = items.map((i) => i.filePath).toSet();
+      final knownThumbnails = items
+          .map((i) => i.thumbnailPath)
+          .whereType<String>()
+          .toSet();
+      final adopted = await adoptOrphanedFilesInDirectory(
+        knownPaths: existingPaths,
+        knownThumbnails: knownThumbnails,
+      );
+      items.addAll(adopted);
 
       items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     } catch (e) {

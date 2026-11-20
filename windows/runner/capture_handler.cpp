@@ -72,6 +72,9 @@
 #include <utility>
 #include <vector>
 
+// Gene - Nov, 20, 2026: Native Windows scrolling capture engine backed by Rust snipsnap_core staticlib.
+#include "scrolling_capture_engine.h"
+
 #ifndef WDA_EXCLUDEFROMCAPTURE
 #define WDA_EXCLUDEFROMCAPTURE 0x00000011
 #endif
@@ -85,6 +88,7 @@ using Microsoft::WRL::ComPtr;
 using CaptureMethodResult = flutter::MethodResult<EncodableValue>;
 
 constexpr char kChannelName[] = "snipsnap/capture";
+std::unique_ptr<ScrollingCaptureEngine> g_scrolling_engine;
 
 std::wstring Utf8ToWide(const std::string& utf8) {
   if (utf8.empty()) return std::wstring();
@@ -750,6 +754,8 @@ struct InteractiveOverlayState {
 
   RECT capture_btn = {0, 0, 0, 0};
   RECT record_btn = {0, 0, 0, 0};
+  // Gene - Nov, 20, 2026: Added scroll_btn to interactive capture overlay.
+  RECT scroll_btn = {0, 0, 0, 0};
   RECT cancel_btn = {0, 0, 0, 0};
   RECT preset_full_btn = {0, 0, 0, 0};
   RECT preset_1080_btn = {0, 0, 0, 0};
@@ -820,6 +826,7 @@ int HitTestOverlayGrip(const RECT& s, POINT pt) {
 void ClearOverlayButtonRects() {
   g_overlay.capture_btn = {0, 0, 0, 0};
   g_overlay.record_btn = {0, 0, 0, 0};
+  g_overlay.scroll_btn = {0, 0, 0, 0};
   g_overlay.cancel_btn = {0, 0, 0, 0};
   g_overlay.preset_full_btn = {0, 0, 0, 0};
   g_overlay.preset_1080_btn = {0, 0, 0, 0};
@@ -910,12 +917,40 @@ void SettleOverlayCapture(RECT r) {
     cropped[i] = 0xFF;
   }
 
-  if (SaveBgraToPngFile(cropped.data(), rw, rh, static_cast<int>(dst_stride),
-                        g_overlay.target_path)) {
-    FinishOverlayWithString(WideToUtf8(g_overlay.target_path));
-  } else {
-    FinishOverlayCancelled();
-  }
+  // Gene - Nov, 20, 2026: Dismiss interactive overlay immediately and offload WIC PNG encoding + disk write to a worker thread so UI closing has zero latency.
+  // Old implementation:
+  // if (SaveBgraToPngFile(cropped.data(), rw, rh, static_cast<int>(dst_stride),
+  //                       g_overlay.target_path)) {
+  //   FinishOverlayWithString(WideToUtf8(g_overlay.target_path));
+  // } else {
+  //   FinishOverlayCancelled();
+  // }
+  if (g_overlay.settled) return;
+  g_overlay.settled = true;
+  auto res = std::move(g_overlay.pending_result);
+  std::wstring target_w = g_overlay.target_path;
+  CloseInteractiveOverlay();
+
+  std::shared_ptr<CaptureMethodResult> shared_res(res.release());
+  std::thread([pixels = std::move(cropped), rw, rh, dst_stride, target_w,
+               shared_res]() mutable {
+    HRESULT co_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    bool did_init = SUCCEEDED(co_hr);
+    bool ok = SaveBgraToPngFile(pixels.data(), rw, rh,
+                                static_cast<int>(dst_stride), target_w);
+    if (did_init) {
+      ::CoUninitialize();
+    }
+    std::string utf8_path = ok ? WideToUtf8(target_w) : std::string();
+    PostToPlatformThread([shared_res, ok, utf8_path]() {
+      if (!shared_res) return;
+      if (ok) {
+        shared_res->Success(EncodableValue(utf8_path));
+      } else {
+        shared_res->Success(EncodableValue());
+      }
+    });
+  }).detach();
 }
 
 void SettleOverlayRecord(RECT r, bool full_screen_flag) {
@@ -936,6 +971,22 @@ void SettleOverlayRecord(RECT r, bool full_screen_flag) {
       << (full_screen_flag ? 1 : 0) << ":"
       << UriEncodeUtf8(g_overlay.mic_device_id);
   FinishOverlayWithString(oss.str());
+}
+
+// Gene - Nov, 20, 2026: Settle interactive overlay for native panoramic scrolling capture.
+void SettleOverlayScroll(RECT r) {
+  int rx = g_overlay.virt_x +
+           std::clamp(static_cast<int>(r.left), 0, g_overlay.virt_w);
+  int ry = g_overlay.virt_y +
+           std::clamp(static_cast<int>(r.top), 0, g_overlay.virt_h);
+  int rw =
+      std::clamp(static_cast<int>(r.right - r.left), 24, g_overlay.virt_w);
+  int rh =
+      std::clamp(static_cast<int>(r.bottom - r.top), 24, g_overlay.virt_h);
+  std::ostringstream oss;
+  oss << "scrolling:" << rx << ":" << ry << ":" << rw << ":" << rh;
+  FinishOverlayWithString(oss.str());
+  SetMainWindowVisible(false);
 }
 
 void ApplyOverlayPresetSize(int target_w, int target_h, bool full_screen) {
@@ -1030,7 +1081,8 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
           return (r.right > r.left && r.bottom > r.top) && ::PtInRect(&r, pt);
         };
         if (in_btn(g_overlay.cancel_btn) || in_btn(g_overlay.capture_btn) ||
-            in_btn(g_overlay.record_btn) || in_btn(g_overlay.preset_full_btn) ||
+            in_btn(g_overlay.record_btn) || in_btn(g_overlay.scroll_btn) ||
+            in_btn(g_overlay.preset_full_btn) ||
             in_btn(g_overlay.preset_1080_btn) ||
             in_btn(g_overlay.preset_720_btn) || in_btn(g_overlay.tb_full_btn) ||
             in_btn(g_overlay.tb_1080_btn) || in_btn(g_overlay.tb_720_btn) ||
@@ -1181,6 +1233,11 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
             }
             g_overlay.initial_mode = "record";
             ::InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
+          }
+          // Gene - Nov, 20, 2026: Trigger panoramic scrolling capture when [Scroll] pill is clicked.
+          if (::PtInRect(&g_overlay.scroll_btn, pt)) {
+            SettleOverlayScroll(g_overlay.sel);
             return 0;
           }
         }
@@ -1594,23 +1651,59 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
             g_overlay.sys_audio_btn = {0, 0, 0, 0};
             g_overlay.cursor_btn = {0, 0, 0, 0};
             g_overlay.mode_snip_btn = {0, 0, 0, 0};
+            // Gene - Nov, 20, 2026: Add [Scroll] pill beside [Capture] and [Video] in Win32 selection overlay.
+            // Old implementation:
+            // int btn_h = 30;
+            // int cap_w = 88;
+            // int rec_w = 88;
+            // int can_w = 32;
+            // int gap = 6;
+            // int total_w = cap_w + gap + rec_w + gap + can_w;
+            // int min_bx = std::max(8, cur_mon_l + 8);
+            // int max_bx =
+            //     std::max(min_bx, std::min(g_overlay.virt_w, cur_mon_r) -
+            //                          total_w - 8);
+            // int bx;
+            // int by;
+            // if (is_full_mon) {
+            //   bx = std::clamp(cur_mon_l + (cur_mon_w - total_w) / 2, min_bx,
+            //                   max_bx);
+            //   by = std::max(
+            //       12, std::min(g_overlay.virt_h, cur_mon_b) - btn_h - 68);
+            // } else {
+            //   bx = std::clamp(sr - total_w, min_bx, max_bx);
+            //   by = sb + 8;
+            //   if (by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 8) {
+            //     by = std::max(8, st - btn_h - 8);
+            //   }
+            // }
+            // if (is_full_mon) {
+            //   RECT tray = {bx - 10, by - 6, bx + total_w + 10, by + btn_h + 6};
+            //   DrawRoundedPill(mem_dc, tray, RGB(24, 18, 14), RGB(110, 90, 78),
+            //                   L"", RGB(255, 255, 255));
+            // }
+            // g_overlay.capture_btn = {bx, by, bx + cap_w, by + btn_h};
+            // g_overlay.record_btn = {bx + cap_w + gap, by,
+            //                         bx + cap_w + gap + rec_w, by + btn_h};
+            // g_overlay.cancel_btn = {bx + cap_w + gap + rec_w + gap, by,
+            //                         bx + total_w, by + btn_h};
+            // DrawRoundedPill(mem_dc, g_overlay.capture_btn, RGB(111, 78, 55),
+            //                 RGB(160, 122, 92), L"Capture", RGB(255, 255, 255));
+            // DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(185, 45, 45),
+            //                 RGB(230, 85, 85), L"Video", RGB(255, 255, 255));
+            // DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(35, 25, 18),
+            //                 RGB(110, 90, 78), L"X", RGB(255, 255, 255));
             int btn_h = 30;
             int cap_w = 88;
-            int rec_w = 88;
+            int rec_w = 78;
+            int scr_w = 78;
             int can_w = 32;
             int gap = 6;
-            int total_w = cap_w + gap + rec_w + gap + can_w;
+            int total_w = cap_w + gap + rec_w + gap + scr_w + gap + can_w;
             int min_bx = std::max(8, cur_mon_l + 8);
             int max_bx =
                 std::max(min_bx, std::min(g_overlay.virt_w, cur_mon_r) -
                                      total_w - 8);
-            // Gene - Nov, 13, 2026: Center [Capture] [Video] [X] above taskbar when full monitor selected, and relabel Record to Video.
-            // Old implementation:
-            // int bx = std::clamp(sr - total_w, min_bx, max_bx);
-            // int by = sb + 8;
-            // if (by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 8) {
-            //   by = std::max(8, st - btn_h - 8);
-            // }
             int bx;
             int by;
             if (is_full_mon) {
@@ -1635,16 +1728,19 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
             g_overlay.capture_btn = {bx, by, bx + cap_w, by + btn_h};
             g_overlay.record_btn = {bx + cap_w + gap, by,
                                     bx + cap_w + gap + rec_w, by + btn_h};
-            g_overlay.cancel_btn = {bx + cap_w + gap + rec_w + gap, by,
-                                    bx + total_w, by + btn_h};
+            g_overlay.scroll_btn = {bx + cap_w + gap + rec_w + gap, by,
+                                    bx + cap_w + gap + rec_w + gap + scr_w,
+                                    by + btn_h};
+            g_overlay.cancel_btn = {
+                bx + cap_w + gap + rec_w + gap + scr_w + gap, by,
+                bx + total_w, by + btn_h};
 
             DrawRoundedPill(mem_dc, g_overlay.capture_btn, RGB(111, 78, 55),
                             RGB(160, 122, 92), L"Capture", RGB(255, 255, 255));
-            // Old implementation:
-            // DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(185, 45, 45),
-            //                 RGB(230, 85, 85), L"Record", RGB(255, 255, 255));
             DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(185, 45, 45),
                             RGB(230, 85, 85), L"Video", RGB(255, 255, 255));
+            DrawRoundedPill(mem_dc, g_overlay.scroll_btn, RGB(58, 48, 41),
+                            RGB(160, 122, 92), L"Scroll", RGB(255, 255, 255));
             DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(35, 25, 18),
                             RGB(110, 90, 78), L"X", RGB(255, 255, 255));
           }
@@ -4178,11 +4274,38 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           int vy = static_cast<int>(mon.top);
           int vw = static_cast<int>(mon.right - mon.left);
           int vh = static_cast<int>(mon.bottom - mon.top);
+          // Gene - Nov, 20, 2026: Offload full-screen WIC PNG encoding + file write off the Win32 platform thread after fast GDI BitBlt.
+          // Old implementation:
+          // std::vector<uint8_t> bgra;
+          // if (vw > 0 && vh > 0 && CaptureScreenRectBgra(vx, vy, vw, vh, &bgra) &&
+          //     SaveBgraToPngFile(bgra.data(), vw, vh, vw * 4,
+          //                       Utf8ToWide(target))) {
+          //   result->Success(EncodableValue(target));
+          // } else {
+          //   result->Success(EncodableValue());
+          // }
           std::vector<uint8_t> bgra;
-          if (vw > 0 && vh > 0 && CaptureScreenRectBgra(vx, vy, vw, vh, &bgra) &&
-              SaveBgraToPngFile(bgra.data(), vw, vh, vw * 4,
-                                Utf8ToWide(target))) {
-            result->Success(EncodableValue(target));
+          if (vw > 0 && vh > 0 && CaptureScreenRectBgra(vx, vy, vw, vh, &bgra)) {
+            std::shared_ptr<CaptureMethodResult> shared_res(result.release());
+            std::wstring target_w = Utf8ToWide(target);
+            std::thread([pixels = std::move(bgra), vw, vh, target, target_w,
+                         shared_res]() mutable {
+              HRESULT co_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+              bool did_init = SUCCEEDED(co_hr);
+              bool ok = SaveBgraToPngFile(pixels.data(), vw, vh, vw * 4,
+                                          target_w);
+              if (did_init) {
+                ::CoUninitialize();
+              }
+              PostToPlatformThread([shared_res, ok, target]() {
+                if (!shared_res) return;
+                if (ok) {
+                  shared_res->Success(EncodableValue(target));
+                } else {
+                  shared_res->Success(EncodableValue());
+                }
+              });
+            }).detach();
           } else {
             result->Success(EncodableValue());
           }
@@ -4228,6 +4351,127 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           } else {
             result->Success(EncodableValue());
           }
+          return;
+        }
+
+        // Gene - Nov, 20, 2026: Native Windows scrolling capture session MethodChannel commands backed by Rust snipsnap_core.
+        if (method == "startScrollingCapture") {
+          std::string target = get_str("targetPath");
+          if (target.empty()) {
+            result->Error("bad_args", "targetPath missing");
+            return;
+          }
+          ScrollingCaptureConfig cfg;
+          cfg.x = static_cast<int>(std::llround(get_double("x")));
+          cfg.y = static_cast<int>(std::llround(get_double("y")));
+          cfg.width = static_cast<int>(std::llround(get_double("width")));
+          cfg.height = static_cast<int>(std::llround(get_double("height")));
+          cfg.max_dimension =
+              static_cast<int>(get_int64("maxDimension", 16000));
+          cfg.axis_mode = static_cast<int>(get_int64("axisMode", 0));
+          cfg.target_path = Utf8ToWide(target);
+          cfg.target_path_utf8 = target;
+
+          SetMainWindowVisible(false);
+          if (g_scrolling_engine) {
+            g_scrolling_engine->Cancel();
+            g_scrolling_engine.reset();
+          }
+          g_scrolling_engine = std::make_unique<ScrollingCaptureEngine>();
+
+          ScrollingCaptureCallbacks cbs;
+          cbs.save_png = [](const uint8_t* bgra, int w, int h, int stride,
+                            const std::wstring& path) -> bool {
+            return SaveBgraToPngFile(bgra, w, h, stride, path);
+          };
+          cbs.on_progress = [](int width, int height, int frame_count, int axis,
+                               int status, bool paused, bool auto_scrolling,
+                               const std::string& warning) {
+            PostToPlatformThread([width, height, frame_count, axis, status,
+                                  paused, auto_scrolling, warning]() {
+              EncodableMap m;
+              m[EncodableValue("width")] = EncodableValue(width);
+              m[EncodableValue("height")] = EncodableValue(height);
+              m[EncodableValue("frameCount")] = EncodableValue(frame_count);
+              m[EncodableValue("axis")] = EncodableValue(axis);
+              m[EncodableValue("status")] = EncodableValue(status);
+              m[EncodableValue("isPaused")] = EncodableValue(paused);
+              m[EncodableValue("isAutoScrolling")] =
+                  EncodableValue(auto_scrolling);
+              if (!warning.empty()) {
+                m[EncodableValue("warning")] = EncodableValue(warning);
+              }
+              InvokeDartMethod("onScrollingProgress", EncodableValue(m));
+            });
+          };
+          cbs.on_completed = [](const std::string& path, int width, int height,
+                                int frame_count, int axis, bool truncated) {
+            PostToPlatformThread(
+                [path, width, height, frame_count, axis, truncated]() {
+                  SetMainWindowVisible(true);
+                  EncodableMap m;
+                  m[EncodableValue("path")] = EncodableValue(path);
+                  m[EncodableValue("width")] = EncodableValue(width);
+                  m[EncodableValue("height")] = EncodableValue(height);
+                  m[EncodableValue("frameCount")] = EncodableValue(frame_count);
+                  m[EncodableValue("axis")] = EncodableValue(axis);
+                  m[EncodableValue("truncated")] = EncodableValue(truncated);
+                  InvokeDartMethod("onScrollingCompleted", EncodableValue(m));
+                });
+          };
+          cbs.on_cancel = []() {
+            PostToPlatformThread([]() {
+              SetMainWindowVisible(true);
+              InvokeDartMethod("onScrollingCancel", EncodableValue());
+            });
+          };
+          cbs.on_error = [](const std::string& message) {
+            PostToPlatformThread([message]() {
+              SetMainWindowVisible(true);
+              EncodableMap m;
+              m[EncodableValue("message")] = EncodableValue(message);
+              InvokeDartMethod("onScrollingError", EncodableValue(m));
+            });
+          };
+
+          bool started = g_scrolling_engine->Start(cfg, cbs);
+          if (!started) {
+            g_scrolling_engine.reset();
+            SetMainWindowVisible(true);
+          }
+          result->Success(EncodableValue(started));
+          return;
+        }
+
+        if (method == "setScrollingAutoMode") {
+          if (g_scrolling_engine) {
+            g_scrolling_engine->SetAutoScroll(get_bool("enabled", false));
+          }
+          result->Success(EncodableValue(true));
+          return;
+        }
+
+        if (method == "pauseScrollingCapture") {
+          if (g_scrolling_engine) g_scrolling_engine->Pause();
+          result->Success(EncodableValue(true));
+          return;
+        }
+
+        if (method == "resumeScrollingCapture") {
+          if (g_scrolling_engine) g_scrolling_engine->Resume();
+          result->Success(EncodableValue(true));
+          return;
+        }
+
+        if (method == "finishScrollingCapture") {
+          if (g_scrolling_engine) g_scrolling_engine->Finish();
+          result->Success(EncodableValue(true));
+          return;
+        }
+
+        if (method == "cancelScrollingCapture") {
+          if (g_scrolling_engine) g_scrolling_engine->Cancel();
+          result->Success(EncodableValue(true));
           return;
         }
 
@@ -4716,6 +4960,11 @@ void ShutdownCaptureHandler() {
     }
   }
   CloseInteractiveOverlay();
+  // Gene - Nov, 20, 2026: Tear down active Windows scrolling capture engine before engine destruction.
+  if (g_scrolling_engine) {
+    g_scrolling_engine->Cancel();
+    g_scrolling_engine.reset();
+  }
   // Gene - Nov, 13, 2026: Ensure both active and in-flight stopping recorder workers are safely joined under join_mutex on shutdown.
   // Old implementation:
   // if (g_recorder.active.load()) {

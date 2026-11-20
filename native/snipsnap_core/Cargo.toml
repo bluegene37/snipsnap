@@ -1,0 +1,16 @@
+# Gene - Nov, 20, 2026: Zero-dependency Rust native core for SnipSnap panoramic image stitching and fast pixel operations.
+[package]
+name = "snipsnap_core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "snipsnap_core"
+crate-type = ["staticlib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -449,16 +449,25 @@ class HeaderBar extends StatelessWidget {
                       'Ctrl+Shift+X',
                     ),
                   ),
-                  // Gene - Oct, 27, 2026: Removed Scrolling Capture dropdown option from top left bar as requested; panoramic capture is initiated from the interactive selection overlay.
+                  // Gene - Nov, 20, 2026: Re-enabled Scrolling Capture dropdown item inside Capture Modes menu when onSnipScrolling is wired.
                   // Old implementation:
-                  // if (onSnipScrolling != null)
-                  //   _captureMenuItem(
-                  //     t,
-                  //     value: 'scroll',
-                  //     icon: Icons.unfold_more_rounded,
-                  //     title: 'Scrolling Capture',
-                  //     subtitle: 'Panoramic',
-                  //   ),
+                  // // Gene - Oct, 27, 2026: Removed Scrolling Capture dropdown option from top left bar as requested; panoramic capture is initiated from the interactive selection overlay.
+                  // // if (onSnipScrolling != null)
+                  // //   _captureMenuItem(
+                  // //     t,
+                  // //     value: 'scroll',
+                  // //     icon: Icons.unfold_more_rounded,
+                  // //     title: 'Scrolling Capture',
+                  // //     subtitle: 'Panoramic',
+                  // //   ),
+                  if (onSnipScrolling != null)
+                    _captureMenuItem(
+                      t,
+                      value: 'scroll',
+                      icon: Icons.unfold_more_rounded,
+                      title: 'Scrolling Capture',
+                      subtitle: 'Panoramic',
+                    ),
                   _captureMenuItem(
                     t,
                     value: 'full',

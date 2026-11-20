@@ -17,8 +17,22 @@ project(runner LANGUAGES CXX)
 #   "Runner.rc"
 #   "runner.exe.manifest"
 # )
+# Gene - Nov, 20, 2026: Added scrolling_capture_engine.cpp and Rust snipsnap_core staticlib build/link rules.
+# Old implementation:
+# add_executable(${BINARY_NAME} WIN32
+#   "capture_handler.cpp"
+#   "flutter_window.cpp"
+#   "main.cpp"
+#   "ocr_handler.cpp"
+#   "utils.cpp"
+#   "win32_window.cpp"
+#   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
+#   "Runner.rc"
+#   "runner.exe.manifest"
+# )
 add_executable(${BINARY_NAME} WIN32
   "capture_handler.cpp"
+  "scrolling_capture_engine.cpp"
   "flutter_window.cpp"
   "main.cpp"
   "ocr_handler.cpp"
@@ -66,7 +80,42 @@ target_link_libraries(${BINARY_NAME} PRIVATE "windowsapp.lib")
 # Old implementation:
 # target_link_libraries(${BINARY_NAME} PRIVATE "windowscodecs.lib" "mfplat.lib" "mfreadwrite.lib" "mfuuid.lib" "ole32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "windowscodecs.lib" "mfplat.lib" "mfreadwrite.lib" "mfuuid.lib" "mf.lib" "mmdevapi.lib" "msimg32.lib" "ole32.lib")
-target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+
+# Gene - Nov, 20, 2026: Build and link Rust snipsnap_core staticlib + D3D11/DXGI/Rust-std import libraries.
+find_program(CARGO_EXECUTABLE NAMES cargo PATHS "$ENV{USERPROFILE}/.cargo/bin" REQUIRED)
+set(SNIPSNAP_CORE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/Cargo.toml")
+set(SNIPSNAP_CORE_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/rust_target")
+set(SNIPSNAP_CORE_LIB "${SNIPSNAP_CORE_TARGET_DIR}/x86_64-pc-windows-msvc/release/snipsnap_core.lib")
+add_custom_command(
+  OUTPUT "${SNIPSNAP_CORE_LIB}"
+  COMMAND "${CARGO_EXECUTABLE}" build --manifest-path "${SNIPSNAP_CORE_MANIFEST}" --release --target x86_64-pc-windows-msvc --target-dir "${SNIPSNAP_CORE_TARGET_DIR}"
+  DEPENDS
+    "${SNIPSNAP_CORE_MANIFEST}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/include/snipsnap_core.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/lib.rs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/stitcher.rs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/image_ops.rs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/ffi.rs"
+  COMMENT "Building Rust snipsnap_core staticlib (x86_64-pc-windows-msvc)"
+  VERBATIM
+)
+add_custom_target(snipsnap_core_rust ALL DEPENDS "${SNIPSNAP_CORE_LIB}")
+add_dependencies(${BINARY_NAME} snipsnap_core_rust)
+
+target_link_libraries(${BINARY_NAME} PRIVATE
+  "${SNIPSNAP_CORE_LIB}"
+  "d3d11.lib"
+  "dxgi.lib"
+  "ws2_32.lib"
+  "userenv.lib"
+  "bcrypt.lib"
+  "ntdll.lib"
+  "advapi32.lib"
+)
+target_include_directories(${BINARY_NAME} PRIVATE
+  "${CMAKE_SOURCE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/include"
+)
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

@@ -46,14 +46,27 @@ class CapturePlugin: NSObject {
   //     inst.recordingSession != nil ||
   //     inst.isMainWindowHiddenForCapture
   // }
+  // Gene - Nov, 20, 2026: Include active Rust/ScreenCaptureKit scrollingEngine in isCaptureOrRecordingActive.
+  // Old implementation:
+  // static var isCaptureOrRecordingActive: Bool {
+  //   guard let inst = sharedInstance else { return false }
+  //   return !inst.activeWindows.isEmpty ||
+  //     inst.countdownWindow != nil ||
+  //     inst.recordingSession != nil ||
+  //     inst.stoppingSession != nil ||
+  //     inst.isMainWindowHiddenForCapture
+  // }
   static var isCaptureOrRecordingActive: Bool {
     guard let inst = sharedInstance else { return false }
     return !inst.activeWindows.isEmpty ||
       inst.countdownWindow != nil ||
       inst.recordingSession != nil ||
       inst.stoppingSession != nil ||
+      inst.scrollingEngine != nil ||
       inst.isMainWindowHiddenForCapture
   }
+
+  private var scrollingEngine: ScrollingCaptureEngine?
 
   static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(
@@ -75,6 +88,8 @@ class CapturePlugin: NSObject {
   private var localKeyMonitor: Any?
   private var globalKeyMonitor: Any?
   private var activeResult: FlutterResult?
+  // Gene - Nov, 20, 2026: Track async ScreenCaptureKit interactive overlay pre-capture generation so stale completions never present outdated panels.
+  private var interactiveCaptureGeneration: Int = 0
 
   private var scrollingGuideWindow: NSPanel?
   private var scrollingHudWindow: NSPanel?
@@ -272,6 +287,51 @@ class CapturePlugin: NSObject {
         scrollEvent?.location = CGPoint(x: CGFloat(xVal), y: CGFloat(yVal))
       }
       scrollEvent?.post(tap: .cghidEventTap)
+      result(true)
+
+    // Gene - Nov, 20, 2026: Native ScreenCaptureKit + Rust snipsnap_core scrolling capture session controls.
+    case "startScrollingCapture":
+      guard
+        let args = call.arguments as? [String: Any],
+        let xVal = (args["x"] as? NSNumber)?.doubleValue ?? (args["x"] as? Double),
+        let yVal = (args["y"] as? NSNumber)?.doubleValue ?? (args["y"] as? Double),
+        let wVal = (args["width"] as? NSNumber)?.doubleValue ?? (args["width"] as? Double),
+        let hVal = (args["height"] as? NSNumber)?.doubleValue ?? (args["height"] as? Double),
+        let targetPath = args["targetPath"] as? String
+      else {
+        result(FlutterError(code: "bad_args", message: "scrolling capture arguments missing", details: nil))
+        return
+      }
+      let maxDimension = (args["maxDimension"] as? NSNumber)?.intValue ?? (args["maxDimension"] as? Int) ?? 16000
+      let axisMode = (args["axisMode"] as? NSNumber)?.intValue ?? (args["axisMode"] as? Int) ?? 0
+      let rect = CGRect(x: CGFloat(xVal), y: CGFloat(yVal), width: CGFloat(wVal), height: CGFloat(hVal))
+      startNativeScrollingCapture(
+        quartzRect: rect,
+        targetPath: targetPath,
+        maxDimension: maxDimension,
+        axisMode: axisMode,
+        result: result
+      )
+
+    case "setScrollingAutoMode":
+      let enabled = ((call.arguments as? [String: Any])?["enabled"] as? Bool) ?? false
+      scrollingEngine?.setAutoScroll(enabled)
+      result(true)
+
+    case "pauseScrollingCapture":
+      scrollingEngine?.pause()
+      result(true)
+
+    case "resumeScrollingCapture":
+      scrollingEngine?.resume()
+      result(true)
+
+    case "finishScrollingCapture":
+      scrollingEngine?.finish()
+      result(true)
+
+    case "cancelScrollingCapture":
+      scrollingEngine?.cancel()
       result(true)
 
     // Gene - Nov, 08, 2026: Added native NSPasteboard clipboard operations (eliminating osascript subprocess overhead) and native screen recording / video frame / trim methods.
@@ -601,23 +661,53 @@ class CapturePlugin: NSObject {
 
   // MARK: - Full Screen Capture
 
+  // Gene - Nov, 20, 2026: Switched full-screen still capture to ScreenCaptureKit (macOS 14+ SCScreenshotManager) with off-main-thread ImageIO PNG encoding (saveImageFast), falling back cleanly on macOS 13.
+  // Old implementation:
+  // private func captureFullScreen(targetPath: String, result: @escaping FlutterResult) {
+  //   DispatchQueue.main.async {
+  //     let screen = NSScreen.main ?? NSScreen.screens.first
+  //     guard let screen = screen else {
+  //       result(FlutterError(code: "no_screen", message: "No active screen found", details: nil))
+  //       return
+  //     }
+  //
+  //     guard let image = self.captureScreenImage(for: screen) else {
+  //       result(FlutterError(code: "capture_failed", message: "Failed to capture screen image", details: nil))
+  //       return
+  //     }
+  //
+  //     if self.saveImage(image, toPath: targetPath) {
+  //       result(targetPath)
+  //     } else {
+  //       result(FlutterError(code: "save_failed", message: "Failed to save screenshot file", details: nil))
+  //     }
+  //   }
+  // }
   private func captureFullScreen(targetPath: String, result: @escaping FlutterResult) {
-    DispatchQueue.main.async {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
       let screen = NSScreen.main ?? NSScreen.screens.first
       guard let screen = screen else {
         result(FlutterError(code: "no_screen", message: "No active screen found", details: nil))
         return
       }
 
-      guard let image = self.captureScreenImage(for: screen) else {
-        result(FlutterError(code: "capture_failed", message: "Failed to capture screen image", details: nil))
-        return
-      }
-
-      if self.saveImage(image, toPath: targetPath) {
-        result(targetPath)
-      } else {
-        result(FlutterError(code: "save_failed", message: "Failed to save screenshot file", details: nil))
+      self.captureAllScreensForOverlay(screens: [screen]) { [weak self] images in
+        guard let self = self else { return }
+        guard let image = images[screen] else {
+          result(FlutterError(code: "capture_failed", message: "Failed to capture screen image", details: nil))
+          return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+          let ok = self.saveImageFast(image, toPath: targetPath)
+          DispatchQueue.main.async {
+            if ok {
+              result(targetPath)
+            } else {
+              result(FlutterError(code: "save_failed", message: "Failed to save screenshot file", details: nil))
+            }
+          }
+        }
       }
     }
   }
@@ -654,6 +744,8 @@ class CapturePlugin: NSObject {
       guard let self = self else { return }
       self.cleanup()
       self.activeResult = result
+      self.interactiveCaptureGeneration += 1
+      let gen = self.interactiveCaptureGeneration
 
       let screens = NSScreen.screens
       if screens.isEmpty {
@@ -661,126 +753,222 @@ class CapturePlugin: NSObject {
         return
       }
 
-      // Pre-capture display images for each screen before showing overlays
-      var screenImages: [NSScreen: CGImage] = [:]
-      for screenItem in screens {
-        if let img = self.captureScreenImage(for: screenItem) {
-          screenImages[screenItem] = img
-        }
-      }
-
-      // Create overlay window for each screen
-      for screenItem in screens {
-        let image = screenImages[screenItem]
-        // Gene - Nov, 13, 2026: Clear sibling monitor selections when the user interacts with a specific display.
-        // Old implementation:
-        // let overlayWindow = CaptureOverlayWindow(
-        //   screen: screenItem,
-        //   screenImage: image,
-        //   initialMode: initialMode,
-        //   initialRecordOptions: initialRecordOptions,
-        let overlayWindow = CaptureOverlayWindow(
-          screen: screenItem,
-          screenImage: image,
-          initialMode: initialMode,
-          initialRecordOptions: initialRecordOptions,
-          onActivateScreen: { [weak self, weak screenItem] in
-            guard let self = self else { return }
-            for win in self.activeWindows where win.screen !== screenItem {
-              win.clearOverlaySelection()
-            }
-          },
-          onCapture: { [weak self] capturedImage in
-            guard let self = self else { return }
-            if let capturedImage = capturedImage, self.saveImage(capturedImage, toPath: targetPath) {
-              self.finishWithResult(targetPath)
-            } else {
-              self.finishWithResult(nil)
-            }
-          },
-          onPanoramicCapture: { [weak self] selRect in
-            guard let self = self else { return }
-            let screenFrame = screenItem.frame
-            let primaryHeight = NSScreen.screens.first?.frame.height ?? screenFrame.height
-            let quartzX = screenFrame.origin.x + selRect.origin.x
-            let quartzY = primaryHeight - (screenFrame.origin.y + selRect.origin.y + selRect.height)
-            let quartzW = selRect.width
-            let quartzH = selRect.height
-            let resultString = String(format: "scrolling:%.1f:%.1f:%.1f:%.1f", quartzX, quartzY, quartzW, quartzH)
-            self.finishWithResult(resultString)
-            NSApp.windows.first(where: { !($0 is NSPanel) })?.orderOut(nil)
-          },
-          onRecordCapture: { [weak self] selRect, opts in
-            guard let self = self else { return }
-            let screenFrame = screenItem.frame
-            let primaryHeight = NSScreen.screens.first?.frame.height ?? screenFrame.height
-            let quartzX = screenFrame.origin.x + selRect.origin.x
-            let quartzY = primaryHeight - (screenFrame.origin.y + selRect.origin.y + selRect.height)
-            let quartzW = selRect.width
-            let quartzH = selRect.height
-            let encodedMic = (opts.micDeviceId ?? "").addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
-            let resultString = String(
-              format: "record:%.1f:%.1f:%.1f:%.1f:%d:%d:%d:%d:%d:%d:%@",
-              quartzX,
-              quartzY,
-              quartzW,
-              quartzH,
-              opts.fps,
-              opts.recordMic ? 1 : 0,
-              opts.recordSystemAudio ? 1 : 0,
-              opts.recordCursor ? 1 : 0,
-              opts.highlightClicks ? 1 : 0,
-              opts.isFullScreen ? 1 : 0,
-              encodedMic
-            )
-            self.finishWithResult(resultString)
-          },
-          onCancel: { [weak self] in
-            self?.finishWithResult(nil)
-          }
-        )
-        self.activeWindows.append(overlayWindow)
-        overlayWindow.orderFrontRegardless()
-      }
-
-      // Ensure overlay window on the cursor's current screen is key window to receive events
-      // Deliberately no `NSApp.activate`. Activating a regular app brings its
-      // main window's Space forward, which is the desktop — so it would switch
-      // the user away from the full-screen app they meant to capture. The
-      // non-activating panel takes key on its own, which is all the cancel
-      // keys need.
-      // Gene - Nov, 13, 2026: Make the overlay panel on the cursor's current screen key instead of blindly picking activeWindows.first.
+      // Gene - Nov, 20, 2026: Pre-capture all displays in parallel via ScreenCaptureKit (macOS 14+) or background CGDisplayCreateImage, and dismiss overlay immediately on capture before encoding PNG off the main thread.
       // Old implementation:
-      // self.activeWindows.first?.makeKey()
-      let mouseLoc = NSEvent.mouseLocation
-      let cursorOverlayWindow = self.activeWindows.first(where: {
-        NSMouseInRect(mouseLoc, $0.frame, false) || $0.frame.contains(mouseLoc)
-      })
-      (cursorOverlayWindow ?? self.activeWindows.first)?.makeKey()
-
-      // Escape cancels; every other key is passed through so the overlay can
-      // act on it. These used to cancel on *any* key press, which was fine
-      // when a capture ended the instant the mouse came up — but the selection
-      // is now adjustable and waits for a confirm, so Return has to survive
-      // the trip to `CaptureOverlayView.keyDown`, and a stray keystroke must
-      // not throw away a selection the user is still positioning.
-      let escapeKeyCode: UInt16 = 53
-      self.localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-        if event.keyCode == escapeKeyCode {
-          self?.finishWithResult(nil)
-          return nil
-        }
-        return event
+      // var screenImages: [NSScreen: CGImage] = [:]
+      // for screenItem in screens {
+      //   if let img = self.captureScreenImage(for: screenItem) {
+      //     screenImages[screenItem] = img
+      //   }
+      // }
+      // self.presentInteractiveOverlayWindows(...)
+      self.captureAllScreensForOverlay(screens: screens) { [weak self] screenImages in
+        guard let self = self, gen == self.interactiveCaptureGeneration else { return }
+        self.presentInteractiveOverlayWindows(
+          screens: screens,
+          screenImages: screenImages,
+          targetPath: targetPath,
+          initialMode: initialMode,
+          initialRecordOptions: initialRecordOptions
+        )
       }
+    }
+  }
 
-      // The global monitor only sees keys aimed at *other* apps, where there is
-      // no selection to protect — but it still only cancels on Escape, so a
-      // user typing elsewhere does not silently kill the overlay.
-      self.globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-        if event.keyCode == escapeKeyCode {
+  private func presentInteractiveOverlayWindows(
+    screens: [NSScreen],
+    screenImages: [NSScreen: CGImage],
+    targetPath: String,
+    initialMode: String,
+    initialRecordOptions: OverlayRecordOptions
+  ) {
+    // Create overlay window for each screen
+    for screenItem in screens {
+      let image = screenImages[screenItem]
+      let overlayWindow = CaptureOverlayWindow(
+        screen: screenItem,
+        screenImage: image,
+        initialMode: initialMode,
+        initialRecordOptions: initialRecordOptions,
+        onActivateScreen: { [weak self, weak screenItem] in
+          guard let self = self else { return }
+          for win in self.activeWindows where win.screen !== screenItem {
+            win.clearOverlaySelection()
+          }
+        },
+        onCapture: { [weak self] capturedImage in
+          guard let self = self else { return }
+          // Old implementation:
+          // if let capturedImage = capturedImage, self.saveImage(capturedImage, toPath: targetPath) {
+          //   self.finishWithResult(targetPath)
+          // } else {
+          //   self.finishWithResult(nil)
+          // }
+          guard let capturedImage = capturedImage else {
+            self.finishWithResult(nil)
+            return
+          }
+          // Dismiss overlay panels immediately so UI feels instantaneous while ImageIO writes PNG off-main-thread.
+          let pending = self.activeResult
+          self.activeResult = nil
+          self.cleanup()
+          DispatchQueue.global(qos: .userInitiated).async {
+            let ok = self.saveImageFast(capturedImage, toPath: targetPath)
+            DispatchQueue.main.async {
+              pending?(ok ? targetPath : nil)
+            }
+          }
+        },
+        onPanoramicCapture: { [weak self] selRect in
+          guard let self = self else { return }
+          let screenFrame = screenItem.frame
+          let primaryHeight = NSScreen.screens.first?.frame.height ?? screenFrame.height
+          let quartzX = screenFrame.origin.x + selRect.origin.x
+          let quartzY = primaryHeight - (screenFrame.origin.y + selRect.origin.y + selRect.height)
+          let quartzW = selRect.width
+          let quartzH = selRect.height
+          let resultString = String(format: "scrolling:%.1f:%.1f:%.1f:%.1f", quartzX, quartzY, quartzW, quartzH)
+          self.finishWithResult(resultString)
+          let mainWin = NSApp.windows.first(where: { !($0 is NSPanel) })
+          self.lastHiddenMainWindowScreen = mainWin?.screen
+          self.isMainWindowHiddenForCapture = true
+          mainWin?.orderOut(nil)
+        },
+        onRecordCapture: { [weak self] selRect, opts in
+          guard let self = self else { return }
+          let screenFrame = screenItem.frame
+          let primaryHeight = NSScreen.screens.first?.frame.height ?? screenFrame.height
+          let quartzX = screenFrame.origin.x + selRect.origin.x
+          let quartzY = primaryHeight - (screenFrame.origin.y + selRect.origin.y + selRect.height)
+          let quartzW = selRect.width
+          let quartzH = selRect.height
+          let encodedMic = (opts.micDeviceId ?? "").addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+          let resultString = String(
+            format: "record:%.1f:%.1f:%.1f:%.1f:%d:%d:%d:%d:%d:%d:%@",
+            quartzX,
+            quartzY,
+            quartzW,
+            quartzH,
+            opts.fps,
+            opts.recordMic ? 1 : 0,
+            opts.recordSystemAudio ? 1 : 0,
+            opts.recordCursor ? 1 : 0,
+            opts.highlightClicks ? 1 : 0,
+            opts.isFullScreen ? 1 : 0,
+            encodedMic
+          )
+          self.finishWithResult(resultString)
+        },
+        onCancel: { [weak self] in
           self?.finishWithResult(nil)
         }
+      )
+      self.activeWindows.append(overlayWindow)
+      overlayWindow.orderFrontRegardless()
+    }
+
+    let mouseLoc = NSEvent.mouseLocation
+    let cursorOverlayWindow = self.activeWindows.first(where: {
+      NSMouseInRect(mouseLoc, $0.frame, false) || $0.frame.contains(mouseLoc)
+    })
+    (cursorOverlayWindow ?? self.activeWindows.first)?.makeKey()
+
+    let escapeKeyCode: UInt16 = 53
+    self.localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+      if event.keyCode == escapeKeyCode {
+        self?.finishWithResult(nil)
+        return nil
       }
+      return event
+    }
+
+    self.globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+      if event.keyCode == escapeKeyCode {
+        self?.finishWithResult(nil)
+      }
+    }
+  }
+
+  private func captureAllScreensForOverlay(
+    screens: [NSScreen],
+    completion: @escaping ([NSScreen: CGImage]) -> Void
+  ) {
+    if #available(macOS 14.0, *) {
+      let screenInfos: [(screen: NSScreen, displayID: CGDirectDisplayID, pixelW: Int, pixelH: Int)] = screens.map { s in
+        let num = (s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+        let scale = s.backingScaleFactor > 0 ? s.backingScaleFactor : 1.0
+        return (
+          screen: s,
+          displayID: CGDirectDisplayID(num),
+          pixelW: max(1, Int((s.frame.width * scale).rounded())),
+          pixelH: max(1, Int((s.frame.height * scale).rounded()))
+        )
+      }
+      SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { [weak self] content, err in
+        guard let self = self else { return }
+        guard err == nil, let scContent = content, !scContent.displays.isEmpty else {
+          self.captureAllScreensLegacyParallel(screens: screens, completion: completion)
+          return
+        }
+        let lock = NSLock()
+        var results: [NSScreen: CGImage] = [:]
+        let group = DispatchGroup()
+        for info in screenInfos {
+          guard let matchedDisplay = scContent.displays.first(where: { $0.displayID == info.displayID }) else {
+            continue
+          }
+          group.enter()
+          let filter = SCContentFilter(display: matchedDisplay, excludingWindows: [])
+          let config = SCStreamConfiguration()
+          config.width = info.pixelW
+          config.height = info.pixelH
+          config.showsCursor = false
+          config.pixelFormat = kCVPixelFormatType_32BGRA
+          SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) { cgImage, _ in
+            if let cgImage = cgImage {
+              lock.lock()
+              results[info.screen] = cgImage
+              lock.unlock()
+            }
+            group.leave()
+          }
+        }
+        group.notify(queue: .main) {
+          if results.count < screens.count {
+            for s in screens where results[s] == nil {
+              if let fallback = self.captureScreenImage(for: s) {
+                results[s] = fallback
+              }
+            }
+          }
+          completion(results)
+        }
+      }
+      return
+    }
+    captureAllScreensLegacyParallel(screens: screens, completion: completion)
+  }
+
+  private func captureAllScreensLegacyParallel(
+    screens: [NSScreen],
+    completion: @escaping ([NSScreen: CGImage]) -> Void
+  ) {
+    let lock = NSLock()
+    var results: [NSScreen: CGImage] = [:]
+    let group = DispatchGroup()
+    for screenItem in screens {
+      group.enter()
+      DispatchQueue.global(qos: .userInitiated).async {
+        if let img = self.captureScreenImage(for: screenItem) {
+          lock.lock()
+          results[screenItem] = img
+          lock.unlock()
+        }
+        group.leave()
+      }
+    }
+    group.notify(queue: .main) {
+      completion(results)
     }
   }
 
@@ -794,6 +982,7 @@ class CapturePlugin: NSObject {
   }
 
   private func cleanup() {
+    interactiveCaptureGeneration += 1
     if let local = localKeyMonitor {
       NSEvent.removeMonitor(local)
       localKeyMonitor = nil
@@ -832,6 +1021,107 @@ class CapturePlugin: NSObject {
   }
 
   // MARK: - Save PNG Helper
+
+  // Gene - Nov, 20, 2026: Native ScreenCaptureKit + Rust scrolling capture orchestrator and main window restoration helpers.
+  private func startNativeScrollingCapture(
+    quartzRect: CGRect,
+    targetPath: String,
+    maxDimension: Int,
+    axisMode: Int,
+    result: @escaping FlutterResult
+  ) {
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else {
+        result(false)
+        return
+      }
+      self.scrollingEngine?.cancel()
+      self.scrollingEngine = nil
+
+      let mainWin = NSApp.windows.first(where: { !($0 is NSPanel) }) ?? NSApp.windows.first
+      var excluded: [Int] = []
+      if let mainWin = mainWin {
+        excluded.append(mainWin.windowNumber)
+        self.lastHiddenMainWindowScreen = mainWin.screen
+        self.isMainWindowHiddenForCapture = true
+        mainWin.orderOut(nil)
+      }
+
+      let engine = ScrollingCaptureEngine(
+        quartzRect: quartzRect,
+        targetPath: targetPath,
+        maxDimension: maxDimension,
+        axisMode: axisMode,
+        excludedWindowNumbers: excluded,
+        onProgress: { [weak self] progress in
+          var args: [String: Any] = [
+            "width": progress.width,
+            "height": progress.height,
+            "frameCount": progress.frameCount,
+            "axis": Int(progress.axis),
+            "status": Int(progress.statusCode),
+            "isPaused": progress.isPaused,
+            "isAutoScrolling": progress.isAutoScrolling,
+          ]
+          if let warn = progress.warningMessage {
+            args["warning"] = warn
+          }
+          self?.channel?.invokeMethod("onScrollingProgress", arguments: args)
+        },
+        onCompleted: { [weak self] completed in
+          guard let self = self else { return }
+          self.scrollingEngine = nil
+          self.restoreMainWindowAfterScrolling()
+          self.channel?.invokeMethod(
+            "onScrollingCompleted",
+            arguments: [
+              "path": completed.path,
+              "width": completed.width,
+              "height": completed.height,
+              "frameCount": completed.frameCount,
+              "axis": Int(completed.axis),
+              "truncated": completed.truncated,
+            ]
+          )
+        },
+        onCancel: { [weak self] in
+          guard let self = self else { return }
+          self.scrollingEngine = nil
+          self.restoreMainWindowAfterScrolling()
+          self.channel?.invokeMethod("onScrollingCancel", arguments: nil)
+        },
+        onError: { [weak self] message in
+          guard let self = self else { return }
+          self.scrollingEngine = nil
+          self.restoreMainWindowAfterScrolling()
+          self.channel?.invokeMethod("onScrollingError", arguments: ["message": message])
+        }
+      )
+
+      self.scrollingEngine = engine
+      engine.start { started in
+        DispatchQueue.main.async {
+          if !started {
+            if self.scrollingEngine === engine {
+              self.scrollingEngine = nil
+            }
+            self.restoreMainWindowAfterScrolling()
+          }
+          result(started)
+        }
+      }
+    }
+  }
+
+  private func restoreMainWindowAfterScrolling() {
+    DispatchQueue.main.async { [weak self] in
+      self?.isMainWindowHiddenForCapture = false
+      self?.lastHiddenMainWindowScreen = nil
+      let mainWin = NSApp.windows.first(where: { !($0 is NSPanel) }) ?? NSApp.windows.first
+      mainWin?.makeKeyAndOrderFront(nil)
+      NSApp.activate(ignoringOtherApps: true)
+    }
+  }
 
   // Gene - Oct, 27, 2026: Added showScrollingHud, updateScrollingHud, and closeScrollingHud for native floating HUD and viewport outline.
   private func showScrollingHud(for rect: CGRect) {
@@ -1877,6 +2167,21 @@ class CapturePlugin: NSObject {
     }
   }
 
+  // Gene - Nov, 20, 2026: Added saveImageFast using ImageIO CGImageDestinationCreateWithURL (3-5x faster than NSBitmapImageRep PNG representation and safe on background threads).
+  private func saveImageFast(_ image: CGImage, toPath path: String) -> Bool {
+    let url = URL(fileURLWithPath: path)
+    guard let dest = CGImageDestinationCreateWithURL(
+      url as CFURL,
+      UTType.png.identifier as CFString,
+      1,
+      nil
+    ) else {
+      return saveImage(image, toPath: path)
+    }
+    CGImageDestinationAddImage(dest, image, nil)
+    return CGImageDestinationFinalize(dest)
+  }
+
   private func saveImage(_ image: CGImage, toPath path: String) -> Bool {
     let rep = NSBitmapImageRep(cgImage: image)
     guard let data = rep.representation(using: .png, properties: [:]) else {
@@ -2603,10 +2908,32 @@ private class CaptureOverlayView: NSView {
     }
   }
   */
+  // Gene - Nov, 20, 2026: Added hover tracking and cursor rect for re-enabled [Scroll] button alongside Capture and Video controls.
+  // Old implementation:
+  // override func mouseMoved(with event: NSEvent) {
+  //   let pt = convert(event.locationInWindow, from: nil)
+  //   let captureHot = !captureButtonRect.isEmpty && captureButtonRect.contains(pt)
+  //   let recordHot = !recordButtonRect.isEmpty && recordButtonRect.contains(pt)
+  //   let cancelHot = (!cancelButtonRect.isEmpty && cancelButtonRect.contains(pt)) ||
+  //     (!idleCancelRect.isEmpty && idleCancelRect.contains(pt))
+  //   ...
+  //   if captureHot != captureButtonHot ||
+  //     recordHot != recordButtonHot ||
+  //     cancelHot != cancelButtonHot ||
+  //     nextChip != hotChipKey
+  //   {
+  //     captureButtonHot = captureHot
+  //     recordButtonHot = recordHot
+  //     cancelButtonHot = cancelHot
+  //     hotChipKey = nextChip
+  //     needsDisplay = true
+  //   }
+  // }
   override func mouseMoved(with event: NSEvent) {
     let pt = convert(event.locationInWindow, from: nil)
     let captureHot = !captureButtonRect.isEmpty && captureButtonRect.contains(pt)
     let recordHot = !recordButtonRect.isEmpty && recordButtonRect.contains(pt)
+    let panoramicHot = !panoramicButtonRect.isEmpty && panoramicButtonRect.contains(pt)
     let cancelHot = (!cancelButtonRect.isEmpty && cancelButtonRect.contains(pt)) ||
       (!idleCancelRect.isEmpty && idleCancelRect.contains(pt))
     let chipPairs: [(String, NSRect)] = [
@@ -2633,11 +2960,13 @@ private class CaptureOverlayView: NSView {
     }
     if captureHot != captureButtonHot ||
       recordHot != recordButtonHot ||
+      panoramicHot != panoramicButtonHot ||
       cancelHot != cancelButtonHot ||
       nextChip != hotChipKey
     {
       captureButtonHot = captureHot
       recordButtonHot = recordHot
+      panoramicButtonHot = panoramicHot
       cancelButtonHot = cancelHot
       hotChipKey = nextChip
       needsDisplay = true
@@ -2657,7 +2986,7 @@ private class CaptureOverlayView: NSView {
       addCursorRect(gRect, cursor: cursor(for: gItem))
     }
     let toolbarRects = [
-      captureButtonRect, recordButtonRect, cancelButtonRect,
+      captureButtonRect, recordButtonRect, panoramicButtonRect, cancelButtonRect,
       tbPresetFullRect, tbPreset1080Rect, tbPreset720Rect,
       tbFpsRect, tbMicRect, tbMicChevronRect, tbSysAudioRect, tbCursorRect, tbImageRect
     ]
@@ -2819,6 +3148,11 @@ private class CaptureOverlayView: NSView {
       }
       if !captureButtonRect.isEmpty && captureButtonRect.contains(pt) {
         captureCurrentSelection()
+        return
+      }
+      // Gene - Nov, 20, 2026: Handle [Scroll] button click in overlay action toolbar.
+      if !panoramicButtonRect.isEmpty && panoramicButtonRect.contains(pt) {
+        startPanoramicCapture()
         return
       }
       // Gene - Nov, 13, 2026: In capture mode, clicking Video switches in-place to the Snagit Pre-Recording Toolbar; in record mode, Rec starts recording.
@@ -3754,13 +4088,41 @@ private class CaptureOverlayView: NSView {
     //
     // // 3. Draw Cancel (X) button
     // drawCancelButton(in: cancelButtonRect, accent: accent)
+    // Gene - Nov, 20, 2026: Re-enabled [Scroll] pill button ([Capture] | [Video] | [Scroll] | [X]) in selection overlay toolbar.
+    // Old implementation:
+    // clearToolbarRects()
+    // let recLabel = "Video"
+    // let recAttrString = NSAttributedString(string: recLabel, attributes: attrs)
+    // let recTextSize = recAttrString.size()
+    // let recPillW = padH * 2 + iconW + gap + recTextSize.width
+    //
+    // let buttonW = pillW + controlGap + recPillW + controlGap + buttonH
+    // ...
+    // let captureRect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
+    // captureButtonRect = captureRect
+    // panoramicButtonRect = .zero
+    //
+    // let recRect = NSRect(x: block.minX + pillW + controlGap, y: block.minY, width: recPillW, height: buttonH)
+    // recordButtonRect = recRect
+    //
+    // cancelButtonRect = NSRect(
+    //   x: block.maxX - buttonH,
+    //   y: block.minY,
+    //   width: buttonH,
+    //   height: buttonH
+    // )
     clearToolbarRects()
     let recLabel = "Video"
     let recAttrString = NSAttributedString(string: recLabel, attributes: attrs)
     let recTextSize = recAttrString.size()
     let recPillW = padH * 2 + iconW + gap + recTextSize.width
 
-    let buttonW = pillW + controlGap + recPillW + controlGap + buttonH
+    let scrollLabel = "Scroll"
+    let scrollAttrString = NSAttributedString(string: scrollLabel, attributes: attrs)
+    let scrollTextSize = scrollAttrString.size()
+    let scrollPillW = padH * 2 + iconW + gap + scrollTextSize.width
+
+    let buttonW = pillW + controlGap + recPillW + controlGap + scrollPillW + controlGap + buttonH
     let isFullDisplay = abs(selRect.width - bounds.width) < 4 && abs(selRect.height - bounds.height) < 4
 
     var y: CGFloat
@@ -3801,10 +4163,12 @@ private class CaptureOverlayView: NSView {
 
     let captureRect = NSRect(x: block.minX, y: block.minY, width: pillW, height: buttonH)
     captureButtonRect = captureRect
-    panoramicButtonRect = .zero
 
-    let recRect = NSRect(x: block.minX + pillW + controlGap, y: block.minY, width: recPillW, height: buttonH)
+    let recRect = NSRect(x: captureRect.maxX + controlGap, y: block.minY, width: recPillW, height: buttonH)
     recordButtonRect = recRect
+
+    let scrollRect = NSRect(x: recRect.maxX + controlGap, y: block.minY, width: scrollPillW, height: buttonH)
+    panoramicButtonRect = scrollRect
 
     cancelButtonRect = NSRect(
       x: block.maxX - buttonH,
@@ -3844,7 +4208,23 @@ private class CaptureOverlayView: NSView {
       at: NSPoint(x: recRect.minX + padH + iconW + gap, y: recRect.midY - recTextSize.height / 2)
     )
 
-    // 3. Draw Cancel (X) button
+    // 3. Draw Scroll button beside Video
+    let scrollPath = NSBezierPath(roundedRect: scrollRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
+    let scrollFill = NSColor(red: 0.24, green: 0.20, blue: 0.17, alpha: 0.96)
+    (panoramicButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : scrollFill).setFill()
+    scrollPath.fill()
+    NSColor(white: 1.0, alpha: 0.35).setStroke()
+    scrollPath.lineWidth = 1
+    scrollPath.stroke()
+
+    drawPanoramicGlyph(
+      in: NSRect(x: scrollRect.minX + padH, y: scrollRect.midY - 5.5, width: iconW, height: 11)
+    )
+    scrollAttrString.draw(
+      at: NSPoint(x: scrollRect.minX + padH + iconW + gap, y: scrollRect.midY - scrollTextSize.height / 2)
+    )
+
+    // 4. Draw Cancel (X) button
     drawCancelButton(in: cancelButtonRect, accent: accent)
   }
 
@@ -3961,6 +4341,8 @@ private class CaptureOverlayView: NSView {
   /// caller has to render the view before reading them.
   var captureButtonRectForTesting: NSRect { captureButtonRect }
   var recordButtonRectForTesting: NSRect { recordButtonRect }
+  // Gene - Nov, 20, 2026: Expose panoramicButtonRectForTesting alongside Capture and Video controls.
+  var panoramicButtonRectForTesting: NSRect { panoramicButtonRect }
   var cancelButtonRectForTesting: NSRect { cancelButtonRect }
   var currentModeForTesting: String { initialMode }
 

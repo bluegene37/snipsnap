@@ -3,10 +3,15 @@ import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
+import 'package:snipsnap/services/scrolling/image_stitcher.dart';
+import 'package:snipsnap/services/scrolling/scrolling_capture_controller.dart';
 import 'package:snipsnap/utils/snip_theme.dart';
 import 'package:snipsnap/views/capture/capture_overlay.dart';
 import 'package:snipsnap/views/components/header_bar.dart';
+import 'package:snipsnap/views/editor_canvas.dart';
 
 class _OverlayHarness {
   final List<Rect> captured = [];
@@ -205,14 +210,38 @@ void main() {
     //     expect(scrollingCalled, isTrue);
     //   },
     // );
+    // Gene - Nov, 20, 2026: Re-enabled Scrolling Capture dropdown item while keeping top-left HeaderBar clean without standalone button.
+    // Old implementation:
+    // testWidgets(
+    //   'omits Panoramic and Scrolling Capture buttons from HeaderBar and dropdown',
+    //   (tester) async {
+    //     await tester.pumpWidget(
+    //       _headerBarHarness(width: 1200, onSnipScrolling: () {}),
+    //     );
+    //
+    //     // Header bar itself should not show Panoramic button
+    //     expect(find.text('Panoramic'), findsNothing);
+    //     expect(find.byIcon(Icons.unfold_more_rounded), findsNothing);
+    //
+    //     // Open capture dropdown menu
+    //     await tester.tap(find.byTooltip('Capture Modes'));
+    //     await tester.pumpAndSettle();
+    //
+    //     expect(find.text('Scrolling Capture'), findsNothing);
+    //   },
+    // );
     testWidgets(
-      'omits Panoramic and Scrolling Capture buttons from HeaderBar and dropdown',
+      'keeps HeaderBar uncluttered while exposing Scrolling Capture inside dropdown when enabled',
       (tester) async {
+        var scrollingCalled = false;
         await tester.pumpWidget(
-          _headerBarHarness(width: 1200, onSnipScrolling: () {}),
+          _headerBarHarness(
+            width: 1200,
+            onSnipScrolling: () => scrollingCalled = true,
+          ),
         );
 
-        // Header bar itself should not show Panoramic button
+        // Header bar itself should not show a standalone Panoramic button
         expect(find.text('Panoramic'), findsNothing);
         expect(find.byIcon(Icons.unfold_more_rounded), findsNothing);
 
@@ -220,7 +249,13 @@ void main() {
         await tester.tap(find.byTooltip('Capture Modes'));
         await tester.pumpAndSettle();
 
-        expect(find.text('Scrolling Capture'), findsNothing);
+        expect(find.text('Scrolling Capture'), findsOneWidget);
+        expect(find.text('Panoramic'), findsOneWidget);
+
+        await tester.tap(find.text('Scrolling Capture'));
+        await tester.pumpAndSettle();
+
+        expect(scrollingCalled, isTrue);
       },
     );
 
@@ -278,5 +313,189 @@ void main() {
         expect(mainScreenSource, contains('ScrollingCaptureHud('));
       },
     );
+  });
+
+  group('StitchStripSession O(N) Fallback Assembly', () {
+    img.Image makePattern(int width, int height, {int offsetY = 0}) {
+      final image = img.Image(width: width, height: height);
+      for (var y = 0; y < height; y++) {
+        final gy = y + offsetY;
+        final c = img.ColorRgb8(
+          (gy * 7) % 256,
+          (gy * 13) % 256,
+          (gy * 17) % 256,
+        );
+        for (var x = 0; x < width; x++) {
+          image.setPixel(x, y, c);
+        }
+      }
+      return image;
+    }
+
+    test(
+      'accumulates scrolled tail slices and assembles single composite image',
+      () {
+        final session = StitchStripSession(
+          stitcher: ImageStitcher(
+            scrollbarIgnoreMargin: 5,
+            maxMatchError: 30.0,
+          ),
+        );
+        final r1 = session.pushFrame(makePattern(200, 100, offsetY: 0));
+        expect(r1.isMatchValid, isTrue);
+        expect(session.cumulativeHeight, 100);
+
+        final r2 = session.pushFrame(makePattern(200, 100, offsetY: 30));
+        expect(r2.shiftY, 30);
+        expect(session.cumulativeHeight, 130);
+
+        final r3 = session.pushFrame(makePattern(200, 100, offsetY: 60));
+        expect(r3.shiftY, 30);
+        expect(session.cumulativeHeight, 160);
+
+        final assembled = session.assemble();
+        expect(assembled, isNotNull);
+        expect(assembled!.width, 200);
+        expect(assembled.height, 160);
+      },
+    );
+  });
+
+  group('ScrollingCaptureController Native Rust Engine Channel', () {
+    const channel = MethodChannel('snipsnap/capture');
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    test(
+      'streams native Rust progress events and resolves completion path',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'snipsnap_native_scroll_test',
+        );
+        addTearDown(() async {
+          if (await tempDir.exists()) {
+            await tempDir.delete(recursive: true);
+          }
+        });
+
+        final calls = <MethodCall>[];
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+              calls.add(call);
+              return true;
+            });
+
+        final controller = ScrollingCaptureController(
+          useNativeEngine: true,
+          storageDirectoryProvider: () async => tempDir,
+        );
+
+        await controller.startCapture(
+          viewportRect: const Rect.fromLTWH(50, 80, 500, 400),
+          devicePixelRatio: 2.0,
+          maxDimension: 16000,
+        );
+
+        expect(calls.map((c) => c.method), contains('startScrollingCapture'));
+        expect(controller.status, ScrollingCaptureStatus.capturing);
+
+        await controller.setAutoScroll(true);
+        expect(calls.map((c) => c.method), contains('setScrollingAutoMode'));
+        expect(controller.isAutoScrolling, isTrue);
+
+        // Simulate native Rust progress callback
+        const codec = StandardMethodCodec();
+        final progressBytes = codec.encodeMethodCall(
+          const MethodCall('onScrollingProgress', {
+            'width': 1000,
+            'height': 2400,
+            'frameCount': 18,
+            'axis': 1,
+            'status': 0,
+            'isPaused': false,
+            'isAutoScrolling': true,
+          }),
+        );
+        await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .handlePlatformMessage('snipsnap/capture', progressBytes, (_) {});
+
+        expect(controller.cumulativeWidth, 1000);
+        expect(controller.cumulativeHeight, 2400);
+        expect(controller.frameCount, 18);
+
+        final outPath = '${tempDir.path}/result_scroll.png';
+        final completedBytes = codec.encodeMethodCall(
+          MethodCall('onScrollingCompleted', {
+            'path': outPath,
+            'width': 1000,
+            'height': 2800,
+            'frameCount': 22,
+            'axis': 1,
+            'truncated': false,
+          }),
+        );
+        await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .handlePlatformMessage('snipsnap/capture', completedBytes, (_) {});
+
+        final resolved = await controller.waitForNativeCompletion();
+        expect(resolved, outPath);
+        expect(controller.status, ScrollingCaptureStatus.completed);
+        expect(controller.cumulativeHeight, 2800);
+        controller.dispose();
+      },
+      skip: !(Platform.isMacOS || Platform.isWindows),
+    );
+  });
+
+  group('Panoramic Initial Viewport Auto-Zoom', () {
+    test(
+      'fits tall scrolling capture to width top-aligned without exceeding maxZoom',
+      () {
+        final matrix = computeInitialPanoramicTransform(
+          viewportSize: const Size(1200, 800),
+          imageSize: const Size(1000, 6000),
+        );
+        expect(matrix, isNotNull);
+        final scale = matrix!.getMaxScaleOnAxis();
+        expect(scale, greaterThan(1.5));
+        expect(scale, lessThanOrEqualTo(4.0));
+        expect(matrix.storage[13], 0.0); // Top-aligned
+      },
+    );
+
+    test(
+      'caps tall capture initial zoom at 1:1 native pixels to prevent blur',
+      () {
+        // 400x1200 in 1200x800 => fitScale = 800/1200 = 2/3, native 1:1 = 1.5x
+        final matrix = computeInitialPanoramicTransform(
+          viewportSize: const Size(1200, 800),
+          imageSize: const Size(400, 1200),
+        );
+        expect(matrix, isNotNull);
+        expect(matrix!.getMaxScaleOnAxis(), closeTo(1.5, 0.01));
+        expect(matrix.storage[13], 0.0);
+      },
+    );
+
+    test('fits wide panorama to height left-aligned', () {
+      final matrix = computeInitialPanoramicTransform(
+        viewportSize: const Size(1200, 800),
+        imageSize: const Size(6000, 800),
+      );
+      expect(matrix, isNotNull);
+      expect(matrix!.getMaxScaleOnAxis(), greaterThan(1.5));
+      expect(matrix.storage[12], 0.0); // Left-aligned
+    });
+
+    test('leaves normal aspect ratio capture unzoomed (null)', () {
+      final matrix = computeInitialPanoramicTransform(
+        viewportSize: const Size(1200, 800),
+        imageSize: const Size(1600, 900),
+      );
+      expect(matrix, isNull);
+    });
   });
 }

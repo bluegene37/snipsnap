@@ -67,11 +67,19 @@ void main() {
     //   3,
     //   reason: 'all three active capture hotkeys must still be attempted',
     // );
+    // Gene - Nov, 20, 2026: Updated expected capture hotkey count from 5 to 6 to include re-enabled scrollingSnip (Panoramic).
+    // Old implementation:
+    // expect(
+    //   calls.where((c) => c == 'register').length,
+    //   5,
+    //   reason:
+    //       'all five active capture/recording hotkeys must still be attempted',
+    // );
     expect(
       calls.where((c) => c == 'register').length,
-      5,
+      6,
       reason:
-          'all five active capture/recording hotkeys must still be attempted',
+          'all six active capture/recording hotkeys must still be attempted',
     );
     expect(failed, isNotEmpty, reason: 'and the refusal is reported back');
   });

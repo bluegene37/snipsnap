@@ -282,24 +282,20 @@ class ShortcutService {
       for (final entry in shortcuts.entries) {
         final action = entry.key;
 
-        // Gene - Oct, 30, 2026: Excluded scrollingSnip from global OS-wide capture hotkeys while panoramic capture is switched off for beta testing.
+        // Gene - Nov, 20, 2026: Re-enabled AppShortcutAction.scrollingSnip in OS-wide global capture hotkeys.
         // Old implementation:
-        // // Gene - Oct, 27, 2026: Include scrollingSnip in registered global OS-wide capture hotkeys.
-        // if (action != AppShortcutAction.interactiveSnip &&
-        //     action != AppShortcutAction.scrollingSnip &&
-        //     action != AppShortcutAction.fullScreenSnip &&
-        //     action != AppShortcutAction.timerSnip) {
-        //   continue;
-        // }
-        // Gene - Nov, 08, 2026: Include recordArea and recordFullScreen in global OS-wide capture hotkeys.
-        // Old implementation:
+        // // Gene - Oct, 30, 2026: Excluded scrollingSnip from global OS-wide capture hotkeys while panoramic capture is switched off for beta testing.
+        // // ...
         // if (action != AppShortcutAction.interactiveSnip &&
         //     action != AppShortcutAction.fullScreenSnip &&
-        //     action != AppShortcutAction.timerSnip) {
+        //     action != AppShortcutAction.timerSnip &&
+        //     action != AppShortcutAction.recordArea &&
+        //     action != AppShortcutAction.recordFullScreen) {
         //   continue;
         // }
         // Only register global OS-wide hotkeys for active capture actions
         if (action != AppShortcutAction.interactiveSnip &&
+            action != AppShortcutAction.scrollingSnip &&
             action != AppShortcutAction.fullScreenSnip &&
             action != AppShortcutAction.timerSnip &&
             action != AppShortcutAction.recordArea &&

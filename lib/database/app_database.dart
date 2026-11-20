@@ -204,6 +204,24 @@ class AppDatabase extends _$AppDatabase {
             ..limit(limit, offset: offset))
           .get();
 
+  // Gene - Nov, 20, 2026: Added getCaptureById so startup can fetch a saved active_capture_id outside page 1, and getAllCapturePathsAndThumbnails to avoid fetching annotation BLOBs during background orphan scan.
+  Future<Capture?> getCaptureById(String id) =>
+      (select(captures)..where((t) => t.id.equals(id))).getSingleOrNull();
+
+  Future<List<({String filePath, String? thumbnailPath})>>
+  getAllCapturePathsAndThumbnails() async {
+    final query = selectOnly(captures)
+      ..addColumns([captures.filePath, captures.thumbnailPath]);
+    final rows = await query.get();
+    return [
+      for (final row in rows)
+        (
+          filePath: row.read(captures.filePath)!,
+          thumbnailPath: row.read(captures.thumbnailPath),
+        ),
+    ];
+  }
+
   Future<void> insertOrUpdateCapture(CapturesCompanion capture) =>
       into(captures).insertOnConflictUpdate(capture);
 
@@ -224,6 +242,20 @@ class AppDatabase extends _$AppDatabase {
             ]))
           .get();
 
+  // Gene - Nov, 20, 2026: Added scoped getAnnotationsForCaptureIds so paginated history loads only fetch annotations belonging to the requested captures (and avoid pulling unrelated patchBytes BLOBs).
+  Future<List<DbAnnotation>> getAnnotationsForCaptureIds(
+    List<String> captureIds,
+  ) {
+    if (captureIds.isEmpty) return Future.value(const <DbAnnotation>[]);
+    return (select(annotations)
+          ..where((t) => t.captureId.isIn(captureIds))
+          ..orderBy([
+            (t) => OrderingTerm(expression: t.zIndex),
+            (t) => OrderingTerm(expression: t.createdAt),
+          ]))
+        .get();
+  }
+
   // Gene - Nov, 17, 2026: Batch query returning all annotation rows sorted by zIndex and createdAt for single-trip startup loading.
   Future<List<DbAnnotation>> getAllAnnotations() =>
       (select(annotations)..orderBy([
@@ -232,6 +264,21 @@ class AppDatabase extends _$AppDatabase {
           ]))
           .get();
 
+  // Gene - Nov, 20, 2026: Replaced sequential row-by-row inserts with a Drift batch insertAll inside the transaction.
+  // Old implementation:
+  // Future<void> saveAnnotationsForCapture(
+  //   String captureId,
+  //   List<AnnotationsCompanion> annotationList,
+  // ) async {
+  //   await transaction(() async {
+  //     await (delete(
+  //       annotations,
+  //     )..where((t) => t.captureId.equals(captureId))).go();
+  //     for (final companion in annotationList) {
+  //       await into(annotations).insert(companion);
+  //     }
+  //   });
+  // }
   Future<void> saveAnnotationsForCapture(
     String captureId,
     List<AnnotationsCompanion> annotationList,
@@ -240,8 +287,8 @@ class AppDatabase extends _$AppDatabase {
       await (delete(
         annotations,
       )..where((t) => t.captureId.equals(captureId))).go();
-      for (final companion in annotationList) {
-        await into(annotations).insert(companion);
+      if (annotationList.isNotEmpty) {
+        await batch((b) => b.insertAll(annotations, annotationList));
       }
     });
   }

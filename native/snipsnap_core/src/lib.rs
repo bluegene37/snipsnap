@@ -1,0 +1,428 @@
+// Gene - Nov, 20, 2026: SnipSnap Rust native core crate entrypoint & comprehensive unit + benchmark test suite.
+pub mod ffi;
+pub mod image_ops;
+pub mod stitcher;
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use crate::ffi::{
+        snipsnap_buffer_free, snipsnap_flood_fill_rgba, snipsnap_stitcher_assemble_bgra,
+        snipsnap_stitcher_create, snipsnap_stitcher_free, snipsnap_stitcher_get_preview_bgra,
+        snipsnap_stitcher_push_bgra, SnipSnapImageBuffer,
+    };
+    use crate::image_ops::{flood_fill_rgba, RgbaColor};
+    use crate::stitcher::{ScrollAxis, ScrollStitcher, StitchStatus};
+
+    fn make_synthetic_doc(width: usize, doc_height: usize) -> Vec<u8> {
+        let mut buf = vec![245u8; width * doc_height * 4];
+        for y in 0..doc_height {
+            // Varied unique line/block hash per section so distant regions never alias identically.
+            let section = y / 37;
+            let row_hash = (y.wrapping_mul(2654435761)) ^ (section.wrapping_mul(1597334677));
+            let block_h = 26 + (section % 17);
+            let in_card = (y % block_h) < block_h - 6;
+            for x in 0..width {
+                let idx = (y * width + x) * 4;
+                let margin_l = 24 + ((section * 19) % 45);
+                let margin_r = width.saturating_sub(24 + ((section * 29) % 70));
+                let has_glyph = in_card
+                    && x > margin_l
+                    && x < margin_r
+                    && (y % 9) >= 2
+                    && (y % 9) <= 6
+                    && (((x.wrapping_mul(31) ^ row_hash) % 17) < 9);
+                if has_glyph {
+                    buf[idx] = ((row_hash >> 3) & 0x7F) as u8;
+                    buf[idx + 1] = (((x * 13 + section * 41) >> 1) & 0x9F) as u8;
+                    buf[idx + 2] = (((section * 67 + y * 5) >> 1) & 0xAF) as u8;
+                    buf[idx + 3] = 255;
+                } else if in_card && x > margin_l - 8 && x < margin_r + 8 {
+                    buf[idx] = 232u8.saturating_sub(((section * 11) % 30) as u8);
+                    buf[idx + 1] = 238u8.saturating_sub(((section * 7) % 24) as u8);
+                    buf[idx + 2] = 246u8.saturating_sub(((section * 17) % 28) as u8);
+                    buf[idx + 3] = 255;
+                } else {
+                    buf[idx] = 250;
+                    buf[idx + 1] = 250;
+                    buf[idx + 2] = 252;
+                    buf[idx + 3] = 255;
+                }
+            }
+        }
+        buf
+    }
+
+    fn crop_window(
+        doc: &[u8],
+        doc_w: usize,
+        offset_x: usize,
+        offset_y: usize,
+        view_w: usize,
+        view_h: usize,
+    ) -> Vec<u8> {
+        let mut out = vec![0u8; view_w * view_h * 4];
+        for y in 0..view_h {
+            let src_start = ((offset_y + y) * doc_w + offset_x) * 4;
+            let dst_start = y * view_w * 4;
+            out[dst_start..dst_start + view_w * 4]
+                .copy_from_slice(&doc[src_start..src_start + view_w * 4]);
+        }
+        out
+    }
+
+    fn overlay_sticky_bars(
+        frame: &mut [u8],
+        w: usize,
+        h: usize,
+        top_h: usize,
+        bottom_h: usize,
+        right_sb: usize,
+        sb_thumb_y: usize,
+    ) {
+        // Sticky top header with icons & bottom border
+        for y in 0..top_h {
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                if y == top_h - 1 {
+                    frame[i] = 90;
+                    frame[i + 1] = 90;
+                    frame[i + 2] = 100;
+                } else if (x / 18 + y / 10) % 3 == 0 && y > 12 && y < top_h - 12 {
+                    frame[i] = 220;
+                    frame[i + 1] = 140;
+                    frame[i + 2] = 60;
+                } else {
+                    frame[i] = 32;
+                    frame[i + 1] = 34;
+                    frame[i + 2] = 38;
+                }
+                frame[i + 3] = 255;
+            }
+        }
+        // Sticky bottom footer with textured input pill
+        for y in (h - bottom_h)..h {
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                if y == h - bottom_h {
+                    frame[i] = 110;
+                    frame[i + 1] = 110;
+                    frame[i + 2] = 115;
+                } else if x > 30 && x < w - 50 && (x % 23) < 9 && y > h - bottom_h + 10 && y < h - 10 {
+                    frame[i] = 200;
+                    frame[i + 1] = 205;
+                    frame[i + 2] = 215;
+                } else {
+                    frame[i] = 44;
+                    frame[i + 1] = 46;
+                    frame[i + 2] = 52;
+                }
+                frame[i + 3] = 255;
+            }
+        }
+        // Moving right scrollbar thumb (moves opposite direction of page content)
+        for y in top_h..(h - bottom_h) {
+            for x in (w - right_sb)..w {
+                let i = (y * w + x) * 4;
+                let in_thumb = y >= sb_thumb_y && y < sb_thumb_y + 40;
+                let v = if in_thumb { 140 } else { 230 };
+                frame[i] = v;
+                frame[i + 1] = v;
+                frame[i + 2] = v;
+                frame[i + 3] = 255;
+            }
+        }
+    }
+
+    #[test]
+    fn clean_vertical_scroll_exact_reconstruction() {
+        let w = 400;
+        let view_h = 300;
+        let doc = make_synthetic_doc(w, 900);
+        let mut stitcher = ScrollStitcher::new(w, view_h, 16000, ScrollAxis::Auto);
+
+        let mut total_scroll = 0usize;
+        for step in [0, 75, 110, 95, 130, 80] {
+            total_scroll += step;
+            let frame = crop_window(&doc, w, 0, total_scroll, w, view_h);
+            let res = stitcher.push_bgra(&frame, w, view_h, w * 4);
+            assert_eq!(res.status, StitchStatus::Ok as i32);
+            assert_eq!(res.delta, step as i32);
+        }
+
+        let (assembled, aw, ah) = stitcher.assemble_bgra().expect("assemble");
+        assert_eq!(aw, w);
+        assert_eq!(ah, view_h + total_scroll);
+        assert_eq!(assembled.len(), w * ah * 4);
+        assert_eq!(assembled, doc[..w * ah * 4]);
+    }
+
+    #[test]
+    fn sticky_header_footer_and_scrollbar_masked_cleanly() {
+        let w = 480;
+        let view_h = 360;
+        let top_h = 64;
+        let bottom_h = 48;
+        let dyn_h = view_h - top_h - bottom_h;
+        let doc = make_synthetic_doc(w, 1200);
+        let mut stitcher = ScrollStitcher::new(w, view_h, 16000, ScrollAxis::Vertical);
+
+        let offsets = [0usize, 72, 160, 250, 340];
+        for (idx, &off) in offsets.iter().enumerate() {
+            let mut frame = vec![0u8; w * view_h * 4];
+            let body = crop_window(&doc, w, 0, off, w, dyn_h);
+            frame[top_h * w * 4..(top_h + dyn_h) * w * 4].copy_from_slice(&body);
+            overlay_sticky_bars(&mut frame, w, view_h, top_h, bottom_h, 16, top_h + idx * 30);
+
+            let res = stitcher.push_bgra(&frame, w, view_h, w * 4);
+            assert_eq!(res.status, StitchStatus::Ok as i32, "failed at frame {idx}");
+            if idx > 0 {
+                let expected_delta = (off - offsets[idx - 1]) as i32;
+                assert!((res.delta - expected_delta).abs() <= 1, "delta mismatch: {} vs {}", res.delta, expected_delta);
+            }
+        }
+
+        let (assembled, aw, ah) = stitcher.assemble_bgra().expect("assemble");
+        assert_eq!(aw, w);
+        let expected_h = view_h + offsets.last().copied().unwrap();
+        assert!((ah as isize - expected_h as isize).abs() <= 2);
+
+        // Top header must appear cleanly once at row 16 and NOT repeated inside dynamic region.
+        let header_pixel = &assembled[(20 * w + 50) * 4..(20 * w + 50) * 4 + 4];
+        let footer_y = ah - bottom_h + 20;
+        let footer_pixel = &assembled[(footer_y * w + 15) * 4..(footer_y * w + 15) * 4 + 4];
+        assert_eq!(footer_pixel[2], 52);
+        assert_ne!(header_pixel[2], 252);
+    }
+
+    #[test]
+    fn blinking_cursor_and_duplicate_frames_increment_streak() {
+        let w = 360;
+        let h = 240;
+        let doc = make_synthetic_doc(w, 500);
+        let mut stitcher = ScrollStitcher::new(w, h, 16000, ScrollAxis::Vertical);
+        let frame1 = crop_window(&doc, w, 0, 0, w, h);
+        stitcher.push_bgra(&frame1, w, h, w * 4);
+
+        let mut frame_cursor = frame1.clone();
+        // Small 2x12px blinking cursor toggle inside the viewport.
+        for y in 100..112 {
+            for x in 120..122 {
+                let i = (y * w + x) * 4;
+                frame_cursor[i] = 0;
+                frame_cursor[i + 1] = 0;
+                frame_cursor[i + 2] = 0;
+            }
+        }
+        let r1 = stitcher.push_bgra(&frame_cursor, w, h, w * 4);
+        assert_eq!(r1.status, StitchStatus::Duplicate as i32);
+        assert_eq!(r1.identical_streak, 1);
+
+        let r2 = stitcher.push_bgra(&frame1, w, h, w * 4);
+        assert_eq!(r2.status, StitchStatus::Duplicate as i32);
+        assert_eq!(r2.identical_streak, 2);
+    }
+
+    #[test]
+    fn rollback_and_resume_produces_zero_duplicate_rows() {
+        let w = 380;
+        let view_h = 260;
+        let doc = make_synthetic_doc(w, 800);
+        let mut stitcher = ScrollStitcher::new(w, view_h, 16000, ScrollAxis::Vertical);
+
+        for off in [0usize, 80, 140] {
+            let f = crop_window(&doc, w, 0, off, w, view_h);
+            assert_eq!(stitcher.push_bgra(&f, w, view_h, w * 4).status, StitchStatus::Ok as i32);
+        }
+        // User scrolls back up to 90, then back to 120 (still within 140), then forward to 200.
+        let r_back = stitcher.push_bgra(&crop_window(&doc, w, 0, 90, w, view_h), w, view_h, w * 4);
+        assert_eq!(r_back.status, StitchStatus::RolledBack as i32);
+        assert_eq!(r_back.total_height, (view_h + 140) as i32);
+
+        let r_mid = stitcher.push_bgra(&crop_window(&doc, w, 0, 120, w, view_h), w, view_h, w * 4);
+        assert_eq!(r_mid.status, StitchStatus::RolledBack as i32);
+        assert_eq!(r_mid.total_height, (view_h + 140) as i32);
+
+        let r_fwd = stitcher.push_bgra(&crop_window(&doc, w, 0, 200, w, view_h), w, view_h, w * 4);
+        assert_eq!(r_fwd.status, StitchStatus::Ok as i32);
+        assert_eq!(r_fwd.total_height, (view_h + 200) as i32);
+
+        let (assembled, _, ah) = stitcher.assemble_bgra().unwrap();
+        assert_eq!(ah, view_h + 200);
+        assert_eq!(assembled, doc[..w * ah * 4]);
+    }
+
+    #[test]
+    fn horizontal_1d_panoramic_scroll() {
+        let doc_w = 1000;
+        let view_w = 340;
+        let view_h = 280;
+        // Build horizontally rich wide spreadsheet/table content so columns are visually distinct.
+        let mut doc = make_synthetic_doc(doc_w, view_h);
+        for y in 0..view_h {
+            for x in 0..doc_w {
+                let col_idx = x / 53;
+                if (x % 53) < 3 || (y > 20 && y < view_h - 20 && ((x + col_idx * 11) % 31) < 12) {
+                    let i = (y * doc_w + x) * 4;
+                    doc[i] = ((col_idx * 47 + y) & 0xFF) as u8;
+                    doc[i + 1] = ((col_idx * 89 + 40) & 0xFF) as u8;
+                    doc[i + 2] = ((col_idx * 131 + y * 3) & 0xFF) as u8;
+                    doc[i + 3] = 255;
+                }
+            }
+        }
+        let mut stitcher = ScrollStitcher::new(view_w, view_h, 16000, ScrollAxis::Auto);
+
+        let mut total_x = 0usize;
+        for step in [0, 80, 95, 110] {
+            total_x += step;
+            let frame = crop_window(&doc, doc_w, total_x, 0, view_w, view_h);
+            let res = stitcher.push_bgra(&frame, view_w, view_h, view_w * 4);
+            assert_eq!(res.status, StitchStatus::Ok as i32);
+            if step > 0 {
+                assert_eq!(res.active_axis, ScrollAxis::Horizontal as i32);
+            }
+        }
+
+        let (assembled, aw, ah) = stitcher.assemble_bgra().unwrap();
+        assert_eq!(aw, view_w + total_x);
+        assert_eq!(ah, view_h);
+        for y in 0..view_h {
+            let a_row = &assembled[y * aw * 4..(y + 1) * aw * 4];
+            let d_row = &doc[y * doc_w * 4..y * doc_w * 4 + aw * 4];
+            assert_eq!(a_row, d_row);
+        }
+    }
+
+    #[test]
+    fn lost_tracking_recovers_without_corrupting_buffer() {
+        let w = 360;
+        let h = 240;
+        let doc = make_synthetic_doc(w, 1200);
+        let mut stitcher = ScrollStitcher::new(w, h, 16000, ScrollAxis::Vertical);
+
+        stitcher.push_bgra(&crop_window(&doc, w, 0, 0, w, h), w, h, w * 4);
+        stitcher.push_bgra(&crop_window(&doc, w, 0, 80, w, h), w, h, w * 4);
+
+        // User scrolls way too fast (zero overlap: jump 500px when viewport is 240px).
+        let lost = stitcher.push_bgra(&crop_window(&doc, w, 0, 580, w, h), w, h, w * 4);
+        assert_eq!(lost.status, StitchStatus::TrackingLost as i32);
+        assert_eq!(lost.total_height, (h + 80) as i32);
+
+        // User nudges back into overlapping range -> clean re-lock!
+        let recovered = stitcher.push_bgra(&crop_window(&doc, w, 0, 170, w, h), w, h, w * 4);
+        assert_eq!(recovered.status, StitchStatus::Ok as i32);
+        assert_eq!(recovered.total_height, (h + 170) as i32);
+    }
+
+    #[test]
+    fn max_dimension_cap_enforced_gracefully() {
+        let w = 300;
+        let h = 200;
+        let doc = make_synthetic_doc(w, 700);
+        let mut stitcher = ScrollStitcher::new(w, h, 350, ScrollAxis::Vertical);
+
+        stitcher.push_bgra(&crop_window(&doc, w, 0, 0, w, h), w, h, w * 4);
+        let r1 = stitcher.push_bgra(&crop_window(&doc, w, 0, 100, w, h), w, h, w * 4);
+        assert_eq!(r1.status, StitchStatus::Ok as i32);
+        assert_eq!(r1.total_height, 300);
+
+        let r2 = stitcher.push_bgra(&crop_window(&doc, w, 0, 190, w, h), w, h, w * 4);
+        assert_eq!(r2.status, StitchStatus::MaxLimitReached as i32);
+        assert_eq!(r2.total_height, 350);
+    }
+
+    #[test]
+    fn c_ffi_lifecycle_preview_and_flood_fill() {
+        let w = 240;
+        let h = 180;
+        let doc = make_synthetic_doc(w, 400);
+        let handle = snipsnap_stitcher_create(w as i32, h as i32, 16000, 0);
+        assert!(!handle.is_null());
+
+        let f1 = crop_window(&doc, w, 0, 0, w, h);
+        let f2 = crop_window(&doc, w, 0, 60, w, h);
+        let r1 = snipsnap_stitcher_push_bgra(handle, f1.as_ptr(), w as i32, h as i32, (w * 4) as i32);
+        let r2 = snipsnap_stitcher_push_bgra(handle, f2.as_ptr(), w as i32, h as i32, (w * 4) as i32);
+        assert_eq!(r1.status, StitchStatus::Ok as i32);
+        assert_eq!(r2.status, StitchStatus::Ok as i32);
+
+        let mut preview = SnipSnapImageBuffer {
+            data: std::ptr::null_mut(),
+            width: 0,
+            height: 0,
+            stride: 0,
+            len: 0,
+        };
+        assert!(snipsnap_stitcher_get_preview_bgra(handle, 160, 220, &mut preview));
+        assert!(preview.width > 0 && preview.width <= 160);
+        assert!(preview.height > 0 && preview.height <= 220);
+        snipsnap_buffer_free(&mut preview);
+        assert!(preview.data.is_null());
+
+        let mut full = SnipSnapImageBuffer {
+            data: std::ptr::null_mut(),
+            width: 0,
+            height: 0,
+            stride: 0,
+            len: 0,
+        };
+        assert!(snipsnap_stitcher_assemble_bgra(handle, &mut full));
+        assert_eq!(full.width, w as i32);
+        assert_eq!(full.height, (h + 60) as i32);
+        snipsnap_buffer_free(&mut full);
+        snipsnap_stitcher_free(handle);
+
+        let mut rgba = vec![255u8; 8 * 8 * 4];
+        assert!(snipsnap_flood_fill_rgba(
+            rgba.as_mut_ptr(),
+            8,
+            8,
+            2,
+            2,
+            0x112233FF,
+            5.0,
+            1.0,
+            false
+        ));
+        assert_eq!(&rgba[0..4], &[0x11, 0x22, 0x33, 0xFF]);
+        assert!(flood_fill_rgba(
+            &mut rgba,
+            8,
+            8,
+            0,
+            0,
+            RgbaColor::from_packed_rgba(0x445566FF),
+            5.0,
+            1.0,
+            true
+        ));
+        assert_eq!(&rgba[0..4], &[0x44, 0x55, 0x66, 0xFF]);
+    }
+
+    #[test]
+    fn benchmark_1080p_frame_stitching_speed() {
+        let w = 1920usize;
+        let h = 1080usize;
+        let doc = make_synthetic_doc(w, 3000);
+        let mut stitcher = ScrollStitcher::new(w, h, 16000, ScrollAxis::Vertical);
+        let frames: Vec<Vec<u8>> = (0..11)
+            .map(|i| crop_window(&doc, w, 0, i * 160, w, h))
+            .collect();
+
+        stitcher.push_bgra(&frames[0], w, h, w * 4);
+        let start = Instant::now();
+        for f in &frames[1..] {
+            let res = stitcher.push_bgra(f, w, h, w * 4);
+            assert_eq!(res.status, StitchStatus::Ok as i32);
+        }
+        let elapsed = start.elapsed();
+        let per_frame_ms = elapsed.as_secs_f64() * 1000.0 / 10.0;
+        println!("1920x1080 BGRA average stitch time: {per_frame_ms:.3} ms/frame");
+        assert!(
+            per_frame_ms < 2.5,
+            "Expected < 2.5 ms/frame under release optimization, got {per_frame_ms:.3} ms"
+        );
+    }
+}

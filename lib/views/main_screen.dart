@@ -24,11 +24,13 @@ import '../services/shortcut_service.dart';
 import '../services/storage_service.dart';
 // Gene - Oct, 22, 2026: Import PdfExportService for PDF export.
 import '../services/pdf_export_service.dart';
-// Gene - Oct, 30, 2026: Commented out panoramic scrolling imports for beta testing.
+// Gene - Nov, 20, 2026: Re-enabled panoramic scrolling capture controller and HUD imports.
 // Old implementation:
-// // Gene - Oct, 27, 2026: Added imports for panoramic scrolling capture.
-// import '../services/scrolling/scrolling_capture_controller.dart';
-// import 'capture/scrolling_capture_hud.dart';
+// // Gene - Oct, 30, 2026: Commented out panoramic scrolling imports for beta testing.
+// // import '../services/scrolling/scrolling_capture_controller.dart';
+// // import 'capture/scrolling_capture_hud.dart';
+import '../services/scrolling/scrolling_capture_controller.dart';
+import 'capture/scrolling_capture_hud.dart';
 import '../services/update/update_controller.dart';
 // Gene - Nov, 08, 2026: Added ScreenRecordingController, ImageHeaderParser, and VideoCapturePlayerView imports.
 import '../services/screen_recording_controller.dart';
@@ -143,18 +145,46 @@ ColorScheme snipColorScheme(SnipTheme t) {
 /// app shell out of this plus [SnipThemeScope], and
 /// `test/switch_contrast_test.dart` reads [ThemeData.switchTheme] straight
 /// out of it.
+// Gene - Nov, 20, 2026: Memoized snipThemeData per theme signature so MainScreen.setState() calls do not rebuild ThemeData and GoogleFonts.interTextTheme every frame.
+final Map<int, ThemeData> _snipThemeDataCache = <int, ThemeData>{};
+
+// Old implementation:
+// ThemeData snipThemeData(SnipTheme t) {
+//   return ThemeData(
+//     useMaterial3: true,
+//     brightness: t.isDark ? Brightness.dark : Brightness.light,
+//     scaffoldBackgroundColor: t.canvas,
+//     colorScheme: snipColorScheme(t),
+//     textTheme: GoogleFonts.interTextTheme(
+//       t.isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme,
+//     ).apply(bodyColor: t.ink, displayColor: t.ink),
+//     dividerColor: t.border,
+//     switchTheme: snipSwitchTheme(t),
+//   );
+// }
 ThemeData snipThemeData(SnipTheme t) {
-  return ThemeData(
-    useMaterial3: true,
-    brightness: t.isDark ? Brightness.dark : Brightness.light,
-    scaffoldBackgroundColor: t.canvas,
-    colorScheme: snipColorScheme(t),
-    textTheme: GoogleFonts.interTextTheme(
-      t.isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme,
-    ).apply(bodyColor: t.ink, displayColor: t.ink),
-    dividerColor: t.border,
-    switchTheme: snipSwitchTheme(t),
+  final key = Object.hash(
+    t.isDark,
+    t.canvas,
+    t.ink,
+    t.surface,
+    t.border,
+    t.activeFill,
+    t.onActive,
   );
+  return _snipThemeDataCache.putIfAbsent(key, () {
+    return ThemeData(
+      useMaterial3: true,
+      brightness: t.isDark ? Brightness.dark : Brightness.light,
+      scaffoldBackgroundColor: t.canvas,
+      colorScheme: snipColorScheme(t),
+      textTheme: GoogleFonts.interTextTheme(
+        t.isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme,
+      ).apply(bodyColor: t.ink, displayColor: t.ink),
+      dividerColor: t.border,
+      switchTheme: snipSwitchTheme(t),
+    );
+  });
 }
 
 /// The [Switch] treatment, applied at the root so all four switches in the app
@@ -330,11 +360,13 @@ class _MainScreenState extends State<MainScreen> {
   bool _isSidebarOpen = true;
   bool _isPropertiesOpen = true;
   bool _isCapturing = false;
-  // Gene - Oct, 30, 2026: Commented out scrolling capture controller and completion tracker while switched off for beta testing.
+  // Gene - Nov, 20, 2026: Re-enabled scrolling capture controller and completion tracker.
   // Old implementation:
-  // // Gene - Oct, 27, 2026: Added scrolling capture controller and completion tracker.
-  // ScrollingCaptureController? _scrollingController;
-  // Completer<String?>? _scrollingCompleter;
+  // // Gene - Oct, 30, 2026: Commented out scrolling capture controller and completion tracker while switched off for beta testing.
+  // // ScrollingCaptureController? _scrollingController;
+  // // Completer<String?>? _scrollingCompleter;
+  ScrollingCaptureController? _scrollingController;
+  Completer<String?>? _scrollingCompleter;
   bool _darkMode = true;
 
   /// Caption for the progress overlay shown over the canvas, or null when
@@ -537,50 +569,55 @@ class _MainScreenState extends State<MainScreen> {
   // Gene - Nov, 13, 2026: Per-video edit undo history for non-destructive Snagit Cut/Trim with 1-click Undo / Restore Original.
   final Map<String, List<({String filePath, int durationMs})>>
   _videoEditUndoStacks = {};
+  // Gene - Nov, 20, 2026: Paginated gallery DB tracking state for two-phase startup and lazy scroll loading.
+  static const int _historyPageSize = 30;
+  int _historyDbOffset = 0;
+  bool _hasMoreHistory = true;
+  bool _isLoadingMoreHistory = false;
 
   @override
   void initState() {
     super.initState();
-    // Gene - Nov, 13, 2026: Restore main window on cancel and load initial audio input devices.
+    // Gene - Nov, 20, 2026: Removed root MainScreen.setState() from _recordingController listener (HeaderBar now wraps itself in ListenableBuilder) and coalesced startup preference loads into _loadInitialPreferences().
     // Old implementation:
-    // _recordingController = ScreenRecordingController(
-    //   captureService: _captureService,
-    //   onRecordingCompleted: _handleRecordingCompleted,
-    //   onRecordingCancelled: () {
-    //     if (mounted) _showToast('Screen recording cancelled');
-    //   },
-    // )..addListener(() {
-    //   if (mounted) setState(() {});
-    // });
-    // Gene - Nov, 13, 2026: Restore main window on cancel/failure, toast native save errors, and load initial audio input devices.
-    // Old implementation:
-    // _recordingController = ScreenRecordingController(
-    //   captureService: _captureService,
-    //   onRecordingCompleted: _handleRecordingCompleted,
-    //   onRecordingCancelled: () {
-    //     unawaited(_captureService.setMainWindowVisible(true));
-    //     if (mounted) _showToast('Screen recording cancelled');
-    //   },
-    // )..addListener(() {
-    //   if (mounted) setState(() {});
-    // });
-    _recordingController =
-        ScreenRecordingController(
-          captureService: _captureService,
-          onRecordingCompleted: _handleRecordingCompleted,
-          onRecordingCancelled: () {
-            unawaited(_captureService.setMainWindowVisible(true));
-            if (mounted) _showToast('Screen recording cancelled');
-          },
-          onRecordingFailed: (errMsg) {
-            unawaited(_captureService.setMainWindowVisible(true));
-            if (mounted) {
-              _showToast(errMsg ?? 'Could not save screen recording');
-            }
-          },
-        )..addListener(() {
-          if (mounted) setState(() {});
-        });
+    // _recordingController =
+    //     ScreenRecordingController(
+    //       captureService: _captureService,
+    //       onRecordingCompleted: _handleRecordingCompleted,
+    //       onRecordingCancelled: () {
+    //         unawaited(_captureService.setMainWindowVisible(true));
+    //         if (mounted) _showToast('Screen recording cancelled');
+    //       },
+    //       onRecordingFailed: (errMsg) {
+    //         unawaited(_captureService.setMainWindowVisible(true));
+    //         if (mounted) {
+    //           _showToast(errMsg ?? 'Could not save screen recording');
+    //         }
+    //       },
+    //     )..addListener(() {
+    //       if (mounted) setState(() {});
+    //     });
+    // unawaited(_recordingController.refreshAudioDevices());
+    // ...
+    // _loadShortcuts();
+    // _loadHistory();
+    // _loadThemePreference();
+    // _loadAutoCopyPreference();
+    // _loadSavedColors();
+    _recordingController = ScreenRecordingController(
+      captureService: _captureService,
+      onRecordingCompleted: _handleRecordingCompleted,
+      onRecordingCancelled: () {
+        unawaited(_captureService.setMainWindowVisible(true));
+        if (mounted) _showToast('Screen recording cancelled');
+      },
+      onRecordingFailed: (errMsg) {
+        unawaited(_captureService.setMainWindowVisible(true));
+        if (mounted) {
+          _showToast(errMsg ?? 'Could not save screen recording');
+        }
+      },
+    );
     unawaited(_recordingController.refreshAudioDevices());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -592,11 +629,8 @@ class _MainScreenState extends State<MainScreen> {
         },
       );
     });
-    _loadShortcuts();
-    _loadHistory();
-    _loadThemePreference();
-    _loadAutoCopyPreference();
-    _loadSavedColors();
+    unawaited(_loadInitialPreferences());
+    unawaited(_loadHistory());
     // Gene - Oct, 30, 2026: Disabled native panoramic HUD callbacks for beta testing.
     // Old implementation:
     // // Gene - Oct, 27, 2026: Register callbacks for native panoramic scrolling capture HUD.
@@ -606,15 +640,54 @@ class _MainScreenState extends State<MainScreen> {
     // );
   }
 
-  Future<void> _loadSavedColors() async {
-    final raw = await DatabaseService.getSetting('saved_colors');
-    if (raw == null || raw.isEmpty || !mounted) return;
-    final colors = <Color>[
-      for (final part in raw.split(','))
-        if (int.tryParse(part) case final v?) Color(v),
-    ];
-    setState(() => _savedColors = colors);
+  // Gene - Nov, 20, 2026: Coalesce startup preference reads (shortcuts, theme, auto-copy, saved colors) into a single parallel Future.wait + single setState.
+  Future<void> _loadInitialPreferences() async {
+    final results = await Future.wait<Object?>([
+      ShortcutService.loadShortcuts(),
+      DatabaseService.getSetting('theme_mode'),
+      DatabaseService.getSetting('auto_copy_after_capture'),
+      DatabaseService.getSetting('saved_colors'),
+    ]);
+    if (!mounted) return;
+
+    final loadedShortcuts =
+        results[0] as Map<AppShortcutAction, CustomShortcut>;
+    final themePref = results[1] as String?;
+    final autoCopyPref = results[2] as String?;
+    final colorsRaw = results[3] as String?;
+
+    final parsedColors = (colorsRaw != null && colorsRaw.isNotEmpty)
+        ? <Color>[
+            for (final part in colorsRaw.split(','))
+              if (int.tryParse(part) case final v?) Color(v),
+          ]
+        : null;
+
+    setState(() {
+      _shortcuts = loadedShortcuts;
+      if (themePref != null) {
+        _darkMode = themePref == 'dark';
+      }
+      if (autoCopyPref != null) {
+        _autoCopyAfterCapture = autoCopyPref == 'true';
+      }
+      if (parsedColors != null) {
+        _savedColors = parsedColors;
+      }
+    });
+    unawaited(_registerGlobalHotKeys());
   }
+
+  // Gene - Nov, 20, 2026: Replaced individual _loadSavedColors call with coalesced _loadInitialPreferences().
+  // Future<void> _loadSavedColors() async {
+  //   final raw = await DatabaseService.getSetting('saved_colors');
+  //   if (raw == null || raw.isEmpty || !mounted) return;
+  //   final colors = <Color>[
+  //     for (final part in raw.split(','))
+  //       if (int.tryParse(part) case final v?) Color(v),
+  //   ];
+  //   setState(() => _savedColors = colors);
+  // }
 
   void _persistSavedColors() {
     DatabaseService.setSetting(
@@ -655,10 +728,11 @@ class _MainScreenState extends State<MainScreen> {
   void dispose() {
     _recordingController.dispose();
     _updateController.dispose();
-    // Gene - Oct, 30, 2026: Commented out scrolling controller disposal while switched off for beta testing.
+    // Gene - Nov, 20, 2026: Re-enabled scrolling controller disposal on screen teardown.
     // Old implementation:
-    // // Gene - Oct, 27, 2026: Dispose active scrolling capture controller if still running.
-    // _scrollingController?.dispose();
+    // // Gene - Oct, 30, 2026: Commented out scrolling controller disposal while switched off for beta testing.
+    // // _scrollingController?.dispose();
+    _scrollingController?.dispose();
     _lifecycleListener?.dispose();
     // Flush any annotation edit still waiting on the debounce timer.
     _persistDebounce?.cancel();
@@ -676,24 +750,25 @@ class _MainScreenState extends State<MainScreen> {
     super.dispose();
   }
 
-  Future<void> _loadThemePreference() async {
-    final pref = await DatabaseService.getSetting('theme_mode');
-    if (pref != null && mounted) {
-      setState(() {
-        _darkMode = pref == 'dark';
-      });
-    }
-  }
-
-  // Gene - Nov, 08, 2026: Load and toggle auto-copy after capture preference.
-  Future<void> _loadAutoCopyPreference() async {
-    final pref = await DatabaseService.getSetting('auto_copy_after_capture');
-    if (pref != null && mounted) {
-      setState(() {
-        _autoCopyAfterCapture = pref == 'true';
-      });
-    }
-  }
+  // Gene - Nov, 20, 2026: Replaced individual _loadThemePreference and _loadAutoCopyPreference calls with coalesced _loadInitialPreferences().
+  // Future<void> _loadThemePreference() async {
+  //   final pref = await DatabaseService.getSetting('theme_mode');
+  //   if (pref != null && mounted) {
+  //     setState(() {
+  //       _darkMode = pref == 'dark';
+  //     });
+  //   }
+  // }
+  //
+  // // Gene - Nov, 08, 2026: Load and toggle auto-copy after capture preference.
+  // Future<void> _loadAutoCopyPreference() async {
+  //   final pref = await DatabaseService.getSetting('auto_copy_after_capture');
+  //   if (pref != null && mounted) {
+  //     setState(() {
+  //       _autoCopyAfterCapture = pref == 'true';
+  //     });
+  //   }
+  // }
 
   void _toggleAutoCopyAfterCapture() {
     setState(() {
@@ -828,14 +903,52 @@ class _MainScreenState extends State<MainScreen> {
     await _lastPersist;
   }
 
+  // Gene - Nov, 20, 2026: Two-phase startup history load: page 1 + saved active item render immediately; orphan directory scan defers until after the first frame.
   Future<void> _loadHistory() async {
-    final items = await StorageService.loadHistory();
-    final savedSelectedId = await DatabaseService.getSetting(
-      'active_capture_id',
-    );
+    // Old implementation:
+    // final items = await StorageService.loadHistory();
+    // final savedSelectedId = await DatabaseService.getSetting(
+    //   'active_capture_id',
+    // );
+    // ...
+    final results = await Future.wait<Object?>([
+      StorageService.loadHistoryPage(limit: _historyPageSize, offset: 0),
+      DatabaseService.getSetting('active_capture_id'),
+    ]);
+    final page =
+        results[0] as ({List<CaptureItem> items, int dbCount, bool hasMore});
+    final savedSelectedId = results[1] as String?;
+
+    final items = List<CaptureItem>.of(page.items);
+    if (savedSelectedId != null && !items.any((c) => c.id == savedSelectedId)) {
+      final savedItem = await DatabaseService.loadCaptureByIdFromDb(
+        savedSelectedId,
+      );
+      if (savedItem != null && await File(savedItem.filePath).exists()) {
+        items.add(savedItem);
+        items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      }
+    }
+
+    // Gene - Nov, 20, 2026: Adopt on-disk files eagerly when DB page 1 is empty (e.g., fresh migration or tests), and defer background adoption otherwise.
+    var adoptedCount = 0;
+    final shouldAdoptInBackground = items.isNotEmpty;
+    if (items.isEmpty) {
+      final adopted = await StorageService.adoptOrphanedFilesInDirectory(
+        knownPaths: <String>{},
+        knownThumbnails: <String>{},
+      );
+      if (adopted.isNotEmpty) {
+        items.addAll(adopted);
+        items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        adoptedCount = adopted.length;
+      }
+    }
 
     if (mounted) {
       setState(() {
+        _historyDbOffset = page.dbCount + adoptedCount;
+        _hasMoreHistory = page.hasMore;
         _captures.clear();
         _captures.addAll(items);
         if (_captures.isNotEmpty) {
@@ -858,7 +971,81 @@ class _MainScreenState extends State<MainScreen> {
           _convertActiveCaptureAnnotations();
         });
       }
+
+      if (shouldAdoptInBackground) {
+        unawaited(_adoptOrphanedFilesInBackground());
+      }
     }
+  }
+
+  // Gene - Nov, 20, 2026: Load next page of capture history lazily when GallerySidebar scrolls near the end.
+  Future<void> _loadMoreHistory() async {
+    if (_isLoadingMoreHistory || !_hasMoreHistory) return;
+    _isLoadingMoreHistory = true;
+    try {
+      final page = await StorageService.loadHistoryPage(
+        limit: _historyPageSize,
+        offset: _historyDbOffset,
+      );
+      if (!mounted) return;
+      _historyDbOffset += page.dbCount;
+      _hasMoreHistory = page.hasMore;
+      if (page.items.isNotEmpty) {
+        final existingIds = _captures.map((c) => c.id).toSet();
+        final fresh = page.items
+            .where((c) => !existingIds.contains(c.id))
+            .toList();
+        if (fresh.isNotEmpty) {
+          setState(() {
+            _captures.addAll(fresh);
+          });
+        }
+      }
+    } finally {
+      _isLoadingMoreHistory = false;
+    }
+  }
+
+  // Gene - Nov, 20, 2026: Deferred background directory scan after first frame so orphan image/video files are adopted without blocking startup; queries only paths/thumbnails with zero annotation BLOB reads.
+  Future<void> _adoptOrphanedFilesInBackground() async {
+    // Old implementation:
+    // final dbItems = await DatabaseService.loadCapturesFromDb();
+    // final knownPaths = <String>{
+    //   ..._captures.map((c) => c.filePath),
+    //   ...dbItems.map((c) => c.filePath),
+    // };
+    // final knownThumbnails = <String>{
+    //   ..._captures.map((c) => c.thumbnailPath).whereType<String>(),
+    //   ...dbItems.map((c) => c.thumbnailPath).whereType<String>(),
+    // };
+    final dbKnown = await DatabaseService.loadKnownCapturePaths();
+    final knownPaths = <String>{
+      ..._captures.map((c) => c.filePath),
+      ...dbKnown.filePaths,
+    };
+    final knownThumbnails = <String>{
+      ..._captures.map((c) => c.thumbnailPath).whereType<String>(),
+      ...dbKnown.thumbnailPaths,
+    };
+    final adopted = await StorageService.adoptOrphanedFilesInDirectory(
+      knownPaths: knownPaths,
+      knownThumbnails: knownThumbnails,
+    );
+    if (!mounted || adopted.isEmpty) return;
+
+    final existingIds = _captures.map((c) => c.id).toSet();
+    final fresh = adopted.where((c) => !existingIds.contains(c.id)).toList();
+    if (fresh.isEmpty) return;
+    setState(() {
+      _captures.addAll(fresh);
+      _captures.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      _historyDbOffset += fresh.length;
+      if (_activeCapture == null && _captures.isNotEmpty) {
+        _activeCapture = _captures.first;
+        _annotations = List.from(_activeCapture!.annotations);
+        _stepCounter = _findMaxStepNumber(_annotations) + 1;
+      }
+    });
   }
 
   /// One-time migration of a pre-v4 capture's annotations into image pixels.
@@ -926,17 +1113,18 @@ class _MainScreenState extends State<MainScreen> {
     _syncCurrentCaptureAnnotations();
   }
 
-  Future<void> _loadShortcuts() async {
-    final loaded = await ShortcutService.loadShortcuts();
-    if (mounted) {
-      setState(() {
-        _shortcuts = loaded;
-      });
-      // Deliberately not awaited: registration talks to the OS and the UI is
-      // usable without it. Failures surface through its own toast.
-      unawaited(_registerGlobalHotKeys());
-    }
-  }
+  // Gene - Nov, 20, 2026: Replaced individual _loadShortcuts call with coalesced _loadInitialPreferences().
+  // Future<void> _loadShortcuts() async {
+  //   final loaded = await ShortcutService.loadShortcuts();
+  //   if (mounted) {
+  //     setState(() {
+  //       _shortcuts = loaded;
+  //     });
+  //     // Deliberately not awaited: registration talks to the OS and the UI is
+  //     // usable without it. Failures surface through its own toast.
+  //     unawaited(_registerGlobalHotKeys());
+  //   }
+  // }
 
   // Gene - Nov, 03, 2026: Preflight macOS Accessibility permissions when registering global hotkeys so users are alerted if macOS revoked permissions on update.
   // Old implementation:
@@ -1124,9 +1312,13 @@ class _MainScreenState extends State<MainScreen> {
     switch (action) {
       case AppShortcutAction.interactiveSnip:
         return _handleInteractiveCapture;
+      // Gene - Nov, 20, 2026: Re-enabled AppShortcutAction.scrollingSnip global hotkey dispatch.
+      // Old implementation:
+      // case AppShortcutAction.scrollingSnip:
+      //   // Panoramic capture switched off for beta testing.
+      //   return null;
       case AppShortcutAction.scrollingSnip:
-        // Panoramic capture switched off for beta testing.
-        return null;
+        return _handleScrollingCapture;
       case AppShortcutAction.fullScreenSnip:
         return _handleFullScreenCapture;
       case AppShortcutAction.timerSnip:
@@ -1760,8 +1952,25 @@ class _MainScreenState extends State<MainScreen> {
     );
     setState(() => _isCapturing = false);
     if (path != null) {
+      // Gene - Nov, 20, 2026: Route "scrolling:x:y:w:h" selection overlay results directly to native/fallback scrolling capture.
+      // Old implementation:
+      // if (path.startsWith('scrolling:')) {
+      //   // Panoramic capture switched off for beta testing.
+      //   return;
+      // }
       if (path.startsWith('scrolling:')) {
-        // Panoramic capture switched off for beta testing.
+        final parts = path.substring('scrolling:'.length).split(':');
+        if (parts.length == 4) {
+          final x = double.tryParse(parts[0]) ?? 0.0;
+          final y = double.tryParse(parts[1]) ?? 0.0;
+          final w = double.tryParse(parts[2]) ?? 800.0;
+          final h = double.tryParse(parts[3]) ?? 600.0;
+          await _captureService.setMainWindowVisible(false);
+          await Future<void>.delayed(
+            Duration(milliseconds: Platform.isWindows ? 30 : 80),
+          );
+          await _handleScrollingCapture(Rect.fromLTWH(x, y, w, h));
+        }
         return;
       }
       if (path.startsWith('record:')) {
@@ -1998,6 +2207,8 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       _resetOcr();
       _captures.insert(0, newItem);
+      // Gene - Nov, 20, 2026: Advance pagination DB offset when inserting a new recording at the top.
+      _historyDbOffset++;
       _activeCapture = newItem;
       _annotations = [];
       _undoStack.clear();
@@ -2577,6 +2788,143 @@ class _MainScreenState extends State<MainScreen> {
   //   }
   // }
 
+  // Gene - Nov, 20, 2026: Production scrolling capture orchestration (native Rust engine on macOS/Windows, O(N) strip session on Linux/fallback).
+  Future<void> _handleScrollingCapture([
+    Rect? initialRect,
+    ScrollingCaptureController? customController,
+  ]) async {
+    if (!await _ensureCapturePermission()) return;
+    if (!mounted) return;
+
+    Rect? region = initialRect;
+    if (region == null) {
+      setState(() => _isCapturing = true);
+      final overlayResult = await _captureService.captureInteractive(
+        initialFps: _recordingController.fps,
+        initialRecordMic: _recordingController.recordMicrophone,
+        initialMicDeviceId: _recordingController.selectedMicrophoneId,
+        initialRecordSystemAudio: _recordingController.recordSystemAudio,
+        initialRecordCursor: _recordingController.recordCursor,
+        initialHighlightClicks: _recordingController.highlightClicks,
+      );
+      if (mounted) setState(() => _isCapturing = false);
+      if (overlayResult == null) return;
+
+      if (overlayResult.startsWith('scrolling:')) {
+        final parts = overlayResult.substring('scrolling:'.length).split(':');
+        if (parts.length == 4) {
+          final x = double.tryParse(parts[0]) ?? 0.0;
+          final y = double.tryParse(parts[1]) ?? 0.0;
+          final w = double.tryParse(parts[2]) ?? 800.0;
+          final h = double.tryParse(parts[3]) ?? 600.0;
+          region = Rect.fromLTWH(x, y, w, h);
+          await _captureService.setMainWindowVisible(false);
+          await Future<void>.delayed(
+            Duration(milliseconds: Platform.isWindows ? 30 : 80),
+          );
+        }
+      } else if (overlayResult.startsWith('record:')) {
+        await _captureService.setMainWindowVisible(false);
+        await Future<void>.delayed(
+          Duration(milliseconds: Platform.isWindows ? 30 : 120),
+        );
+        await _startRecordingFromOverlayString(overlayResult);
+        return;
+      } else {
+        await _addCaptureFromPath(overlayResult);
+        return;
+      }
+    }
+
+    if (region == null || !mounted) return;
+
+    final useNative =
+        customController == null &&
+        ScrollingCaptureController.supportsNativeRustEngine;
+    final controller =
+        customController ??
+        ScrollingCaptureController(
+          captureService: _captureService,
+          useNativeEngine: useNative,
+        );
+    setState(() {
+      _scrollingController = controller;
+      _isCapturing = true;
+    });
+
+    try {
+      final dpr = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
+      await controller.startCapture(
+        viewportRect: region,
+        devicePixelRatio: dpr,
+        maxDimension: 16000,
+        axisMode: 0,
+      );
+
+      if (controller.status == ScrollingCaptureStatus.cancelled) {
+        if (useNative) {
+          await _captureService.setMainWindowVisible(true);
+        }
+        if (mounted && controller.warningMessage != null) {
+          _showToast(controller.warningMessage!);
+        }
+        return;
+      }
+
+      String? resultPath;
+      if (useNative) {
+        resultPath = await controller.waitForNativeCompletion();
+        await _captureService.setMainWindowVisible(true);
+      } else {
+        final completer = Completer<String?>();
+        _scrollingCompleter = completer;
+        resultPath = await completer.future;
+      }
+
+      if (resultPath != null && mounted) {
+        if (controller.warningMessage != null) {
+          _showToast(controller.warningMessage!);
+        }
+        await _addCaptureFromPath(resultPath);
+      } else if (mounted && controller.warningMessage != null) {
+        _showToast(controller.warningMessage!);
+      }
+    } catch (e) {
+      debugPrint('SnipSnap scrolling capture error: $e');
+      if (useNative) {
+        await _captureService.setMainWindowVisible(true);
+      }
+    } finally {
+      controller.dispose();
+      if (mounted) {
+        setState(() {
+          if (identical(_scrollingController, controller)) {
+            _scrollingController = null;
+          }
+          _scrollingCompleter = null;
+          _isCapturing = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _finishScrollingCapture() async {
+    final controller = _scrollingController;
+    if (controller != null) {
+      final path = await controller.finishCapture();
+      if (!(_scrollingCompleter?.isCompleted ?? true)) {
+        _scrollingCompleter?.complete(path);
+      }
+    }
+  }
+
+  void _cancelScrollingCapture() {
+    _scrollingController?.cancelCapture();
+    if (!(_scrollingCompleter?.isCompleted ?? true)) {
+      _scrollingCompleter?.complete(null);
+    }
+  }
+
   Future<void> _handleImportImage() async {
     try {
       final result = await FilePicker.pickFile(
@@ -2634,6 +2982,8 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       _resetOcr();
       _captures.insert(0, newItem);
+      // Gene - Nov, 20, 2026: Advance pagination DB offset when inserting a new recording at the top.
+      _historyDbOffset++;
       _activeCapture = newItem;
       _annotations = [];
       _undoStack.clear();
@@ -3468,69 +3818,77 @@ class _MainScreenState extends State<MainScreen> {
                     //   onSnipFullScreen: _handleFullScreenCapture,
                     //   onSnipTimer: _handleTimerCapture,
                     //   onImportImage: _handleImportImage,
-                    // Gene - Nov, 08, 2026: Wired screen recording controls, microphone toggle, clipboard paste, and auto-copy into HeaderBar.
-                    HeaderBar(
-                      onSnipInteractive: _handleInteractiveCapture,
-                      onSnipScrolling: null,
-                      onSnipFullScreen: _handleFullScreenCapture,
-                      onSnipTimer: _handleTimerCapture,
-                      onRecordArea: _handleRecordArea,
-                      onRecordFullScreen: _handleRecordFullScreen,
-                      onImportImage: _handleImportImage,
-                      onPasteFromClipboard: _handlePasteFromClipboard,
-                      isRecording: _recordingController.isRecording,
-                      isRecordingPaused: _recordingController.isPaused,
-                      recordingElapsedText:
-                          _recordingController.formattedElapsed,
-                      onTogglePauseRecording: _recordingController.togglePause,
-                      onStopRecording: _recordingController.stopRecording,
-                      recordMicrophone: _recordingController.recordMicrophone,
-                      onToggleRecordMicrophone: (val) =>
-                          _recordingController.setRecordMicrophone(val),
-                      // Gene - Nov, 13, 2026: Wired System Audio toggle, live mic mute, and restart recording into HeaderBar.
-                      recordSystemAudio: _recordingController.recordSystemAudio,
-                      onToggleRecordSystemAudio: (val) =>
-                          _recordingController.setRecordSystemAudio(val),
-                      isMicrophoneMuted: _recordingController.isMicrophoneMuted,
-                      onToggleMicrophoneMute:
-                          _recordingController.toggleMicrophoneMute,
-                      onRestartRecording: () =>
-                          unawaited(_recordingController.restartRecording()),
-                      autoCopyAfterCapture: _autoCopyAfterCapture,
-                      onToggleAutoCopy: (_) => _toggleAutoCopyAfterCapture(),
-                      onUndo: _undo,
-                      onRedo: _redo,
-                      onClear: _clearAnnotations,
-                      onCopyToClipboard: _handleCopyToClipboard,
-                      onSaveAs: _handleSaveAs,
-                      onFlattenCanvas: _annotations.isNotEmpty
-                          ? _handleFlattenCanvas
-                          : null,
-                      onToggleSidebar: () =>
-                          setState(() => _isSidebarOpen = !_isSidebarOpen),
-                      onToggleProperties: () => setState(
-                        () => _isPropertiesOpen = !_isPropertiesOpen,
+                    // Gene - Nov, 20, 2026: Isolate _recordingController updates to HeaderBar via ListenableBuilder so timer ticks never trigger root MainScreen rebuilds.
+                    ListenableBuilder(
+                      listenable: _recordingController,
+                      builder: (context, _) => HeaderBar(
+                        onSnipInteractive: _handleInteractiveCapture,
+                        // Gene - Nov, 20, 2026: Re-enabled onSnipScrolling dropdown action in HeaderBar.
+                        // Old: onSnipScrolling: null,
+                        onSnipScrolling: _handleScrollingCapture,
+                        onSnipFullScreen: _handleFullScreenCapture,
+                        onSnipTimer: _handleTimerCapture,
+                        onRecordArea: _handleRecordArea,
+                        onRecordFullScreen: _handleRecordFullScreen,
+                        onImportImage: _handleImportImage,
+                        onPasteFromClipboard: _handlePasteFromClipboard,
+                        isRecording: _recordingController.isRecording,
+                        isRecordingPaused: _recordingController.isPaused,
+                        recordingElapsedText:
+                            _recordingController.formattedElapsed,
+                        onTogglePauseRecording:
+                            _recordingController.togglePause,
+                        onStopRecording: _recordingController.stopRecording,
+                        recordMicrophone: _recordingController.recordMicrophone,
+                        onToggleRecordMicrophone: (val) =>
+                            _recordingController.setRecordMicrophone(val),
+                        // Gene - Nov, 13, 2026: Wired System Audio toggle, live mic mute, and restart recording into HeaderBar.
+                        recordSystemAudio:
+                            _recordingController.recordSystemAudio,
+                        onToggleRecordSystemAudio: (val) =>
+                            _recordingController.setRecordSystemAudio(val),
+                        isMicrophoneMuted:
+                            _recordingController.isMicrophoneMuted,
+                        onToggleMicrophoneMute:
+                            _recordingController.toggleMicrophoneMute,
+                        onRestartRecording: () =>
+                            unawaited(_recordingController.restartRecording()),
+                        autoCopyAfterCapture: _autoCopyAfterCapture,
+                        onToggleAutoCopy: (_) => _toggleAutoCopyAfterCapture(),
+                        onUndo: _undo,
+                        onRedo: _redo,
+                        onClear: _clearAnnotations,
+                        onCopyToClipboard: _handleCopyToClipboard,
+                        onSaveAs: _handleSaveAs,
+                        onFlattenCanvas: _annotations.isNotEmpty
+                            ? _handleFlattenCanvas
+                            : null,
+                        onToggleSidebar: () =>
+                            setState(() => _isSidebarOpen = !_isSidebarOpen),
+                        onToggleProperties: () => setState(
+                          () => _isPropertiesOpen = !_isPropertiesOpen,
+                        ),
+                        isPropertiesOpen: _isPropertiesOpen,
+                        onOpenShortcutSettings: _openShortcutSettingsDialog,
+                        onToggleThemeMode: _toggleThemeMode,
+                        onOpenAboutDialog: _openAboutDialog,
+                        onOpenUserManual: _openUserManualDialog,
+                        canUndo: _undoStack.isNotEmpty,
+                        canRedo: _redoStack.isNotEmpty,
+                        canClear: _annotations.isNotEmpty,
+                        hasCapture: _activeCapture != null,
+                        isSidebarOpen: _isSidebarOpen,
+                        shortcuts: _shortcuts,
+                        zoomScale: _zoomScale,
+                        onZoomScaleChanged: (val) =>
+                            setState(() => _zoomScale = val),
+                        // updateController: _updateController,
+                        // Gene - Oct, 14, 2026: Hide the GitHub update button
+                        // in Microsoft Store builds (Store handles updates).
+                        updateController: AppInfo.isStoreBuild
+                            ? null
+                            : _updateController,
                       ),
-                      isPropertiesOpen: _isPropertiesOpen,
-                      onOpenShortcutSettings: _openShortcutSettingsDialog,
-                      onToggleThemeMode: _toggleThemeMode,
-                      onOpenAboutDialog: _openAboutDialog,
-                      onOpenUserManual: _openUserManualDialog,
-                      canUndo: _undoStack.isNotEmpty,
-                      canRedo: _redoStack.isNotEmpty,
-                      canClear: _annotations.isNotEmpty,
-                      hasCapture: _activeCapture != null,
-                      isSidebarOpen: _isSidebarOpen,
-                      shortcuts: _shortcuts,
-                      zoomScale: _zoomScale,
-                      onZoomScaleChanged: (val) =>
-                          setState(() => _zoomScale = val),
-                      // updateController: _updateController,
-                      // Gene - Oct, 14, 2026: Hide the GitHub update button
-                      // in Microsoft Store builds (Store handles updates).
-                      updateController: AppInfo.isStoreBuild
-                          ? null
-                          : _updateController,
                     ),
 
                     // Main Work Area (Canvas + Right Properties Sidebar)
@@ -3905,10 +4263,34 @@ class _MainScreenState extends State<MainScreen> {
                           //       ),
                           //     ),
                           //   ),
-                          if (_isCapturing)
+                          // Gene - Nov, 20, 2026: Mount fallback ScrollingCaptureHud on non-native platforms and hide busy overlay while native HUD runs.
+                          // Old implementation:
+                          // if (_isCapturing)
+                          //   const Positioned.fill(
+                          //     child: CanvasBusyOverlay(
+                          //       message: 'Waiting for screen capture...',
+                          //     ),
+                          //   ),
+                          if (_isCapturing && _scrollingController == null)
                             const Positioned.fill(
                               child: CanvasBusyOverlay(
                                 message: 'Waiting for screen capture...',
+                              ),
+                            ),
+
+                          if (_scrollingController != null &&
+                              !ScrollingCaptureController
+                                  .supportsNativeRustEngine)
+                            Positioned(
+                              bottom: 24,
+                              left: 0,
+                              right: 0,
+                              child: Center(
+                                child: ScrollingCaptureHud(
+                                  controller: _scrollingController!,
+                                  onDone: _finishScrollingCapture,
+                                  onCancel: _cancelScrollingCapture,
+                                ),
                               ),
                             ),
 
@@ -3945,6 +4327,8 @@ class _MainScreenState extends State<MainScreen> {
                       onZoomScaleChanged: (val) =>
                           setState(() => _zoomScale = val),
                       isOpen: _isSidebarOpen,
+                      // Gene - Nov, 20, 2026: Wire paginated DB loading when GallerySidebar scrolls near the end.
+                      onLoadMore: _hasMoreHistory ? _loadMoreHistory : null,
                       onToggleCollapse: () =>
                           setState(() => _isSidebarOpen = !_isSidebarOpen),
                       onSelectItem: (item) {
@@ -3979,6 +4363,8 @@ class _MainScreenState extends State<MainScreen> {
                         }
                         setState(() {
                           _captures.removeWhere((c) => c.id == item.id);
+                          // Gene - Nov, 20, 2026: Keep DB pagination offset aligned after item deletion.
+                          if (_historyDbOffset > 0) _historyDbOffset--;
                           if (_activeCapture?.id == item.id) {
                             _resetOcr();
                             _activeCapture = _captures.isNotEmpty

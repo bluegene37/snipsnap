@@ -1,3 +1,5 @@
+// Gene - Nov, 20, 2026: Added dart:collection for bounded LRU TextPainter layout caching.
+import 'dart:collection';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -465,22 +467,91 @@ class AnnotationRenderer {
   static const double _textPadX = 8.0;
   static const double _textPadY = 5.0;
 
-  static TextPainter _layoutText(Annotation ann) {
+  // Gene - Nov, 20, 2026: Bounded LRU TextPainter cache (128 entries) to eliminate repeated paragraph shaping on paint/hit-test frames.
+  static const int _maxTextCacheEntries = 128;
+  static final LinkedHashMap<Object, TextPainter> _textPainterCache =
+      LinkedHashMap<Object, TextPainter>();
+  static const List<Shadow> _defaultTextShadows = [
+    Shadow(color: Color(0xB3000000), offset: Offset(0, 1), blurRadius: 4),
+  ];
+
+  static TextPainter _cachedTextPainter({
+    required String text,
+    required Color color,
+    required double fontSize,
+    required FontWeight fontWeight,
+    double? height,
+    bool hasShadows = false,
+    TextAlign textAlign = TextAlign.left,
+  }) {
+    final key = (
+      text,
+      color.toARGB32(),
+      fontSize,
+      // Gene - Nov, 20, 2026: Use FontWeight.value (non-deprecated) instead of FontWeight.index for cache key.
+      // Old: fontWeight.index,
+      fontWeight.value,
+      height ?? -1.0,
+      hasShadows,
+      textAlign.index,
+    );
+    final existing = _textPainterCache.remove(key);
+    if (existing != null) {
+      _textPainterCache[key] = existing;
+      return existing;
+    }
+
     final tp = TextPainter(
       text: TextSpan(
-        text: ann.text ?? '',
+        text: text,
         style: TextStyle(
-          color: ann.color,
-          fontSize: ann.fontSize,
-          fontWeight: FontWeight.w600,
-          height: 1.25,
+          color: color,
+          fontSize: fontSize,
+          fontWeight: fontWeight,
+          height: height,
+          shadows: hasShadows ? _defaultTextShadows : null,
         ),
       ),
       textDirection: TextDirection.ltr,
+      textAlign: textAlign,
+    )..layout();
+
+    _textPainterCache[key] = tp;
+    if (_textPainterCache.length > _maxTextCacheEntries) {
+      final oldestKey = _textPainterCache.keys.first;
+      final evicted = _textPainterCache.remove(oldestKey);
+      evicted?.dispose();
+    }
+    return tp;
+  }
+
+  // Old implementation:
+  // static TextPainter _layoutText(Annotation ann) {
+  //   final tp = TextPainter(
+  //     text: TextSpan(
+  //       text: ann.text ?? '',
+  //       style: TextStyle(
+  //         color: ann.color,
+  //         fontSize: ann.fontSize,
+  //         fontWeight: FontWeight.w600,
+  //         height: 1.25,
+  //       ),
+  //     ),
+  //     textDirection: TextDirection.ltr,
+  //     textAlign: TextAlign.left,
+  //   );
+  //   tp.layout();
+  //   return tp;
+  // }
+  static TextPainter _layoutText(Annotation ann) {
+    return _cachedTextPainter(
+      text: ann.text ?? '',
+      color: ann.color,
+      fontSize: ann.fontSize,
+      fontWeight: FontWeight.w600,
+      height: 1.25,
       textAlign: TextAlign.left,
     );
-    tp.layout();
-    return tp;
   }
 
   // ---------------------------------------------------------------------------
@@ -1082,17 +1153,25 @@ class AnnotationRenderer {
     required String text,
     required Color background,
   }) {
-    final tp = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
+    // Gene - Nov, 20, 2026: Use cached TextPainter layout for ruler/HUD badges.
+    // Old implementation:
+    // final tp = TextPainter(
+    //   text: TextSpan(
+    //     text: text,
+    //     style: const TextStyle(
+    //       color: Colors.white,
+    //       fontSize: 11,
+    //       fontWeight: FontWeight.bold,
+    //     ),
+    //   ),
+    //   textDirection: TextDirection.ltr,
+    // )..layout();
+    final tp = _cachedTextPainter(
+      text: text,
+      color: Colors.white,
+      fontSize: 11,
+      fontWeight: FontWeight.bold,
+    );
 
     final rect = RRect.fromRectAndRadius(
       Rect.fromCenter(
@@ -1148,27 +1227,68 @@ class AnnotationRenderer {
       if (ann.blurType == BlurType.pixelate) {
         _paintPixelated(canvas, ann, rect, baseImage, imageRect);
       } else {
-        canvas.saveLayer(
-          rect,
-          Paint()
-            ..imageFilter = ui.ImageFilter.blur(
-              sigmaX: ann.blurStrength,
-              sigmaY: ann.blurStrength,
-              tileMode: TileMode.clamp,
-            ),
-        );
-        canvas.drawImageRect(
-          baseImage,
-          Rect.fromLTWH(
-            0,
-            0,
-            baseImage.width.toDouble(),
-            baseImage.height.toDouble(),
-          ),
-          imageRect,
-          Paint()..filterQuality = FilterQuality.high,
-        );
-        canvas.restore();
+        // Gene - Nov, 20, 2026: Draw only the bounded blur sub-rectangle (+3*sigma padding) inside saveLayer instead of rasterizing the entire 5K baseImage.
+        // Old implementation:
+        // canvas.saveLayer(
+        //   rect,
+        //   Paint()
+        //     ..imageFilter = ui.ImageFilter.blur(
+        //       sigmaX: ann.blurStrength,
+        //       sigmaY: ann.blurStrength,
+        //       tileMode: TileMode.clamp,
+        //     ),
+        // );
+        // canvas.drawImageRect(
+        //   baseImage,
+        //   Rect.fromLTWH(
+        //     0,
+        //     0,
+        //     baseImage.width.toDouble(),
+        //     baseImage.height.toDouble(),
+        //   ),
+        //   imageRect,
+        //   Paint()..filterQuality = FilterQuality.high,
+        // );
+        // canvas.restore();
+        if (imageRect.width > 0 && imageRect.height > 0) {
+          final margin = ann.blurStrength * 3.0;
+          final expanded = rect.inflate(margin).intersect(imageRect);
+          if (!expanded.isEmpty) {
+            final scaleX = baseImage.width / imageRect.width;
+            final scaleY = baseImage.height / imageRect.height;
+            final srcLeft = ((expanded.left - imageRect.left) * scaleX).clamp(
+              0.0,
+              baseImage.width.toDouble(),
+            );
+            final srcTop = ((expanded.top - imageRect.top) * scaleY).clamp(
+              0.0,
+              baseImage.height.toDouble(),
+            );
+            final srcRight = ((expanded.right - imageRect.left) * scaleX).clamp(
+              srcLeft,
+              baseImage.width.toDouble(),
+            );
+            final srcBottom = ((expanded.bottom - imageRect.top) * scaleY)
+                .clamp(srcTop, baseImage.height.toDouble());
+            final srcRect = Rect.fromLTRB(srcLeft, srcTop, srcRight, srcBottom);
+            canvas.saveLayer(
+              rect,
+              Paint()
+                ..imageFilter = ui.ImageFilter.blur(
+                  sigmaX: ann.blurStrength,
+                  sigmaY: ann.blurStrength,
+                  tileMode: TileMode.clamp,
+                ),
+            );
+            canvas.drawImageRect(
+              baseImage,
+              srcRect,
+              expanded,
+              Paint()..filterQuality = FilterQuality.high,
+            );
+            canvas.restore();
+          }
+        }
       }
       canvas.restore();
       return;
@@ -1288,26 +1408,39 @@ class AnnotationRenderer {
         ..isAntiAlias = true,
     );
 
-    final tp = TextPainter(
-      text: TextSpan(
-        text: '$step',
-        style: TextStyle(
-          color: Colors.white.withValues(alpha: ann.opacity),
-          // Shrink the glyph as the number grows so 2- and 3-digit badges stay
-          // inside the circle.
-          fontSize:
-              (radius *
-                      (step >= 100
-                          ? 0.72
-                          : step >= 10
-                          ? 0.88
-                          : 1.05))
-                  .clamp(8.0, 60.0),
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
+    // Gene - Nov, 20, 2026: Use cached TextPainter layout for step marker badges.
+    // Old implementation:
+    // final tp = TextPainter(
+    //   text: TextSpan(
+    //     text: '$step',
+    //     style: TextStyle(
+    //       color: Colors.white.withValues(alpha: ann.opacity),
+    //       fontSize:
+    //           (radius *
+    //                   (step >= 100
+    //                       ? 0.72
+    //                       : step >= 10
+    //                       ? 0.88
+    //                       : 1.05))
+    //               .clamp(8.0, 60.0),
+    //       fontWeight: FontWeight.bold,
+    //     ),
+    //   ),
+    //   textDirection: TextDirection.ltr,
+    // )..layout();
+    final tp = _cachedTextPainter(
+      text: '$step',
+      color: Colors.white.withValues(alpha: ann.opacity),
+      fontSize:
+          (radius *
+                  (step >= 100
+                      ? 0.72
+                      : step >= 10
+                      ? 0.88
+                      : 1.05))
+              .clamp(8.0, 60.0),
+      fontWeight: FontWeight.bold,
+    );
 
     tp.paint(canvas, center - Offset(tp.width / 2, tp.height / 2));
   }
@@ -1321,27 +1454,37 @@ class AnnotationRenderer {
     final showBg =
         ann.fill && ann.backgroundColor != null && ann.backgroundColor!.a > 0;
 
-    final tp = TextPainter(
-      text: TextSpan(
-        text: ann.text,
-        style: TextStyle(
-          color: _applyOpacity(ann.color, ann.opacity),
-          fontSize: ann.fontSize,
-          fontWeight: FontWeight.w600,
-          height: 1.25,
-          shadows: (showBg && !ann.hasShadow)
-              ? null
-              : const [
-                  Shadow(
-                    color: Color(0xB3000000),
-                    offset: Offset(0, 1),
-                    blurRadius: 4,
-                  ),
-                ],
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
+    // Gene - Nov, 20, 2026: Use cached TextPainter layout for text annotations.
+    // Old implementation:
+    // final tp = TextPainter(
+    //   text: TextSpan(
+    //     text: ann.text,
+    //     style: TextStyle(
+    //       color: _applyOpacity(ann.color, ann.opacity),
+    //       fontSize: ann.fontSize,
+    //       fontWeight: FontWeight.w600,
+    //       height: 1.25,
+    //       shadows: (showBg && !ann.hasShadow)
+    //           ? null
+    //           : const [
+    //               Shadow(
+    //                 color: Color(0xB3000000),
+    //                 offset: Offset(0, 1),
+    //                 blurRadius: 4,
+    //               ),
+    //             ],
+    //     ),
+    //   ),
+    //   textDirection: TextDirection.ltr,
+    // )..layout();
+    final tp = _cachedTextPainter(
+      text: ann.text!,
+      color: _applyOpacity(ann.color, ann.opacity),
+      fontSize: ann.fontSize,
+      fontWeight: FontWeight.w600,
+      height: 1.25,
+      hasShadows: !(showBg && !ann.hasShadow),
+    );
 
     if (showBg) {
       final bgRect = RRect.fromRectAndRadius(

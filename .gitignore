@@ -87,3 +87,7 @@ RELEASING.md
 SECURITY.md
 .github/pull_request_template.md
 .github/ISSUE_TEMPLATE/
+
+# Gene - Nov, 20, 2026: Ignore Rust Cargo build artifacts in native/snipsnap_core/target/.
+# Rust build artifacts
+native/snipsnap_core/target/

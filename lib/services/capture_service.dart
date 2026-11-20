@@ -183,6 +183,13 @@ class CaptureService {
     return snapDir;
   }
 
+  // Gene - Nov, 20, 2026: Shared output file path generator for scrolling and still captures.
+  Future<String> createCaptureOutputPath({String prefix = 'snipsnap'}) async {
+    final dir = await getStorageDirectory();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    return p.join(dir.path, '${prefix}_$ts.png');
+  }
+
   /// Whether this launch has already shown the macOS Screen Recording prompt.
   ///
   /// Static on purpose: the grant is per app, not per service instance, and
@@ -666,8 +673,12 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
   }
 
   // Gene - Oct, 27, 2026: Added scrolling capture callbacks and native HUD methods for panoramic scrolling capture.
+  // Gene - Nov, 20, 2026: Extended scrolling callbacks with native Rust progress, completion payload, and error events.
   VoidCallback? _onScrollingDone;
   VoidCallback? _onScrollingCancel;
+  ValueChanged<Map<String, dynamic>>? _onScrollingProgress;
+  ValueChanged<Map<String, dynamic>>? _onScrollingCompleted;
+  ValueChanged<String>? _onScrollingError;
   // Gene - Nov, 08, 2026: Added native screen recording HUD callbacks and screen recording / video processing channel methods.
   ValueChanged<Map<String, dynamic>>? _onRecordingStopped;
   VoidCallback? _onRecordingCancelled;
@@ -677,9 +688,24 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
   ValueChanged<bool>? _onRecordingMicMutedChanged;
   final Map<int, VideoPlayerListener> _videoPlayerListeners = {};
 
-  void setScrollingCallbacks({VoidCallback? onDone, VoidCallback? onCancel}) {
+  // Old implementation:
+  // void setScrollingCallbacks({VoidCallback? onDone, VoidCallback? onCancel}) {
+  //   _onScrollingDone = onDone;
+  //   _onScrollingCancel = onCancel;
+  //   _channel.setMethodCallHandler(_handleNativeMethodCall);
+  // }
+  void setScrollingCallbacks({
+    VoidCallback? onDone,
+    VoidCallback? onCancel,
+    ValueChanged<Map<String, dynamic>>? onProgress,
+    ValueChanged<Map<String, dynamic>>? onCompleted,
+    ValueChanged<String>? onError,
+  }) {
     _onScrollingDone = onDone;
     _onScrollingCancel = onCancel;
+    _onScrollingProgress = onProgress;
+    _onScrollingCompleted = onCompleted;
+    _onScrollingError = onError;
     _channel.setMethodCallHandler(_handleNativeMethodCall);
   }
 
@@ -728,6 +754,24 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
         _onScrollingDone?.call();
       case 'onScrollingCancel':
         _onScrollingCancel?.call();
+      // Gene - Nov, 20, 2026: Dispatch Rust native scrolling capture progress, completion, and error events.
+      case 'onScrollingProgress':
+        if (call.arguments is Map) {
+          _onScrollingProgress?.call(
+            Map<String, dynamic>.from(call.arguments as Map),
+          );
+        }
+      case 'onScrollingCompleted':
+        final map = call.arguments is Map
+            ? Map<String, dynamic>.from(call.arguments as Map)
+            : <String, dynamic>{};
+        _onScrollingCompleted?.call(map);
+      case 'onScrollingError':
+        final msg = call.arguments is Map
+            ? ((call.arguments as Map)['message'] as String?) ??
+                  'Scrolling capture failed'
+            : 'Scrolling capture failed';
+        _onScrollingError?.call(msg);
       // Gene - Nov, 13, 2026: Always forward onRecordingStopped even when arguments are null so ScreenRecordingController resets top-bar recording state on failure.
       // Old implementation:
       // case 'onRecordingStopped':
@@ -1237,6 +1281,78 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
       await _channel.invokeMethod('closeScrollingHud');
     } catch (e) {
       debugPrint('SnipSnap closeScrollingHud error: $e');
+    }
+  }
+
+  // Gene - Nov, 20, 2026: Native macOS/Windows Rust snipsnap_core scrolling capture session controls.
+  Future<bool> startScrollingCapture(
+    Rect rect, {
+    required String targetPath,
+    int maxDimension = 16000,
+    int axisMode = 0,
+  }) async {
+    if (!(Platform.isMacOS || Platform.isWindows)) return false;
+    try {
+      final ok = await _channel.invokeMethod<bool>('startScrollingCapture', {
+        'x': rect.left,
+        'y': rect.top,
+        'width': rect.width,
+        'height': rect.height,
+        'targetPath': targetPath,
+        'maxDimension': maxDimension,
+        'axisMode': axisMode,
+      });
+      return ok == true;
+    } catch (e) {
+      debugPrint('SnipSnap startScrollingCapture error: $e');
+      return false;
+    }
+  }
+
+  Future<void> setScrollingAutoMode(bool enabled) async {
+    if (!(Platform.isMacOS || Platform.isWindows)) return;
+    try {
+      await _channel.invokeMethod<void>('setScrollingAutoMode', {
+        'enabled': enabled,
+      });
+    } catch (e) {
+      debugPrint('SnipSnap setScrollingAutoMode error: $e');
+    }
+  }
+
+  Future<void> pauseScrollingCapture() async {
+    if (!(Platform.isMacOS || Platform.isWindows)) return;
+    try {
+      await _channel.invokeMethod<void>('pauseScrollingCapture');
+    } catch (e) {
+      debugPrint('SnipSnap pauseScrollingCapture error: $e');
+    }
+  }
+
+  Future<void> resumeScrollingCapture() async {
+    if (!(Platform.isMacOS || Platform.isWindows)) return;
+    try {
+      await _channel.invokeMethod<void>('resumeScrollingCapture');
+    } catch (e) {
+      debugPrint('SnipSnap resumeScrollingCapture error: $e');
+    }
+  }
+
+  Future<void> finishScrollingCapture() async {
+    if (!(Platform.isMacOS || Platform.isWindows)) return;
+    try {
+      await _channel.invokeMethod<void>('finishScrollingCapture');
+    } catch (e) {
+      debugPrint('SnipSnap finishScrollingCapture error: $e');
+    }
+  }
+
+  Future<void> cancelScrollingCapture() async {
+    if (!(Platform.isMacOS || Platform.isWindows)) return;
+    try {
+      await _channel.invokeMethod<void>('cancelScrollingCapture');
+    } catch (e) {
+      debugPrint('SnipSnap cancelScrollingCapture error: $e');
     }
   }
 }
