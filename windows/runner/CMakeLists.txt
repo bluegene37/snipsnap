@@ -86,8 +86,9 @@ find_program(CARGO_EXECUTABLE NAMES cargo PATHS "$ENV{USERPROFILE}/.cargo/bin" R
 set(SNIPSNAP_CORE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/Cargo.toml")
 set(SNIPSNAP_CORE_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/rust_target")
 set(SNIPSNAP_CORE_LIB "${SNIPSNAP_CORE_TARGET_DIR}/x86_64-pc-windows-msvc/release/snipsnap_core.lib")
+set(SNIPSNAP_CORE_DLL "${SNIPSNAP_CORE_TARGET_DIR}/x86_64-pc-windows-msvc/release/snipsnap_core.dll")
 add_custom_command(
-  OUTPUT "${SNIPSNAP_CORE_LIB}"
+  OUTPUT "${SNIPSNAP_CORE_LIB}" "${SNIPSNAP_CORE_DLL}"
   COMMAND "${CARGO_EXECUTABLE}" build --manifest-path "${SNIPSNAP_CORE_MANIFEST}" --release --target x86_64-pc-windows-msvc --target-dir "${SNIPSNAP_CORE_TARGET_DIR}"
   DEPENDS
     "${SNIPSNAP_CORE_MANIFEST}"
@@ -115,6 +116,14 @@ target_link_libraries(${BINARY_NAME} PRIVATE
 target_include_directories(${BINARY_NAME} PRIVATE
   "${CMAKE_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/include"
+)
+
+# Gene - Nov, 20, 2026: Copy snipsnap_core.dll beside snipsnap.exe so dart:ffi DynamicLibrary.open('snipsnap_core.dll') works seamlessly at runtime.
+add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${SNIPSNAP_CORE_DLL}"
+    "$<TARGET_FILE_DIR:${BINARY_NAME}>/snipsnap_core.dll"
+  COMMENT "Copying snipsnap_core.dll alongside executable"
 )
 
 # Run the Flutter tool portions of the build. This must not be removed.

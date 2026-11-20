@@ -7,7 +7,9 @@ license = "MIT"
 
 [lib]
 name = "snipsnap_core"
-crate-type = ["staticlib", "rlib"]
+# Gene - Nov, 20, 2026: Added cdylib alongside staticlib so Flutter dart:ffi tests & runtime dynamic loads work seamlessly alongside static linking.
+# crate-type = ["staticlib", "rlib"]
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [profile.release]
 opt-level = 3

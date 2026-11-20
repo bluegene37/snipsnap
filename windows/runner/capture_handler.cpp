@@ -4475,6 +4475,147 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           return;
         }
 
+        // Gene - Nov, 20, 2026: Worker-thread WIC PNG/JPEG encoders for RGBA pixel buffers edited via Rust FFI.
+        if (method == "saveRgbaToPng") {
+          std::string target = get_str("targetPath");
+          int w = static_cast<int>(get_int64("width", 0));
+          int h = static_cast<int>(get_int64("height", 0));
+          std::vector<uint8_t> rgba;
+          if (args) {
+            auto it = args->find(EncodableValue("bytes"));
+            if (it != args->end()) {
+              if (const auto* vec = std::get_if<std::vector<uint8_t>>(&it->second)) {
+                rgba = *vec;
+              }
+            }
+          }
+          if (target.empty() || w <= 0 || h <= 0 ||
+              rgba.size() < static_cast<size_t>(w) * h * 4) {
+            result->Success(EncodableValue(false));
+            return;
+          }
+          std::shared_ptr<CaptureMethodResult> shared_res(result.release());
+          std::wstring target_w = Utf8ToWide(target);
+          std::thread([pixels = std::move(rgba), w, h, target_w,
+                       shared_res]() mutable {
+            // Convert RGBA -> BGRA in-place before passing to WIC BGRA PNG encoder.
+            const size_t total = static_cast<size_t>(w) * h * 4;
+            for (size_t i = 0; i < total; i += 4) {
+              std::swap(pixels[i], pixels[i + 2]);
+            }
+            HRESULT co_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            bool did_init = SUCCEEDED(co_hr);
+            bool ok = SaveBgraToPngFile(pixels.data(), w, h, w * 4, target_w);
+            if (did_init) ::CoUninitialize();
+            PostToPlatformThread([shared_res, ok]() {
+              if (shared_res) shared_res->Success(EncodableValue(ok));
+            });
+          }).detach();
+          return;
+        }
+
+        if (method == "encodeRgbaToJpg") {
+          int w = static_cast<int>(get_int64("width", 0));
+          int h = static_cast<int>(get_int64("height", 0));
+          int quality = std::clamp(static_cast<int>(get_int64("quality", 90)), 10, 100);
+          std::vector<uint8_t> rgba;
+          if (args) {
+            auto it = args->find(EncodableValue("bytes"));
+            if (it != args->end()) {
+              if (const auto* vec = std::get_if<std::vector<uint8_t>>(&it->second)) {
+                rgba = *vec;
+              }
+            }
+          }
+          if (w <= 0 || h <= 0 || rgba.size() < static_cast<size_t>(w) * h * 4) {
+            result->Success(EncodableValue());
+            return;
+          }
+          std::shared_ptr<CaptureMethodResult> shared_res(result.release());
+          std::thread([pixels = std::move(rgba), w, h, quality,
+                       shared_res]() mutable {
+            HRESULT co_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            bool did_init = SUCCEEDED(co_hr);
+            std::vector<uint8_t> out_jpg;
+            do {
+              ComPtr<IWICImagingFactory> factory;
+              if (FAILED(::CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                                            CLSCTX_INPROC_SERVER,
+                                            IID_PPV_ARGS(&factory)))) {
+                break;
+              }
+              ComPtr<IStream> stream;
+              if (FAILED(::CreateStreamOnHGlobal(nullptr, TRUE, &stream))) break;
+              ComPtr<IWICBitmapEncoder> encoder;
+              if (FAILED(factory->CreateEncoder(GUID_ContainerFormatJpeg,
+                                                nullptr, &encoder))) {
+                break;
+              }
+              if (FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache))) {
+                break;
+              }
+              ComPtr<IWICBitmapFrameEncode> frame;
+              ComPtr<IPropertyBag2> props;
+              if (FAILED(encoder->CreateNewFrame(&frame, &props))) break;
+              if (props) {
+                PROPBAG2 opt = {};
+                opt.pstrName = const_cast<LPOLESTR>(L"ImageQuality");
+                VARIANT val;
+                ::VariantInit(&val);
+                val.vt = VT_R4;
+                val.fltVal = static_cast<float>(quality) / 100.0f;
+                props->Write(1, &opt, &val);
+              }
+              if (FAILED(frame->Initialize(props.Get()))) break;
+              if (FAILED(frame->SetSize(static_cast<UINT>(w), static_cast<UINT>(h)))) {
+                break;
+              }
+              WICPixelFormatGUID fmt = GUID_WICPixelFormat24bppBGR;
+              if (FAILED(frame->SetPixelFormat(&fmt))) break;
+
+              const size_t px_count = static_cast<size_t>(w) * h;
+              std::vector<uint8_t> bgr(px_count * 3);
+              for (size_t i = 0; i < px_count; ++i) {
+                bgr[i * 3 + 0] = pixels[i * 4 + 2];
+                bgr[i * 3 + 1] = pixels[i * 4 + 1];
+                bgr[i * 3 + 2] = pixels[i * 4 + 0];
+              }
+              UINT stride24 = static_cast<UINT>(w * 3);
+              if (FAILED(frame->WritePixels(static_cast<UINT>(h), stride24,
+                                            static_cast<UINT>(bgr.size()),
+                                            bgr.data()))) {
+                break;
+              }
+              if (FAILED(frame->Commit())) break;
+              if (FAILED(encoder->Commit())) break;
+
+              HGLOBAL hglobal = nullptr;
+              if (FAILED(::GetHGlobalFromStream(stream.Get(), &hglobal)) ||
+                  !hglobal) {
+                break;
+              }
+              SIZE_T sz = ::GlobalSize(hglobal);
+              void* ptr = ::GlobalLock(hglobal);
+              if (ptr && sz > 0) {
+                out_jpg.assign(static_cast<const uint8_t*>(ptr),
+                               static_cast<const uint8_t*>(ptr) + sz);
+              }
+              if (ptr) ::GlobalUnlock(hglobal);
+            } while (false);
+
+            if (did_init) ::CoUninitialize();
+            PostToPlatformThread([shared_res, out_jpg = std::move(out_jpg)]() mutable {
+              if (!shared_res) return;
+              if (!out_jpg.empty()) {
+                shared_res->Success(EncodableValue(out_jpg));
+              } else {
+                shared_res->Success(EncodableValue());
+              }
+            });
+          }).detach();
+          return;
+        }
+
         if (method == "copyImageToClipboard") {
           if (args) {
             auto bytes_it = args->find(EncodableValue("bytes"));

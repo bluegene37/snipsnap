@@ -28,6 +28,8 @@ class GallerySidebar extends StatefulWidget {
 
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
+  // Gene - Nov, 20, 2026: Dynamic upper zoom bound for long panoramic captures.
+  final double maxZoom;
 
   /// Bumped whenever the active capture's file is rewritten in place (crop,
   /// flatten, flood fill, undo/redo). Keys the active item's thumbnail so it
@@ -88,6 +90,8 @@ class GallerySidebar extends StatefulWidget {
     this.onRenameItem,
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
+    // Gene - Nov, 20, 2026: Dynamic upper zoom bound for long panoramic captures.
+    this.maxZoom = 4.0,
     this.imageRevision = 0,
     this.isOpen = true,
     this.onToggleCollapse,
@@ -498,10 +502,25 @@ class _GallerySidebarState extends State<GallerySidebar> {
                       // tone and stays that way at the reset button below.
                       color: widget.zoomScale > 0.2 ? t.ink : t.inkFaint,
                       tooltip: 'Zoom Out',
+                      // Gene - Nov, 20, 2026: Respect dynamic widget.maxZoom for panoramic images and scale steps above 400%.
+                      // Old implementation:
+                      // onPressed: widget.zoomScale > 0.2
+                      //     ? () => widget.onZoomScaleChanged!(
+                      //         (widget.zoomScale - 0.25).clamp(0.2, 4.0),
+                      //       )
+                      //     : null,
                       onPressed: widget.zoomScale > 0.2
-                          ? () => widget.onZoomScaleChanged!(
-                              (widget.zoomScale - 0.25).clamp(0.2, 4.0),
-                            )
+                          ? () {
+                              final upper = widget.maxZoom >= 0.2
+                                  ? widget.maxZoom
+                                  : 4.0;
+                              final step = widget.zoomScale > 4.25
+                                  ? widget.zoomScale * 0.2
+                                  : 0.25;
+                              widget.onZoomScaleChanged!(
+                                (widget.zoomScale - step).clamp(0.2, upper),
+                              );
+                            }
                           : null,
                       constraints: const BoxConstraints(
                         minWidth: 24,
@@ -513,22 +532,54 @@ class _GallerySidebarState extends State<GallerySidebar> {
                       width: 200,
                       child: SliderTheme(
                         data: sliderThemeData,
+                        // Old implementation:
+                        // child: Slider(
+                        //   value: widget.zoomScale.clamp(0.2, 4.0),
+                        //   min: 0.2,
+                        //   max: 4.0,
+                        //   onChanged: widget.onZoomScaleChanged,
+                        // ),
                         child: Slider(
-                          value: widget.zoomScale.clamp(0.2, 4.0),
+                          value: widget.zoomScale.clamp(
+                            0.2,
+                            widget.maxZoom >= 0.2 ? widget.maxZoom : 4.0,
+                          ),
                           min: 0.2,
-                          max: 4.0,
+                          max: widget.maxZoom >= 0.2 ? widget.maxZoom : 4.0,
                           onChanged: widget.onZoomScaleChanged,
                         ),
                       ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.add_rounded, size: 14),
-                      color: widget.zoomScale < 4.0 ? t.ink : t.inkFaint,
+                      // Old implementation:
+                      // color: widget.zoomScale < 4.0 ? t.ink : t.inkFaint,
+                      // tooltip: 'Zoom In',
+                      // onPressed: widget.zoomScale < 4.0
+                      //     ? () => widget.onZoomScaleChanged!(
+                      //         (widget.zoomScale + 0.25).clamp(0.2, 4.0),
+                      //       )
+                      //     : null,
+                      color:
+                          widget.zoomScale <
+                              (widget.maxZoom >= 0.2 ? widget.maxZoom : 4.0)
+                          ? t.ink
+                          : t.inkFaint,
                       tooltip: 'Zoom In',
-                      onPressed: widget.zoomScale < 4.0
-                          ? () => widget.onZoomScaleChanged!(
-                              (widget.zoomScale + 0.25).clamp(0.2, 4.0),
-                            )
+                      onPressed:
+                          widget.zoomScale <
+                              (widget.maxZoom >= 0.2 ? widget.maxZoom : 4.0)
+                          ? () {
+                              final upper = widget.maxZoom >= 0.2
+                                  ? widget.maxZoom
+                                  : 4.0;
+                              final step = widget.zoomScale >= 4.0
+                                  ? widget.zoomScale * 0.25
+                                  : 0.25;
+                              widget.onZoomScaleChanged!(
+                                (widget.zoomScale + step).clamp(0.2, upper),
+                              );
+                            }
                           : null,
                       constraints: const BoxConstraints(
                         minWidth: 24,

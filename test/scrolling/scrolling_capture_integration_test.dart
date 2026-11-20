@@ -452,7 +452,7 @@ void main() {
 
   group('Panoramic Initial Viewport Auto-Zoom', () {
     test(
-      'fits tall scrolling capture to width top-aligned without exceeding maxZoom',
+      'fits tall scrolling capture to 1:1 native pixels top-aligned within dynamic maxZoom',
       () {
         final matrix = computeInitialPanoramicTransform(
           viewportSize: const Size(1200, 800),
@@ -460,23 +460,34 @@ void main() {
         );
         expect(matrix, isNotNull);
         final scale = matrix!.getMaxScaleOnAxis();
-        expect(scale, greaterThan(1.5));
-        expect(scale, lessThanOrEqualTo(4.0));
-        expect(matrix.storage[13], 0.0); // Top-aligned
+        final effectiveMax = computeEffectiveMaxZoom(
+          viewportSize: const Size(1200, 800),
+          imageSize: const Size(1000, 6000),
+        );
+        expect(scale, greaterThan(4.0));
+        expect(scale, lessThanOrEqualTo(effectiveMax));
+        // Top of the padded image rect (y = 20) lands flush at viewport y = 20.
+        const fitScale = 760.0 / 6000.0;
+        const nativeCap = 1.0 / fitScale;
+        expect(scale, closeTo(nativeCap, 0.02));
+        expect(20.0 * scale + matrix.storage[13], closeTo(20.0, 0.1));
       },
     );
 
     test(
       'caps tall capture initial zoom at 1:1 native pixels to prevent blur',
       () {
-        // 400x1200 in 1200x800 => fitScale = 800/1200 = 2/3, native 1:1 = 1.5x
+        // 400x1200 in 1200x760 padded canvas => fitScale = 760/1200, native 1:1 = 1200/760
         final matrix = computeInitialPanoramicTransform(
           viewportSize: const Size(1200, 800),
           imageSize: const Size(400, 1200),
         );
         expect(matrix, isNotNull);
-        expect(matrix!.getMaxScaleOnAxis(), closeTo(1.5, 0.01));
-        expect(matrix.storage[13], 0.0);
+        expect(matrix!.getMaxScaleOnAxis(), closeTo(1200.0 / 760.0, 0.02));
+        expect(
+          20.0 * matrix.getMaxScaleOnAxis() + matrix.storage[13],
+          closeTo(20.0, 0.1),
+        );
       },
     );
 

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image/image.dart' as img;
@@ -8,7 +9,9 @@ import '../models/capture_item.dart';
 // Gene - Nov, 08, 2026: Imported ImageHeaderParser for <0.1ms header-only dimension reading during history scan.
 import '../utils/image_header_parser.dart';
 
+import 'capture_service.dart';
 import 'database_service.dart';
+import 'render_service.dart';
 
 /// `compute` entry point for the JPEG export transcode. Top-level because a
 /// closure or instance method cannot cross an isolate boundary. Falls back to
@@ -56,13 +59,41 @@ class StorageService {
 
     if (isJpg) {
       try {
-        // Decode + re-encode of a full-resolution capture, so it runs on a
-        // worker isolate: on the UI isolate this blocked the frame that opened
-        // the save dialog.
-        bytesToSave = await compute(_transcodeToJpg, (
-          bytes: Uint8List.fromList(bytes),
-          quality: jpgQuality,
-        ));
+        // Gene - Nov, 20, 2026: Prefer native OS ImageIO/WIC JPEG encoding when available on macOS/Windows, falling back to Dart isolate transcode.
+        // Old implementation:
+        // bytesToSave = await compute(_transcodeToJpg, (
+        //   bytes: Uint8List.fromList(bytes),
+        //   quality: jpgQuality,
+        // ));
+        Uint8List? nativeJpg;
+        if (Platform.isMacOS || Platform.isWindows) {
+          final decodedUi = await RenderService.decodeImageBytes(
+            Uint8List.fromList(bytes),
+          );
+          if (decodedUi != null) {
+            try {
+              final rawRgba = await decodedUi.toByteData(
+                format: ui.ImageByteFormat.rawRgba,
+              );
+              if (rawRgba != null) {
+                nativeJpg = await CaptureService.encodeRgbaToJpg(
+                  rgba: rawRgba.buffer.asUint8List(),
+                  width: decodedUi.width,
+                  height: decodedUi.height,
+                  quality: jpgQuality,
+                );
+              }
+            } finally {
+              decodedUi.dispose();
+            }
+          }
+        }
+        bytesToSave =
+            nativeJpg ??
+            await compute(_transcodeToJpg, (
+              bytes: Uint8List.fromList(bytes),
+              quality: jpgQuality,
+            ));
       } catch (e) {
         debugPrint('SnipSnap JPG encode error: $e');
       }

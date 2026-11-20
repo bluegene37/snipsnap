@@ -1,7 +1,10 @@
 // Gene - Nov, 20, 2026: Panic-safe C ABI entry points for SnipSnap Rust native core.
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use crate::image_ops::{flood_fill_rgba, RgbaColor};
+use crate::image_ops::{
+    box_blur_region_rgba, composite_rgba, crop_rgba, erase_rect_rgba, flood_fill_rgba,
+    pixelate_region_rgba, resize_rgba, RgbaColor,
+};
 use crate::stitcher::{PushResult, ScrollAxis, ScrollStitcher, StitchStatus};
 
 #[repr(C)]
@@ -222,4 +225,187 @@ pub extern "C" fn snipsnap_flood_fill_rgba(
         )
     }));
     res.unwrap_or(false)
+}
+
+// Gene - Nov, 20, 2026: Panic-safe FFI wrappers for Rust crop, erase, composite, resize, pixelate, and box blur.
+
+#[no_mangle]
+pub extern "C" fn snipsnap_crop_rgba(
+    src: *const u8,
+    src_w: i32,
+    src_h: i32,
+    crop_x: i32,
+    crop_y: i32,
+    crop_w: i32,
+    crop_h: i32,
+    dst: *mut u8,
+) -> bool {
+    if src.is_null()
+        || dst.is_null()
+        || src_w <= 0
+        || src_h <= 0
+        || crop_x < 0
+        || crop_y < 0
+        || crop_w <= 0
+        || crop_h <= 0
+    {
+        return false;
+    }
+    let sw = src_w as usize;
+    let sh = src_h as usize;
+    let cx = crop_x as usize;
+    let cy = crop_y as usize;
+    let cw = crop_w as usize;
+    let ch = crop_h as usize;
+    let Some(src_len) = sw.checked_mul(sh).and_then(|n| n.checked_mul(4)) else {
+        return false;
+    };
+    let Some(dst_len) = cw.checked_mul(ch).and_then(|n| n.checked_mul(4)) else {
+        return false;
+    };
+    catch_unwind(AssertUnwindSafe(|| {
+        let src_slice = unsafe { std::slice::from_raw_parts(src, src_len) };
+        let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst, dst_len) };
+        crop_rgba(src_slice, sw, sh, cx, cy, cw, ch, dst_slice)
+    }))
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn snipsnap_erase_rect_rgba(
+    rgba: *mut u8,
+    width: i32,
+    height: i32,
+    rect_x: i32,
+    rect_y: i32,
+    rect_w: i32,
+    rect_h: i32,
+) -> bool {
+    if rgba.is_null() || width <= 0 || height <= 0 || rect_w <= 0 || rect_h <= 0 {
+        return false;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let Some(len) = w.checked_mul(h).and_then(|n| n.checked_mul(4)) else {
+        return false;
+    };
+    catch_unwind(AssertUnwindSafe(|| {
+        let slice = unsafe { std::slice::from_raw_parts_mut(rgba, len) };
+        erase_rect_rgba(slice, w, h, rect_x, rect_y, rect_w, rect_h)
+    }))
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn snipsnap_composite_rgba(
+    dst: *mut u8,
+    dst_w: i32,
+    dst_h: i32,
+    src: *const u8,
+    src_w: i32,
+    src_h: i32,
+    dst_x: i32,
+    dst_y: i32,
+) -> bool {
+    if dst.is_null() || src.is_null() || dst_w <= 0 || dst_h <= 0 || src_w <= 0 || src_h <= 0 {
+        return false;
+    }
+    let dw = dst_w as usize;
+    let dh = dst_h as usize;
+    let sw = src_w as usize;
+    let sh = src_h as usize;
+    let Some(dst_len) = dw.checked_mul(dh).and_then(|n| n.checked_mul(4)) else {
+        return false;
+    };
+    let Some(src_len) = sw.checked_mul(sh).and_then(|n| n.checked_mul(4)) else {
+        return false;
+    };
+    catch_unwind(AssertUnwindSafe(|| {
+        let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst, dst_len) };
+        let src_slice = unsafe { std::slice::from_raw_parts(src, src_len) };
+        composite_rgba(dst_slice, dw, dh, src_slice, sw, sh, dst_x, dst_y)
+    }))
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn snipsnap_resize_rgba(
+    src: *const u8,
+    src_w: i32,
+    src_h: i32,
+    dst: *mut u8,
+    dst_w: i32,
+    dst_h: i32,
+) -> bool {
+    if src.is_null() || dst.is_null() || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0 {
+        return false;
+    }
+    let sw = src_w as usize;
+    let sh = src_h as usize;
+    let dw = dst_w as usize;
+    let dh = dst_h as usize;
+    let Some(src_len) = sw.checked_mul(sh).and_then(|n| n.checked_mul(4)) else {
+        return false;
+    };
+    let Some(dst_len) = dw.checked_mul(dh).and_then(|n| n.checked_mul(4)) else {
+        return false;
+    };
+    catch_unwind(AssertUnwindSafe(|| {
+        let src_slice = unsafe { std::slice::from_raw_parts(src, src_len) };
+        let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst, dst_len) };
+        resize_rgba(src_slice, sw, sh, dst_slice, dw, dh)
+    }))
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn snipsnap_pixelate_region_rgba(
+    rgba: *mut u8,
+    width: i32,
+    height: i32,
+    rect_x: i32,
+    rect_y: i32,
+    rect_w: i32,
+    rect_h: i32,
+    block_size: i32,
+) -> bool {
+    if rgba.is_null() || width <= 0 || height <= 0 || rect_w <= 0 || rect_h <= 0 {
+        return false;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let Some(len) = w.checked_mul(h).and_then(|n| n.checked_mul(4)) else {
+        return false;
+    };
+    catch_unwind(AssertUnwindSafe(|| {
+        let slice = unsafe { std::slice::from_raw_parts_mut(rgba, len) };
+        pixelate_region_rgba(slice, w, h, rect_x, rect_y, rect_w, rect_h, block_size)
+    }))
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn snipsnap_box_blur_region_rgba(
+    rgba: *mut u8,
+    width: i32,
+    height: i32,
+    rect_x: i32,
+    rect_y: i32,
+    rect_w: i32,
+    rect_h: i32,
+    radius: i32,
+) -> bool {
+    if rgba.is_null() || width <= 0 || height <= 0 || rect_w <= 0 || rect_h <= 0 {
+        return false;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let Some(len) = w.checked_mul(h).and_then(|n| n.checked_mul(4)) else {
+        return false;
+    };
+    catch_unwind(AssertUnwindSafe(|| {
+        let slice = unsafe { std::slice::from_raw_parts_mut(rgba, len) };
+        box_blur_region_rgba(slice, w, h, rect_x, rect_y, rect_w, rect_h, radius)
+    }))
+    .unwrap_or(false)
 }

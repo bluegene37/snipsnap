@@ -356,6 +356,8 @@ class _MainScreenState extends State<MainScreen> {
   final Map<CanvasTool, ToolProperties> _toolPropertiesMap =
       ToolProperties.createDefaults();
   double _zoomScale = 1.0;
+  // Gene - Nov, 20, 2026: Dynamic upper zoom limit computed by EditorCanvas for long panoramic captures.
+  double _maxZoomScale = 4.0;
   int _stepCounter = 1;
   bool _isSidebarOpen = true;
   bool _isPropertiesOpen = true;
@@ -2214,6 +2216,9 @@ class _MainScreenState extends State<MainScreen> {
       _undoStack.clear();
       _redoStack.clear();
       _stepCounter = 1;
+      // Gene - Nov, 20, 2026: Reset zoom bounds when switching to a newly added capture.
+      _zoomScale = 1.0;
+      _maxZoomScale = 4.0;
     });
     // Gene - Nov, 13, 2026: Persist only the newly recorded capture item instead of rewriting the entire _captures library (which caused O(N) SQLite churn and concurrent iteration races).
     // unawaited(StorageService.saveHistory(_captures));
@@ -2989,6 +2994,9 @@ class _MainScreenState extends State<MainScreen> {
       _undoStack.clear();
       _redoStack.clear();
       _stepCounter = 1;
+      // Gene - Nov, 20, 2026: Reset zoom bounds when switching to a newly added capture.
+      _zoomScale = 1.0;
+      _maxZoomScale = 4.0;
     });
     // Persisted in the background: the capture is already on screen and usable,
     // and blocking on SQLite here would stall the frame that shows it.
@@ -3761,6 +3769,12 @@ class _MainScreenState extends State<MainScreen> {
       repaintBoundaryKey: _repaintKey,
       zoomScale: _zoomScale,
       onZoomScaleChanged: (val) => setState(() => _zoomScale = val),
+      // Gene - Nov, 20, 2026: Keep header & sidebar zoom bounds synchronized with active capture resolution.
+      onMaxZoomChanged: (maxZoom) {
+        if ((_maxZoomScale - maxZoom).abs() > 0.01) {
+          setState(() => _maxZoomScale = maxZoom);
+        }
+      },
       imageRevision: _imageRevision,
       historyRevision: _historyRevision,
       onQuickSnipArea: _handleInteractiveCapture,
@@ -3882,6 +3896,8 @@ class _MainScreenState extends State<MainScreen> {
                         zoomScale: _zoomScale,
                         onZoomScaleChanged: (val) =>
                             setState(() => _zoomScale = val),
+                        // Gene - Nov, 20, 2026: Propagate dynamic upper zoom limit to header controls.
+                        maxZoom: _maxZoomScale,
                         // updateController: _updateController,
                         // Gene - Oct, 14, 2026: Hide the GitHub update button
                         // in Microsoft Store builds (Store handles updates).
@@ -4326,6 +4342,8 @@ class _MainScreenState extends State<MainScreen> {
                       zoomScale: _zoomScale,
                       onZoomScaleChanged: (val) =>
                           setState(() => _zoomScale = val),
+                      // Gene - Nov, 20, 2026: Propagate dynamic upper zoom limit to sidebar slider.
+                      maxZoom: _maxZoomScale,
                       isOpen: _isSidebarOpen,
                       // Gene - Nov, 20, 2026: Wire paginated DB loading when GallerySidebar scrolls near the end.
                       onLoadMore: _hasMoreHistory ? _loadMoreHistory : null,
@@ -4336,6 +4354,7 @@ class _MainScreenState extends State<MainScreen> {
                         setState(() {
                           // A different bitmap: nothing cached for the old one can
                           // describe it, and the open panel is about the old one.
+                          final switched = _activeCapture?.id != item.id;
                           _resetOcr();
                           _activeCapture = item;
                           _annotations = List.from(item.annotations);
@@ -4343,6 +4362,11 @@ class _MainScreenState extends State<MainScreen> {
                           _redoStack.clear();
                           _stepCounter =
                               _findMaxStepNumber(item.annotations) + 1;
+                          // Gene - Nov, 20, 2026: Reset zoom state when selecting a different capture.
+                          if (switched) {
+                            _zoomScale = 1.0;
+                            _maxZoomScale = 4.0;
+                          }
                         });
                         DatabaseService.setSetting(
                           'active_capture_id',
@@ -4378,6 +4402,9 @@ class _MainScreenState extends State<MainScreen> {
                             _stepCounter = _activeCapture != null
                                 ? _findMaxStepNumber(_annotations) + 1
                                 : 1;
+                            // Gene - Nov, 20, 2026: Reset zoom state when active capture is deleted.
+                            _zoomScale = 1.0;
+                            _maxZoomScale = 4.0;
                           }
                         });
                         if (_activeCapture != null) {

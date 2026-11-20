@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:image/image.dart' as img;
 
+import '../native/rust_image_core.dart';
+import '../render_service.dart';
 import 'channel_ocr_engine.dart';
 import 'ocr_engine.dart';
 import 'unavailable_ocr_engine.dart';
@@ -80,6 +84,82 @@ class OcrService {
         final result = await engine.recognize(sourceBytes);
         _cache[cacheKey] = result;
         return result;
+      }
+
+      // Gene - Nov, 20, 2026: Fast native Skia decode + Rust FFI cropRgba path avoiding slow pure-Dart PNG decode/re-encode on large captures.
+      // Old implementation:
+      // final decoded = await compute(img.decodeImage, sourceBytes);
+      // if (decoded == null) return OcrResult.empty;
+      // final x = regionPx.left.round().clamp(0, decoded.width);
+      // ...
+      // final cropped = img.copyCrop(decoded, x: x, y: y, width: w, height: h);
+      // final result = await engine.recognize(
+      //   Uint8List.fromList(await compute(img.encodePng, cropped)),
+      // );
+      if (RustImageCore.isAvailable) {
+        final uiImg = await RenderService.decodeImageBytes(sourceBytes);
+        if (uiImg != null) {
+          try {
+            final fullW = uiImg.width;
+            final fullH = uiImg.height;
+            final x = regionPx.left.round().clamp(0, fullW);
+            final y = regionPx.top.round().clamp(0, fullH);
+            final right = regionPx.right.round().clamp(0, fullW);
+            final bottom = regionPx.bottom.round().clamp(0, fullH);
+            final w = right - x;
+            final h = bottom - y;
+            if (w < minRegionSide || h < minRegionSide) return OcrResult.empty;
+
+            final rawData = await uiImg.toByteData(
+              format: ui.ImageByteFormat.rawRgba,
+            );
+            if (rawData != null) {
+              final croppedRgba = RustImageCore.cropRgba(
+                src: rawData.buffer.asUint8List(),
+                srcWidth: fullW,
+                srcHeight: fullH,
+                cropX: x,
+                cropY: y,
+                cropWidth: w,
+                cropHeight: h,
+              );
+              if (croppedRgba != null) {
+                final completer = Completer<ui.Image>();
+                ui.decodeImageFromPixels(
+                  croppedRgba,
+                  w,
+                  h,
+                  ui.PixelFormat.rgba8888,
+                  completer.complete,
+                );
+                final croppedImg = await completer.future;
+                try {
+                  final croppedPng = await croppedImg.toByteData(
+                    format: ui.ImageByteFormat.png,
+                  );
+                  if (croppedPng != null) {
+                    final result = await engine.recognize(
+                      croppedPng.buffer.asUint8List(),
+                    );
+                    final fullImageSize = Size(
+                      fullW.toDouble(),
+                      fullH.toDouble(),
+                    );
+                    return _offset(
+                      result,
+                      Offset(x.toDouble(), y.toDouble()),
+                      fullImageSize,
+                    );
+                  }
+                } finally {
+                  croppedImg.dispose();
+                }
+              }
+            }
+          } finally {
+            uiImg.dispose();
+          }
+        }
       }
 
       final decoded = await compute(img.decodeImage, sourceBytes);

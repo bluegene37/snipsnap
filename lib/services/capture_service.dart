@@ -1355,4 +1355,46 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
       debugPrint('SnipSnap cancelScrollingCapture error: $e');
     }
   }
+
+  // Gene - Nov, 20, 2026: Native OS ImageIO / WIC fast RGBA->PNG and RGBA->JPEG encoders.
+  static Future<bool> saveRgbaToPng({
+    required Uint8List rgba,
+    required int width,
+    required int height,
+    required String targetPath,
+  }) async {
+    if (!(Platform.isMacOS || Platform.isWindows)) return false;
+    try {
+      final ok = await _channel.invokeMethod<bool>('saveRgbaToPng', {
+        'bytes': rgba,
+        'width': width,
+        'height': height,
+        'targetPath': targetPath,
+      });
+      return ok == true;
+    } catch (e) {
+      debugPrint('SnipSnap saveRgbaToPng error: $e');
+      return false;
+    }
+  }
+
+  static Future<Uint8List?> encodeRgbaToJpg({
+    required Uint8List rgba,
+    required int width,
+    required int height,
+    int quality = 90,
+  }) async {
+    if (!(Platform.isMacOS || Platform.isWindows)) return null;
+    try {
+      return await _channel.invokeMethod<Uint8List?>('encodeRgbaToJpg', {
+        'bytes': rgba,
+        'width': width,
+        'height': height,
+        'quality': quality.clamp(10, 100),
+      });
+    } catch (e) {
+      debugPrint('SnipSnap encodeRgbaToJpg error: $e');
+      return null;
+    }
+  }
 }

@@ -334,6 +334,104 @@ class CapturePlugin: NSObject {
       scrollingEngine?.cancel()
       result(true)
 
+    // Gene - Nov, 20, 2026: Off-main-thread native ImageIO codecs for RGBA->PNG and RGBA->JPEG used after fast Rust FFI pixel edits.
+    case "saveRgbaToPng":
+      guard
+        let args = call.arguments as? [String: Any],
+        let typed = args["bytes"] as? FlutterStandardTypedData,
+        let width = (args["width"] as? NSNumber)?.intValue ?? (args["width"] as? Int),
+        let height = (args["height"] as? NSNumber)?.intValue ?? (args["height"] as? Int),
+        let targetPath = args["targetPath"] as? String,
+        width > 0, height > 0, typed.data.count >= width * height * 4
+      else {
+        result(false)
+        return
+      }
+      let pngData = typed.data
+      DispatchQueue.global(qos: .userInitiated).async {
+        let ok = autoreleasepool { () -> Bool in
+          guard let provider = CGDataProvider(data: pngData as CFData) else { return false }
+          let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.last.rawValue
+          guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: bitmapInfo),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+          ) else { return false }
+          let url = URL(fileURLWithPath: targetPath)
+          guard let dest = CGImageDestinationCreateWithURL(
+            url as CFURL,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+          ) else { return false }
+          CGImageDestinationAddImage(dest, cgImage, nil)
+          return CGImageDestinationFinalize(dest)
+        }
+        DispatchQueue.main.async {
+          result(ok)
+        }
+      }
+
+    case "encodeRgbaToJpg":
+      guard
+        let args = call.arguments as? [String: Any],
+        let typed = args["bytes"] as? FlutterStandardTypedData,
+        let width = (args["width"] as? NSNumber)?.intValue ?? (args["width"] as? Int),
+        let height = (args["height"] as? NSNumber)?.intValue ?? (args["height"] as? Int),
+        width > 0, height > 0, typed.data.count >= width * height * 4
+      else {
+        result(nil)
+        return
+      }
+      let qualityInt = (args["quality"] as? NSNumber)?.intValue ?? (args["quality"] as? Int) ?? 90
+      let q = max(0.1, min(1.0, Double(qualityInt) / 100.0))
+      let jpgSource = typed.data
+      DispatchQueue.global(qos: .userInitiated).async {
+        let outData: Data? = autoreleasepool {
+          guard let provider = CGDataProvider(data: jpgSource as CFData) else { return nil }
+          let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue
+          guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: bitmapInfo),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+          ) else { return nil }
+          let mutable = NSMutableData()
+          guard let dest = CGImageDestinationCreateWithData(
+            mutable as CFMutableData,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+          ) else { return nil }
+          let props: CFDictionary = [kCGImageDestinationLossyCompressionQuality: q] as CFDictionary
+          CGImageDestinationAddImage(dest, cgImage, props)
+          guard CGImageDestinationFinalize(dest) else { return nil }
+          return mutable as Data
+        }
+        DispatchQueue.main.async {
+          if let outData = outData {
+            result(FlutterStandardTypedData(bytes: outData))
+          } else {
+            result(nil)
+          }
+        }
+      }
+
     // Gene - Nov, 08, 2026: Added native NSPasteboard clipboard operations (eliminating osascript subprocess overhead) and native screen recording / video frame / trim methods.
     case "copyImageToClipboard":
       guard let args = call.arguments as? [String: Any] else {

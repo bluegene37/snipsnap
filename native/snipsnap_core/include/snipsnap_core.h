@@ -81,6 +81,58 @@ bool snipsnap_flood_fill_rgba(uint8_t* rgba,
                               float opacity,
                               bool is_global);
 
+// Gene - Nov, 20, 2026: Fast Rust pixel manipulation operations exported for Dart FFI across desktop platforms.
+bool snipsnap_crop_rgba(const uint8_t* src,
+                        int32_t src_w,
+                        int32_t src_h,
+                        int32_t crop_x,
+                        int32_t crop_y,
+                        int32_t crop_w,
+                        int32_t crop_h,
+                        uint8_t* dst);
+
+bool snipsnap_erase_rect_rgba(uint8_t* rgba,
+                              int32_t width,
+                              int32_t height,
+                              int32_t rect_x,
+                              int32_t rect_y,
+                              int32_t rect_w,
+                              int32_t rect_h);
+
+bool snipsnap_composite_rgba(uint8_t* dst,
+                             int32_t dst_w,
+                             int32_t dst_h,
+                             const uint8_t* src,
+                             int32_t src_w,
+                             int32_t src_h,
+                             int32_t dst_x,
+                             int32_t dst_y);
+
+bool snipsnap_resize_rgba(const uint8_t* src,
+                          int32_t src_w,
+                          int32_t src_h,
+                          uint8_t* dst,
+                          int32_t dst_w,
+                          int32_t dst_h);
+
+bool snipsnap_pixelate_region_rgba(uint8_t* rgba,
+                                   int32_t width,
+                                   int32_t height,
+                                   int32_t rect_x,
+                                   int32_t rect_y,
+                                   int32_t rect_w,
+                                   int32_t rect_h,
+                                   int32_t block_size);
+
+bool snipsnap_box_blur_region_rgba(uint8_t* rgba,
+                                   int32_t width,
+                                   int32_t height,
+                                   int32_t rect_x,
+                                   int32_t rect_y,
+                                   int32_t rect_w,
+                                   int32_t rect_h,
+                                   int32_t radius);
+
 #ifdef __cplusplus
 }
 #endif

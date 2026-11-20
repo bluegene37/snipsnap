@@ -634,9 +634,23 @@
 					"$(inherited)",
 					"$(BUILT_PRODUCTS_DIR)",
 				);
+				/* Gene - Nov, 20, 2026: Force-load Rust snipsnap_core and root all 7 Dart FFI C ABI pixel-op symbols against DEAD_CODE_STRIPPING (-dead_strip). */
+				/* Old:
 				OTHER_LDFLAGS = (
 					"$(inherited)",
-					"-lsnipsnap_core",
+					"-Wl,-force_load,$(BUILT_PRODUCTS_DIR)/libsnipsnap_core.a",
+				);
+				*/
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-Wl,-force_load,$(BUILT_PRODUCTS_DIR)/libsnipsnap_core.a",
+					"-Wl,-u,_snipsnap_flood_fill_rgba",
+					"-Wl,-u,_snipsnap_crop_rgba",
+					"-Wl,-u,_snipsnap_erase_rect_rgba",
+					"-Wl,-u,_snipsnap_composite_rgba",
+					"-Wl,-u,_snipsnap_resize_rgba",
+					"-Wl,-u,_snipsnap_pixelate_region_rgba",
+					"-Wl,-u,_snipsnap_box_blur_region_rgba",
 				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -783,9 +797,23 @@
 					"$(inherited)",
 					"$(BUILT_PRODUCTS_DIR)",
 				);
+				/* Gene - Nov, 20, 2026: Force-load Rust snipsnap_core and root all 7 Dart FFI C ABI pixel-op symbols against DEAD_CODE_STRIPPING (-dead_strip). */
+				/* Old:
 				OTHER_LDFLAGS = (
 					"$(inherited)",
-					"-lsnipsnap_core",
+					"-Wl,-force_load,$(BUILT_PRODUCTS_DIR)/libsnipsnap_core.a",
+				);
+				*/
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-Wl,-force_load,$(BUILT_PRODUCTS_DIR)/libsnipsnap_core.a",
+					"-Wl,-u,_snipsnap_flood_fill_rgba",
+					"-Wl,-u,_snipsnap_crop_rgba",
+					"-Wl,-u,_snipsnap_erase_rect_rgba",
+					"-Wl,-u,_snipsnap_composite_rgba",
+					"-Wl,-u,_snipsnap_resize_rgba",
+					"-Wl,-u,_snipsnap_pixelate_region_rgba",
+					"-Wl,-u,_snipsnap_box_blur_region_rgba",
 				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
@@ -819,9 +847,23 @@
 					"$(inherited)",
 					"$(BUILT_PRODUCTS_DIR)",
 				);
+				/* Gene - Nov, 20, 2026: Force-load Rust snipsnap_core and root all 7 Dart FFI C ABI pixel-op symbols against DEAD_CODE_STRIPPING (-dead_strip). */
+				/* Old:
 				OTHER_LDFLAGS = (
 					"$(inherited)",
-					"-lsnipsnap_core",
+					"-Wl,-force_load,$(BUILT_PRODUCTS_DIR)/libsnipsnap_core.a",
+				);
+				*/
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-Wl,-force_load,$(BUILT_PRODUCTS_DIR)/libsnipsnap_core.a",
+					"-Wl,-u,_snipsnap_flood_fill_rgba",
+					"-Wl,-u,_snipsnap_crop_rgba",
+					"-Wl,-u,_snipsnap_erase_rect_rgba",
+					"-Wl,-u,_snipsnap_composite_rgba",
+					"-Wl,-u,_snipsnap_resize_rgba",
+					"-Wl,-u,_snipsnap_pixelate_region_rgba",
+					"-Wl,-u,_snipsnap_box_blur_region_rgba",
 				);
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";

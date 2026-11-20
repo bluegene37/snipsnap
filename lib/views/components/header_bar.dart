@@ -70,6 +70,8 @@ class HeaderBar extends StatelessWidget {
   final Map<AppShortcutAction, CustomShortcut>? shortcuts;
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
+  // Gene - Nov, 20, 2026: Dynamic upper zoom bound for long panoramic captures.
+  final double maxZoom;
 
   /// When set, a "Check for Updates" button appears next to the theme
   /// toggle. Null keeps the header updater-free (e.g. in isolated tests).
@@ -131,6 +133,8 @@ class HeaderBar extends StatelessWidget {
     this.shortcuts,
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
+    // Gene - Nov, 20, 2026: Dynamic upper zoom bound for long panoramic captures.
+    this.maxZoom = 4.0,
     this.updateController,
   });
 
@@ -732,9 +736,16 @@ class HeaderBar extends StatelessWidget {
   }
 
   Widget _buildZoomGroup(SnipTheme t) {
+    // Gene - Nov, 20, 2026: Use dynamic maxZoom and proportional steps above 400% for panoramic captures.
+    // Old implementation:
+    // final canZoomOut = zoomScale > 0.2;
+    // final canZoomIn = zoomScale < 4.0;
+    final effectiveMaxZoom = maxZoom >= 0.2 ? maxZoom : 4.0;
     final canZoomOut = zoomScale > 0.2;
-    final canZoomIn = zoomScale < 4.0;
+    final canZoomIn = zoomScale < effectiveMaxZoom;
     final isDefaultZoom = (zoomScale - 1.0).abs() < 0.01;
+    final outStep = zoomScale > 4.25 ? zoomScale * 0.2 : 0.25;
+    final inStep = zoomScale >= 4.0 ? zoomScale * 0.25 : 0.25;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -743,8 +754,14 @@ class HeaderBar extends StatelessWidget {
           icon: Icons.remove_rounded,
           tooltip: 'Zoom Out',
           enabled: canZoomOut,
+          // Old implementation:
+          // onPressed: canZoomOut
+          //     ? () => onZoomScaleChanged!((zoomScale - 0.25).clamp(0.2, 4.0))
+          //     : null,
           onPressed: canZoomOut
-              ? () => onZoomScaleChanged!((zoomScale - 0.25).clamp(0.2, 4.0))
+              ? () => onZoomScaleChanged!(
+                  (zoomScale - outStep).clamp(0.2, effectiveMaxZoom),
+                )
               : null,
         ),
         const SizedBox(width: 6),
@@ -759,8 +776,14 @@ class HeaderBar extends StatelessWidget {
           icon: Icons.add_rounded,
           tooltip: 'Zoom In',
           enabled: canZoomIn,
+          // Old implementation:
+          // onPressed: canZoomIn
+          //     ? () => onZoomScaleChanged!((zoomScale + 0.25).clamp(0.2, 4.0))
+          //     : null,
           onPressed: canZoomIn
-              ? () => onZoomScaleChanged!((zoomScale + 0.25).clamp(0.2, 4.0))
+              ? () => onZoomScaleChanged!(
+                  (zoomScale + inStep).clamp(0.2, effectiveMaxZoom),
+                )
               : null,
         ),
       ],

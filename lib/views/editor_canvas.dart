@@ -12,7 +12,9 @@ import 'package:image/image.dart' as img;
 import 'package:uuid/uuid.dart';
 
 import '../models/annotation.dart';
+import '../services/capture_service.dart';
 import '../services/clipboard_service.dart';
+import '../services/native/rust_image_core.dart';
 import '../services/render_service.dart';
 import '../tools/tool_handler.dart';
 import '../utils/canvas_projection.dart';
@@ -26,12 +28,148 @@ import 'components/annotation_renderer.dart';
 Uint8List _encodePngFast(img.Image image) =>
     Uint8List.fromList(img.encodePng(image, level: 1));
 
-// Gene - Nov, 20, 2026: Fit-to-width top-aligned (or fit-to-height left-aligned) initial viewport transform for tall/wide scrolling captures, capped at 1:1 native pixels.
+// Gene - Nov, 20, 2026: Geometry helpers for dynamic panoramic max-zoom, image-bounds-aware pan/zoom constraining, and top/left-aligned initial zoom.
+// Old implementation:
+// Matrix4? computeInitialPanoramicTransform({
+//   required Size viewportSize,
+//   required Size imageSize,
+//   double minZoom = 0.2,
+//   double maxZoom = 4.0,
+// }) { ... }
+
+typedef PanoramicBounds = ({
+  Rect imgRect,
+  double minTx,
+  double maxTx,
+  double minTy,
+  double maxTy,
+  bool canPanX,
+  bool canPanY,
+});
+
+bool _isPanoramicAspect(Size imageSize) {
+  if (imageSize.width <= 0 || imageSize.height <= 0) return false;
+  return (imageSize.height / imageSize.width) > 2.2 ||
+      (imageSize.width / imageSize.height) > 3.0;
+}
+
+double computeEffectiveMaxZoom({
+  required Size viewportSize,
+  required Size imageSize,
+  double baseMaxZoom = 4.0,
+  double verticalPadding = 20.0,
+}) {
+  if (viewportSize.isEmpty ||
+      imageSize.isEmpty ||
+      !_isPanoramicAspect(imageSize)) {
+    return baseMaxZoom;
+  }
+  final canvasSize = Size(
+    viewportSize.width,
+    math.max(1.0, viewportSize.height - verticalPadding * 2),
+  );
+  final fitScale = math.min(
+    canvasSize.width / imageSize.width,
+    canvasSize.height / imageSize.height,
+  );
+  if (fitScale <= 0) return baseMaxZoom;
+  final nativeOneToOne = fitScale < 1.0 ? (1.0 / fitScale) : 1.0;
+  return math.max(baseMaxZoom, math.min(nativeOneToOne * 2.5, 48.0));
+}
+
+PanoramicBounds computePanoramicBounds({
+  required Size viewportSize,
+  required Size imageSize,
+  required double scale,
+  double verticalPadding = 20.0,
+}) {
+  final canvasSize = Size(
+    viewportSize.width,
+    math.max(1.0, viewportSize.height - verticalPadding * 2),
+  );
+  final imgRect = imageSize.isEmpty
+      ? Rect.zero
+      : RenderService.imageRectInCanvas(
+          imageSize: imageSize,
+          canvasSize: canvasSize,
+        ).shift(Offset(0, verticalPadding));
+
+  ({double minT, double maxT, bool canPan}) solveAxis(
+    double contentStart,
+    double contentEnd,
+    double viewportExtent,
+  ) {
+    if (imgRect.isEmpty) {
+      final contentExtent = viewportExtent * scale;
+      if (contentExtent <= viewportExtent + 0.5) {
+        final centered = (viewportExtent - contentExtent) / 2.0;
+        return (minT: centered, maxT: centered, canPan: false);
+      }
+      return (minT: viewportExtent - contentExtent, maxT: 0.0, canPan: true);
+    }
+
+    final scaledStart = contentStart * scale;
+    final scaledEnd = contentEnd * scale;
+    final scaledSize = scaledEnd - scaledStart;
+    if (scaledSize <= viewportExtent + 0.5) {
+      final centered = (viewportExtent - (scaledStart + scaledEnd)) / 2.0;
+      return (minT: centered, maxT: centered, canPan: false);
+    }
+
+    final margin = contentStart <= 24.0
+        ? contentStart
+        : math.min(contentStart, math.max(84.0, viewportExtent * 0.17));
+    final maxT = math.min(0.0, margin - scaledStart);
+    final minT = math.max(
+      viewportExtent - viewportExtent * scale,
+      (viewportExtent - margin) - scaledEnd,
+    );
+    if (minT >= maxT) {
+      final centered = (viewportExtent - (scaledStart + scaledEnd)) / 2.0;
+      return (minT: centered, maxT: centered, canPan: false);
+    }
+    return (minT: minT, maxT: maxT, canPan: true);
+  }
+
+  final x = solveAxis(imgRect.left, imgRect.right, viewportSize.width);
+  final y = solveAxis(imgRect.top, imgRect.bottom, viewportSize.height);
+  return (
+    imgRect: imgRect,
+    minTx: x.minT,
+    maxTx: x.maxT,
+    minTy: y.minT,
+    maxTy: y.maxT,
+    canPanX: x.canPan,
+    canPanY: y.canPan,
+  );
+}
+
+Matrix4 constrainCanvasTransform({
+  required Matrix4 matrix,
+  required Size viewportSize,
+  required Size imageSize,
+  double verticalPadding = 20.0,
+}) {
+  if (viewportSize.isEmpty) return matrix;
+  final scale = matrix.getMaxScaleOnAxis();
+  final storage = matrix.storage;
+  final b = computePanoramicBounds(
+    viewportSize: viewportSize,
+    imageSize: imageSize,
+    scale: scale,
+    verticalPadding: verticalPadding,
+  );
+  storage[12] = storage[12].clamp(b.minTx, b.maxTx);
+  storage[13] = storage[13].clamp(b.minTy, b.maxTy);
+  return matrix;
+}
+
 Matrix4? computeInitialPanoramicTransform({
   required Size viewportSize,
   required Size imageSize,
   double minZoom = 0.2,
   double maxZoom = 4.0,
+  double verticalPadding = 20.0,
 }) {
   if (viewportSize.isEmpty || imageSize.isEmpty) return null;
   if (viewportSize.width <= 0 ||
@@ -41,38 +179,54 @@ Matrix4? computeInitialPanoramicTransform({
     return null;
   }
 
+  final canvasSize = Size(
+    viewportSize.width,
+    math.max(1.0, viewportSize.height - verticalPadding * 2),
+  );
   final fitScale = math.min(
-    viewportSize.width / imageSize.width,
-    viewportSize.height / imageSize.height,
+    canvasSize.width / imageSize.width,
+    canvasSize.height / imageSize.height,
   );
   if (fitScale <= 0) return null;
 
+  final imgRect = RenderService.imageRectInCanvas(
+    imageSize: imageSize,
+    canvasSize: canvasSize,
+  ).shift(Offset(0, verticalPadding));
+  if (imgRect.isEmpty) return null;
+
+  final effectiveMax = computeEffectiveMaxZoom(
+    viewportSize: viewportSize,
+    imageSize: imageSize,
+    baseMaxZoom: maxZoom,
+    verticalPadding: verticalPadding,
+  );
   final nativeCap = fitScale < 1.0 ? (1.0 / fitScale) : 1.0;
-  final upperScale = math.min(nativeCap, maxZoom);
+  final upperScale = math.min(nativeCap, effectiveMax);
 
   final aspectHOverW = imageSize.height / imageSize.width;
   if (aspectHOverW > 2.2) {
-    final renderedW = imageSize.width * fitScale;
-    if (renderedW <= 0) return null;
-    final desired = (viewportSize.width * 0.92) / renderedW;
-    final scale = math.min(desired, upperScale).clamp(minZoom, maxZoom);
+    final desired = (viewportSize.width * 0.92) / imgRect.width;
+    final scale = math.min(desired, upperScale).clamp(minZoom, effectiveMax);
     if (scale <= 1.02) return null;
-    final tx = (viewportSize.width - viewportSize.width * scale) / 2.0;
+    final tx =
+        (viewportSize.width - (imgRect.left + imgRect.right) * scale) / 2.0;
+    final ty = math.min(0.0, verticalPadding - imgRect.top * scale);
     return Matrix4.identity()
-      ..translateByDouble(tx, 0.0, 0.0, 1.0)
+      ..translateByDouble(tx, ty, 0.0, 1.0)
       ..scaleByDouble(scale, scale, scale, 1.0);
   }
 
   final aspectWOverH = imageSize.width / imageSize.height;
   if (aspectWOverH > 3.0) {
-    final renderedH = imageSize.height * fitScale;
-    if (renderedH <= 0) return null;
-    final desired = (viewportSize.height * 0.90) / renderedH;
-    final scale = math.min(desired, upperScale).clamp(minZoom, maxZoom);
+    final desired = (viewportSize.height * 0.90) / imgRect.height;
+    final scale = math.min(desired, upperScale).clamp(minZoom, effectiveMax);
     if (scale <= 1.02) return null;
-    final ty = (viewportSize.height - viewportSize.height * scale) / 2.0;
+    final tx = math.min(0.0, verticalPadding - imgRect.left * scale);
+    final ty =
+        (viewportSize.height - (imgRect.top + imgRect.bottom) * scale) / 2.0;
     return Matrix4.identity()
-      ..translateByDouble(0.0, ty, 0.0, 1.0)
+      ..translateByDouble(tx, ty, 0.0, 1.0)
       ..scaleByDouble(scale, scale, scale, 1.0);
   }
 
@@ -137,6 +291,8 @@ class EditorCanvas extends StatefulWidget {
   final Color? fillColor;
   final double zoomScale;
   final ValueChanged<double>? onZoomScaleChanged;
+  // Gene - Nov, 20, 2026: Report dynamic max zoom scale so HeaderBar and GallerySidebar unlock crisp 1:1 inspection on tall/wide captures.
+  final ValueChanged<double>? onMaxZoomChanged;
   final int imageRevision;
 
   /// Bumped by every undo and redo.
@@ -195,6 +351,7 @@ class EditorCanvas extends StatefulWidget {
     this.opacity = 1.0,
     this.zoomScale = 1.0,
     this.onZoomScaleChanged,
+    this.onMaxZoomChanged,
     this.imageRevision = 0,
     this.historyRevision = 0,
     this.borderRadius = 8.0,
@@ -435,6 +592,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   double _trackpadPanZoomScale = 1.0;
   Offset? _trackpadPanZoomOrigin;
   Offset _trackpadPanLast = Offset.zero;
+  // Gene - Nov, 20, 2026: Track middle-mouse panning and last reported dynamic maxZoom.
+  bool _isMiddleMousePanning = false;
+  double _reportedMaxZoom = _maxZoom;
 
   // Manual double-click detection (see _consumeDoubleTap).
   DateTime _lastTapAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -619,6 +779,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   ///   aspect ratio, through its letterbox).
   void _discardStateForPreviousCapture(String? previousPath) {
     _autoZoomAppliedForPath = null;
+    // Gene - Nov, 20, 2026: Reset viewport transform and reported maxZoom cleanly when switching captures so stale zoom/pan never carries over.
+    _transformationController.value = Matrix4.identity();
+    _reportedMaxZoom = _maxZoom;
+    _isMiddleMousePanning = false;
     _liveAnnotations = null;
     if (_hasExtractedSelection) {
       // Fire-and-forget, like the tool-change path: the paste is a file write
@@ -773,11 +937,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         // parent's own setState.
         widget.onImageSizeResolved?.call(path, resolvedSize);
 
-        // Gene - Nov, 20, 2026: Auto fit-to-width top-aligned (or fit-to-height left-aligned) initial view for tall/wide scrolling captures.
+        // Gene - Nov, 20, 2026: Unlock dynamic maxZoom and auto fit-to-width top-aligned (or fit-to-height left-aligned) initial view for tall/wide captures.
         if (_autoZoomAppliedForPath != path) {
           _autoZoomAppliedForPath = path;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted || widget.imagePath != path) return;
+            _reportEffectiveMaxZoomIfChanged();
             final viewport = _viewportSize;
             if (viewport.isEmpty) return;
             if ((_transformationController.value.getMaxScaleOnAxis() - 1.0)
@@ -789,12 +954,16 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
               viewportSize: viewport,
               imageSize: resolvedSize,
               minZoom: _minZoom,
-              maxZoom: _maxZoom,
+              maxZoom: _effectiveMaxZoom,
             );
             if (initialTransform != null) {
               _setTransform(initialTransform);
               _notifyZoom();
             }
+          });
+        } else {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _reportEffectiveMaxZoomIfChanged();
           });
         }
       }
@@ -942,23 +1111,80 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// nothing to pan, so it is pinned centred; on an axis where it is larger,
   /// translation is clamped to its own edges. Without this, `boundaryMargin:
   /// infinity` lets a flick throw the capture off screen with no way back.
+  // Gene - Nov, 20, 2026: Image-bounds-aware viewport constraining and dynamic max zoom for crisp long-image navigation.
+  // Old implementation:
+  // Matrix4 _constrain(Matrix4 matrix) {
+  //   final viewport = _viewportSize;
+  //   if (viewport.isEmpty) return matrix;
+  //   final scale = matrix.getMaxScaleOnAxis();
+  //   final storage = matrix.storage;
+  //   double axis(double translation, double viewportExtent) {
+  //     final contentExtent = viewportExtent * scale;
+  //     if (contentExtent <= viewportExtent) {
+  //       return (viewportExtent - contentExtent) / 2;
+  //     }
+  //     return translation.clamp(viewportExtent - contentExtent, 0.0);
+  //   }
+  //   storage[12] = axis(storage[12], viewport.width);
+  //   storage[13] = axis(storage[13], viewport.height);
+  //   return matrix;
+  // }
+  double get _effectiveMaxZoom => computeEffectiveMaxZoom(
+    viewportSize: _viewportSize,
+    imageSize: _imageSize,
+    baseMaxZoom: _maxZoom,
+  );
+
+  void _reportEffectiveMaxZoomIfChanged() {
+    final next = _effectiveMaxZoom;
+    if ((next - _reportedMaxZoom).abs() > 0.01) {
+      _reportedMaxZoom = next;
+      widget.onMaxZoomChanged?.call(next);
+    }
+  }
+
   Matrix4 _constrain(Matrix4 matrix) {
     final viewport = _viewportSize;
     if (viewport.isEmpty) return matrix;
-    final scale = matrix.getMaxScaleOnAxis();
-    final storage = matrix.storage;
+    return constrainCanvasTransform(
+      matrix: matrix,
+      viewportSize: viewport,
+      imageSize: _imageSize,
+    );
+  }
 
-    double axis(double translation, double viewportExtent) {
-      final contentExtent = viewportExtent * scale;
-      if (contentExtent <= viewportExtent) {
-        return (viewportExtent - contentExtent) / 2;
-      }
-      return translation.clamp(viewportExtent - contentExtent, 0.0);
-    }
+  void _fitToScreen() {
+    _transformationController.value = Matrix4.identity();
+    _notifyZoom();
+  }
 
-    storage[12] = axis(storage[12], viewport.width);
-    storage[13] = axis(storage[13], viewport.height);
-    return matrix;
+  void _zoomToActualNativeSize() {
+    final viewport = _viewportSize;
+    final imgSize = _imageSize;
+    if (viewport.isEmpty || imgSize.isEmpty) return;
+    final canvasSize = Size(
+      viewport.width,
+      math.max(1.0, viewport.height - 40.0),
+    );
+    final fitScale = math.min(
+      canvasSize.width / imgSize.width,
+      canvasSize.height / imgSize.height,
+    );
+    if (fitScale <= 0) return;
+    final target = (1.0 / fitScale).clamp(_minZoom, _effectiveMaxZoom);
+    final imgRect = RenderService.imageRectInCanvas(
+      imageSize: imgSize,
+      canvasSize: canvasSize,
+    ).shift(const Offset(0, 20.0));
+    final tx = (viewport.width - (imgRect.left + imgRect.right) * target) / 2.0;
+    final ty = imgRect.height * target > viewport.height
+        ? math.min(0.0, 20.0 - imgRect.top * target)
+        : (viewport.height - (imgRect.top + imgRect.bottom) * target) / 2.0;
+    final next = Matrix4.identity()
+      ..translateByDouble(tx, ty, 0.0, 1.0)
+      ..scaleByDouble(target, target, target, 1.0);
+    _setTransform(next);
+    _notifyZoom();
   }
 
   void _setTransform(Matrix4 matrix) {
@@ -1022,7 +1248,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   void _zoomAt(double targetScale, Offset focalPoint) {
     final matrix = _transformationController.value;
     final current = matrix.getMaxScaleOnAxis();
-    final clamped = targetScale.clamp(_minZoom, _maxZoom);
+    // Gene - Nov, 20, 2026: Use _effectiveMaxZoom so tall/wide scrolling captures zoom up to 1:1+ without ceiling lock.
+    // Old: final clamped = targetScale.clamp(_minZoom, _maxZoom);
+    final clamped = targetScale.clamp(_minZoom, _effectiveMaxZoom);
     final factor = clamped / current;
     if ((factor - 1.0).abs() < 1e-6) return;
 
@@ -2119,7 +2347,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // before every tool branch so it works from whichever tool is selected,
     // and it is the only way to reach an off-centre area with a mouse that has
     // no scroll wheel.
-    if (_isPanModifierDown) {
+    if (_isPanModifierDown || _isMiddleMousePanning) {
       _isPanningView = true;
       return;
     }
@@ -3051,6 +3279,68 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final path = widget.imagePath;
     if (path == null || !File(path).existsSync()) return;
     try {
+      // Gene - Nov, 20, 2026: Fast Rust FFI RGBA scanline fill + native ImageIO/WIC PNG write when available (10x-30x faster than Dart decode+fill+encode), with clean Dart isolate fallback.
+      var snapshotted = false;
+      final beforeFill = widget.onBeforeCanvasFill;
+
+      if (RustImageCore.isAvailable && _baseImage != null) {
+        final uiImg = _baseImage!;
+        final pixelPos = _canvasPointToImagePixel(
+          localPos,
+          uiImg.width,
+          uiImg.height,
+        );
+        if (pixelPos == null) return;
+
+        final raw = await uiImg.toByteData(format: ui.ImageByteFormat.rawRgba);
+        if (raw != null && mounted && widget.imagePath == path) {
+          final argb = widget.activeColor.toARGB32();
+          final packedRgba =
+              (((argb >> 16) & 0xFF) << 24) |
+              (((argb >> 8) & 0xFF) << 16) |
+              ((argb & 0xFF) << 8) |
+              ((argb >> 24) & 0xFF);
+          final rgba = Uint8List.fromList(raw.buffer.asUint8List());
+          // Old order ran beforeFill() before knowing whether any pixel changed or native write succeeded,
+          // which risked pushing an extra undo snapshot on fallback. Run pure in-memory fill first.
+          final changed = RustImageCore.floodFillRgba(
+            rgba: rgba,
+            width: uiImg.width,
+            height: uiImg.height,
+            startX: pixelPos.x,
+            startY: pixelPos.y,
+            fillRgbaPacked: packedRgba,
+            tolerancePercent: widget.fillTolerance,
+            opacity: widget.opacity,
+            isGlobal: widget.isGlobalFill,
+          );
+          if (!changed) return;
+
+          if (beforeFill != null) {
+            await beforeFill();
+            snapshotted = true;
+          }
+          if (!mounted || widget.imagePath != path) return;
+
+          final savedNatively = await CaptureService.saveRgbaToPng(
+            rgba: rgba,
+            width: uiImg.width,
+            height: uiImg.height,
+            targetPath: path,
+          );
+          if (savedNatively) {
+            if (!mounted || widget.imagePath != path) return;
+            await evictImageFileFromCaches(path);
+            await _loadBaseImage();
+            if (mounted && widget.onPerformCanvasFill != null) {
+              _suppressNextRevisionReload = true;
+              widget.onPerformCanvasFill!.call(localPos);
+            }
+            return;
+          }
+        }
+      }
+
       final bytes = await File(path).readAsBytes();
       if (!mounted) return;
 
@@ -3069,9 +3359,14 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       );
       if (pixelPos == null) return;
 
-      // Snapshot the pre-fill bitmap *before* it is overwritten for undo.
-      final beforeFill = widget.onBeforeCanvasFill;
-      if (beforeFill != null) await beforeFill();
+      // Snapshot the pre-fill bitmap *before* it is overwritten for undo (only once across Rust/Dart paths).
+      // Old:
+      // final beforeFill = widget.onBeforeCanvasFill;
+      // if (beforeFill != null) await beforeFill();
+      if (!snapshotted && beforeFill != null) {
+        await beforeFill();
+        snapshotted = true;
+      }
       if (!mounted) return;
 
       // The fill itself runs on a worker isolate: it is a per-pixel walk of the
@@ -3168,7 +3463,25 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       return KeyEventResult.ignored;
     }
 
-    // Nudge the selection with the arrow keys; Shift jumps 10px at a time.
+    // Gene - Nov, 20, 2026: Support PageUp/PageDown/Home/End/Arrow panning & Cmd+0/1/+/- zoom navigation on long/panoramic captures.
+    if (key == LogicalKeyboardKey.pageDown && _canPanView) {
+      _panBy(Offset(0, -_viewportSize.height * 0.8));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.pageUp && _canPanView) {
+      _panBy(Offset(0, _viewportSize.height * 0.8));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.home && _canPanView) {
+      _panBy(const Offset(0, 1e6));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.end && _canPanView) {
+      _panBy(const Offset(0, -1e6));
+      return KeyEventResult.handled;
+    }
+
+    // Nudge the selection with the arrow keys (Shift jumps 10px); when nothing is selected and zoomed in, arrow keys scroll cleanly.
     final nudges = <LogicalKeyboardKey, Offset>{
       LogicalKeyboardKey.arrowLeft: const Offset(-1, 0),
       LogicalKeyboardKey.arrowRight: const Offset(1, 0),
@@ -3188,12 +3501,50 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         });
         return KeyEventResult.handled;
       }
-      if (_selectedAnnotationId == null) return KeyEventResult.ignored;
-      _nudgeSelectedAnnotation(nudge * (_isShiftDown ? 10.0 : 1.0));
-      return KeyEventResult.handled;
+      if (_selectedAnnotationId != null) {
+        _nudgeSelectedAnnotation(nudge * (_isShiftDown ? 10.0 : 1.0));
+        return KeyEventResult.handled;
+      }
+      if (_canPanView) {
+        final step = _isShiftDown ? 240.0 : 80.0;
+        _panBy(-nudge * step);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
     }
 
     if (_isCommandDown) {
+      if (key == LogicalKeyboardKey.digit0 ||
+          key == LogicalKeyboardKey.numpad0) {
+        _fitToScreen();
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.digit1 ||
+          key == LogicalKeyboardKey.numpad1) {
+        _zoomToActualNativeSize();
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.equal ||
+          key == LogicalKeyboardKey.add ||
+          key == LogicalKeyboardKey.numpadAdd) {
+        _zoomToCentre(
+          (_transformationController.value.getMaxScaleOnAxis() * 1.25).clamp(
+            _minZoom,
+            _effectiveMaxZoom,
+          ),
+        );
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.minus ||
+          key == LogicalKeyboardKey.numpadSubtract) {
+        _zoomToCentre(
+          (_transformationController.value.getMaxScaleOnAxis() / 1.25).clamp(
+            _minZoom,
+            _effectiveMaxZoom,
+          ),
+        );
+        return KeyEventResult.handled;
+      }
       if (key == LogicalKeyboardKey.keyC) {
         if (_floatingSelectionRect != null) {
           _copyFloatingSelectionToClipboard(cut: false);
@@ -3278,10 +3629,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   }
 
   void _updateCursor(Offset pos) {
-    // Space held over a zoomed-in view: this drag will pan, so say so before
-    // the user commits to it.
-    if (_isPanModifierDown && _canPanView) {
-      final grab = _isPanningView
+    // Space held over a zoomed-in view (or middle mouse drag): this drag will pan.
+    if ((_isPanModifierDown && _canPanView) || _isMiddleMousePanning) {
+      final grab = (_isPanningView || _isMiddleMousePanning)
           ? SystemMouseCursors.grabbing
           : SystemMouseCursors.grab;
       if (_cursor != grab) setState(() => _cursor = grab);
@@ -3416,12 +3766,35 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
               child: Listener(
                 key: _viewportKey,
                 onPointerSignal: _handlePointerSignal,
+                // Gene - Nov, 20, 2026: Support middle-mouse drag panning and reset trackpad pan delta on start/cancel.
+                onPointerDown: (event) {
+                  if ((event.buttons & kMiddleMouseButton) != 0) {
+                    _isMiddleMousePanning = true;
+                    _focusNode.requestFocus();
+                  }
+                },
+                onPointerMove: (event) {
+                  if (_isMiddleMousePanning) {
+                    if ((event.buttons & kMiddleMouseButton) != 0) {
+                      _panBy(event.delta);
+                    } else {
+                      _isMiddleMousePanning = false;
+                    }
+                  }
+                },
+                onPointerUp: (_) {
+                  if (_isMiddleMousePanning) _isMiddleMousePanning = false;
+                },
+                onPointerCancel: (_) {
+                  if (_isMiddleMousePanning) _isMiddleMousePanning = false;
+                },
                 // Trackpad pan/zoom arrives as its own event family on desktop,
                 // never as a scroll signal, so it needs handling of its own:
                 // two-finger drag pans, pinch zooms about the gesture's origin.
                 onPointerPanZoomStart: (event) {
                   _trackpadPanZoomScale = 1.0;
                   _trackpadPanZoomOrigin = event.localPosition;
+                  _trackpadPanLast = Offset.zero;
                 },
                 onPointerPanZoomUpdate: (event) {
                   final origin = _trackpadPanZoomOrigin ?? event.localPosition;
@@ -3438,9 +3811,17 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                   _trackpadPanZoomOrigin = null;
                   _trackpadPanLast = Offset.zero;
                 },
+                // Gene - Nov, 20, 2026: Removed invalid Listener.onPointerPanZoomCancel parameter (Flutter Listener only defines Start/Update/End).
+                // Old:
+                // onPointerPanZoomCancel: (_) {
+                //   _trackpadPanZoomScale = 1.0;
+                //   _trackpadPanZoomOrigin = null;
+                //   _trackpadPanLast = Offset.zero;
+                // },
                 child: InteractiveViewer(
                   transformationController: _transformationController,
-                  maxScale: _maxZoom,
+                  // Old: maxScale: _maxZoom,
+                  maxScale: _effectiveMaxZoom,
                   minScale: _minZoom,
                   boundaryMargin: const EdgeInsets.all(double.infinity),
                   // Both disabled: this canvas owns every zoom and pan gesture
@@ -3536,12 +3917,18 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                           // the visible flash on fill/crop/undo. `_baseImage`
                           // swaps atomically inside setState, so the old
                           // frame stays up until the new one is ready.
-                          RepaintBoundary(
-                            child: RawImage(
-                              image: _baseImage,
-                              fit: BoxFit.contain,
-                              filterQuality: FilterQuality.medium,
-                            ),
+                          // Old:
+                          // RepaintBoundary(
+                          //   child: RawImage(
+                          //     image: _baseImage,
+                          //     fit: BoxFit.contain,
+                          //     filterQuality: FilterQuality.medium,
+                          //   ),
+                          // ),
+                          RawImage(
+                            image: _baseImage,
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.medium,
                           ),
 
                           // Annotations + live preview + selection chrome.
@@ -3774,9 +4161,240 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 ),
               ),
             ),
+            // Gene - Nov, 20, 2026: Interactive overlay scrollbars & compact Fit / 1:1 pill for long/panoramic captures.
+            if (_baseImage != null)
+              Positioned.fill(child: _buildPanoramicNavigationHud(t)),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildPanoramicNavigationHud(SnipTheme t) {
+    return ValueListenableBuilder<Matrix4>(
+      valueListenable: _transformationController,
+      builder: (context, matrix, _) {
+        final viewport = _viewportSize;
+        final imgSize = _imageSize;
+        if (viewport.isEmpty || imgSize.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final scale = matrix.getMaxScaleOnAxis();
+        final b = computePanoramicBounds(
+          viewportSize: viewport,
+          imageSize: imgSize,
+          scale: scale,
+        );
+        final storage = matrix.storage;
+        final tx = storage[12];
+        final ty = storage[13];
+
+        final canvasSize = Size(
+          viewport.width,
+          math.max(1.0, viewport.height - 40.0),
+        );
+        final fitScale = math.min(
+          canvasSize.width / imgSize.width,
+          canvasSize.height / imgSize.height,
+        );
+        final nativePct = fitScale > 0
+            ? (scale * fitScale * 100.0).round()
+            : 100;
+        final isPano = _isPanoramicAspect(imgSize);
+        final isZoomed = (scale - 1.0).abs() > 0.02;
+
+        final scaledW = b.imgRect.width * scale;
+        final scaledH = b.imgRect.height * scale;
+        final showV = b.canPanY && scaledH > viewport.height + 2.0;
+        final showH = b.canPanX && scaledW > viewport.width + 2.0;
+
+        const barThickness = 8.0;
+        const hitThickness = 14.0;
+        final vTrackH = math.max(48.0, viewport.height - (showH ? 28.0 : 16.0));
+        final hTrackW = math.max(48.0, viewport.width - (showV ? 28.0 : 16.0));
+        final scrollRangeY = math.max(1.0, b.maxTy - b.minTy);
+        final scrollRangeX = math.max(1.0, b.maxTx - b.minTx);
+
+        final vThumbH = (vTrackH * (viewport.height / scaledH)).clamp(
+          36.0,
+          vTrackH,
+        );
+        final vTravel = math.max(1.0, vTrackH - vThumbH);
+        final vProgress = ((b.maxTy - ty) / scrollRangeY).clamp(0.0, 1.0);
+        final vThumbTop = vProgress * vTravel;
+
+        final hThumbW = (hTrackW * (viewport.width / scaledW)).clamp(
+          36.0,
+          hTrackW,
+        );
+        final hTravel = math.max(1.0, hTrackW - hThumbW);
+        final hProgress = ((b.maxTx - tx) / scrollRangeX).clamp(0.0, 1.0);
+        final hThumbLeft = hProgress * hTravel;
+
+        return Stack(
+          children: [
+            if (showV)
+              Positioned(
+                right: 3,
+                top: 8,
+                width: hitThickness,
+                height: vTrackH,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (d) {
+                    final targetProg =
+                        ((d.localPosition.dy - vThumbH / 2.0) / vTravel).clamp(
+                          0.0,
+                          1.0,
+                        );
+                    final targetTy = b.maxTy - targetProg * scrollRangeY;
+                    _panBy(Offset(0, targetTy - ty));
+                  },
+                  onVerticalDragUpdate: (d) {
+                    final deltaTy = -(d.delta.dy / vTravel) * scrollRangeY;
+                    _panBy(Offset(0, deltaTy));
+                  },
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Container(
+                      width: barThickness,
+                      height: vTrackH,
+                      decoration: BoxDecoration(
+                        color: t.surface.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            top: vThumbTop,
+                            left: 0,
+                            right: 0,
+                            height: vThumbH,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: t.inkMuted.withValues(alpha: 0.72),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: t.border.withValues(alpha: 0.6),
+                                  width: 0.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (showH)
+              Positioned(
+                left: 8,
+                bottom: 3,
+                width: hTrackW,
+                height: hitThickness,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (d) {
+                    final targetProg =
+                        ((d.localPosition.dx - hThumbW / 2.0) / hTravel).clamp(
+                          0.0,
+                          1.0,
+                        );
+                    final targetTx = b.maxTx - targetProg * scrollRangeX;
+                    _panBy(Offset(targetTx - tx, 0));
+                  },
+                  onHorizontalDragUpdate: (d) {
+                    final deltaTx = -(d.delta.dx / hTravel) * scrollRangeX;
+                    _panBy(Offset(deltaTx, 0));
+                  },
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Container(
+                      width: hTrackW,
+                      height: barThickness,
+                      decoration: BoxDecoration(
+                        color: t.surface.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            left: hThumbLeft,
+                            top: 0,
+                            bottom: 0,
+                            width: hThumbW,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: t.inkMuted.withValues(alpha: 0.72),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: t.border.withValues(alpha: 0.6),
+                                  width: 0.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (isPano || isZoomed)
+              Positioned(
+                left: 12,
+                bottom: showH ? 20 : 12,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: t.surface.withValues(alpha: 0.92),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: t.border),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _CanvasQuickChip(
+                        label: 'Fit',
+                        active: !isZoomed,
+                        theme: t,
+                        onTap: _fitToScreen,
+                      ),
+                      const SizedBox(width: 4),
+                      _CanvasQuickChip(
+                        label: '1:1',
+                        active: (nativePct - 100).abs() <= 3 && isZoomed,
+                        theme: t,
+                        onTap: _zoomToActualNativeSize,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${nativePct.clamp(1, 3200)}% native',
+                        style: TextStyle(
+                          color: t.inkMuted,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -5142,4 +5760,55 @@ class _LoupeGridPainter extends CustomPainter {
       oldDelegate.centerPixel.x != centerPixel.x ||
       oldDelegate.centerPixel.y != centerPixel.y ||
       oldDelegate.theme != theme;
+}
+
+// Gene - Nov, 20, 2026: Compact quick-zoom chip ("Fit" / "1:1") for the panoramic navigation HUD.
+class _CanvasQuickChip extends StatelessWidget {
+  final String label;
+  final bool active;
+  final SnipTheme theme;
+  final VoidCallback onTap;
+
+  const _CanvasQuickChip({
+    required this.label,
+    required this.active,
+    required this.theme,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label == 'Fit'
+          ? 'Fit to window (Cmd/Ctrl+0)'
+          : 'Actual pixel size 1:1 (Cmd/Ctrl+1)',
+      waitDuration: const Duration(milliseconds: 500),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(5),
+          hoverColor: theme.hoverFill,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: active ? theme.activeFill : Colors.transparent,
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                color: active ? theme.activeFill : theme.borderStrong,
+              ),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: active ? theme.onActive : theme.ink,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

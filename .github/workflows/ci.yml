@@ -37,7 +37,7 @@ jobs:
 
       - name: Run Rust native core tests
         shell: bash
-        run: cargo test --manifest-path native/snipsnap_core/Cargo.toml --release -- --nocapture
+        run: cargo build --manifest-path native/snipsnap_core/Cargo.toml --release && cargo test --manifest-path native/snipsnap_core/Cargo.toml --release -- --nocapture
 
       - name: Install dependencies
         shell: bash

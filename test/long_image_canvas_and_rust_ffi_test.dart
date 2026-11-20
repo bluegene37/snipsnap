@@ -1,0 +1,501 @@
+// Gene - Nov, 20, 2026: Regression and integration tests for long panoramic canvas navigation and Rust FFI RGBA ops.
+import 'dart:io';
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
+import 'package:snipsnap/services/native/rust_image_core.dart';
+import 'package:snipsnap/utils/constants.dart';
+import 'package:snipsnap/utils/snip_theme.dart';
+import 'package:snipsnap/views/editor_canvas.dart';
+
+import 'support/base_image_settle.dart';
+
+Matrix4 _transform(WidgetTester tester) {
+  final viewer = tester.widget<InteractiveViewer>(
+    find.byType(InteractiveViewer),
+  );
+  return viewer.transformationController!.value;
+}
+
+double _scale(WidgetTester tester) => _transform(tester).getMaxScaleOnAxis();
+
+Offset _translation(WidgetTester tester) {
+  final s = _transform(tester).storage;
+  return Offset(s[12], s[13]);
+}
+
+Future<void> _scroll(
+  WidgetTester tester,
+  Offset at,
+  Offset delta, {
+  LogicalKeyboardKey? holding,
+}) async {
+  if (holding != null) await tester.sendKeyDownEvent(holding);
+  final pointer = TestPointer(1, PointerDeviceKind.mouse);
+  pointer.hover(at);
+  await tester.sendEventToBinding(pointer.scroll(delta));
+  await tester.pumpAndSettle();
+  if (holding != null) await tester.sendKeyUpEvent(holding);
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('Panoramic Bounds & MaxZoom Math', () {
+    test(
+      'keeps 4.0 maxZoom for regular capture and unlocks for tall images',
+      () {
+        final normalMax = computeEffectiveMaxZoom(
+          viewportSize: const Size(600, 500),
+          imageSize: const Size(1600, 900),
+        );
+        expect(normalMax, 4.0);
+
+        final tallMax = computeEffectiveMaxZoom(
+          viewportSize: const Size(1200, 800),
+          imageSize: const Size(1000, 12000),
+        );
+        // fitScale = 760 / 12000 = 0.06333 => 1:1 native ~ 15.79x, *2.5 ~ 39.47x
+        expect(tallMax, greaterThan(15.0));
+        expect(tallMax, lessThanOrEqualTo(48.0));
+      },
+    );
+
+    test(
+      'pins X centered with zero void drift when tall image fits width and constrains Y',
+      () {
+        const viewport = Size(1200, 800);
+        const image = Size(800, 9000);
+        const scale = 6.0;
+
+        final bounds = computePanoramicBounds(
+          viewportSize: viewport,
+          imageSize: image,
+          scale: scale,
+        );
+        expect(bounds.canPanX, isFalse);
+        expect(bounds.canPanY, isTrue);
+        expect(bounds.minTx, closeTo(bounds.maxTx, 0.001));
+
+        // Attempt extreme horizontal & vertical drift.
+        final driftedRight = Matrix4.identity()
+          ..translateByDouble(5000.0, 2000.0, 0.0, 1.0)
+          ..scaleByDouble(scale, scale, scale, 1.0);
+        final clampedTop = constrainCanvasTransform(
+          matrix: driftedRight,
+          viewportSize: viewport,
+          imageSize: image,
+        );
+        expect(clampedTop.storage[12], closeTo(bounds.minTx, 0.01));
+        expect(clampedTop.storage[13], closeTo(bounds.maxTy, 0.01));
+
+        final driftedBottomLeft = Matrix4.identity()
+          ..translateByDouble(-9000.0, -90000.0, 0.0, 1.0)
+          ..scaleByDouble(scale, scale, scale, 1.0);
+        final clampedBottom = constrainCanvasTransform(
+          matrix: driftedBottomLeft,
+          viewportSize: viewport,
+          imageSize: image,
+        );
+        expect(clampedBottom.storage[12], closeTo(bounds.minTx, 0.01));
+        expect(clampedBottom.storage[13], closeTo(bounds.minTy, 0.01));
+      },
+    );
+
+    test('preserves normal 1600x900 viewport pan clamping at zoomed scale', () {
+      const viewport = Size(600, 500);
+      const image = Size(1600, 900);
+      const scale = 2.0;
+
+      final bounds = computePanoramicBounds(
+        viewportSize: viewport,
+        imageSize: image,
+        scale: scale,
+      );
+      expect(bounds.canPanX, isTrue);
+      expect(bounds.canPanY, isTrue);
+      expect(bounds.maxTx, lessThanOrEqualTo(0.001));
+      expect(bounds.maxTy, lessThanOrEqualTo(0.001));
+      expect(bounds.minTy, greaterThanOrEqualTo(500.0 - 500.0 * scale - 0.001));
+    });
+  });
+
+  group('Long Image EditorCanvas UX', () {
+    late Directory tempDir;
+    late String tallPngPath;
+    late GlobalKey repaintKey;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('snipsnap_long_canvas_');
+      tallPngPath = '${tempDir.path}/tall_800x9000.png';
+      // 800x9000 striped PNG so image decoding, Fit/1:1, and scrolling are exercised.
+      final tall = img.Image(width: 800, height: 9000);
+      img.fill(tall, color: img.ColorRgba8(245, 245, 250, 255));
+      for (var y = 0; y < 9000; y += 500) {
+        img.fillRect(
+          tall,
+          x1: 0,
+          y1: y,
+          x2: 799,
+          y2: (y + 39).clamp(0, 8999),
+          color: img.ColorRgba8(30, 90, 200, 255),
+        );
+      }
+      File(tallPngPath).writeAsBytesSync(img.encodePng(tall, level: 1));
+      repaintKey = GlobalKey();
+    });
+
+    tearDown(() {
+      if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+    });
+
+    testWidgets(
+      'auto-zooms tall capture to 1:1 without horizontal void drift and responds to keyboard + HUD chips',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(1200, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+
+        double? reportedMaxZoom;
+        double currentZoom = 1.0;
+
+        await tester.runAsync(() async {
+          await tester.pumpWidget(
+            SnipThemeScope(
+              theme: SnipTheme.forMode(SnipThemeMode.dark),
+              child: MaterialApp(
+                home: Scaffold(
+                  body: SizedBox(
+                    width: 1200,
+                    height: 800,
+                    child: EditorCanvas(
+                      imagePath: tallPngPath,
+                      annotations: const [],
+                      activeTool: CanvasTool.select,
+                      activeColor: const Color(0xFF000000),
+                      strokeWidth: 4,
+                      fontSize: 16,
+                      isFilled: false,
+                      stepCounter: 1,
+                      onAnnotationAdded: (_) {},
+                      onStepCounterIncremented: (_) {},
+                      onZoomScaleChanged: (z) => currentZoom = z,
+                      onMaxZoomChanged: (m) => reportedMaxZoom = m,
+                      repaintBoundaryKey: repaintKey,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await settleBaseImage(tester);
+        });
+        await tester.pumpAndSettle();
+
+        final initialScale = _scale(tester);
+        final initialTranslation = _translation(tester);
+
+        // Dynamic maxZoom > 4.0 and initial panoramic auto-zoom unlocked to 1:1 native (~11.84x).
+        expect(reportedMaxZoom, isNotNull);
+        expect(reportedMaxZoom!, greaterThan(15.0));
+        expect(initialScale, greaterThan(4.0));
+        expect(currentZoom, closeTo(initialScale, 0.01));
+        expect(find.text('Fit'), findsOneWidget);
+        expect(find.text('1:1'), findsOneWidget);
+        expect(find.textContaining('% native'), findsOneWidget);
+
+        // Top edge of padded image rect (y = 20) sits flush at viewport y = 20.
+        expect(20.0 * initialScale + initialTranslation.dy, closeTo(20.0, 1.0));
+
+        // Horizontal scroll attempts produce zero X drift because width fits inside viewport.
+        await _scroll(tester, const Offset(600, 400), const Offset(350, 0));
+        expect(
+          _translation(tester).dx,
+          closeTo(initialTranslation.dx, 0.01),
+          reason: 'narrow tall image must stay centered without void drift',
+        );
+
+        // Vertical scroll wheel moves viewport downward along Y only.
+        await _scroll(tester, const Offset(600, 400), const Offset(0, 400));
+        final afterWheel = _translation(tester);
+        expect(afterWheel.dx, closeTo(initialTranslation.dx, 0.01));
+        expect(afterWheel.dy, lessThan(initialTranslation.dy - 300.0));
+
+        // Keyboard PageDown, End, Home navigation works cleanly.
+        await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+        await tester.pumpAndSettle();
+        final afterPageDown = _translation(tester);
+        expect(afterPageDown.dy, lessThan(afterWheel.dy - 300.0));
+        expect(afterPageDown.dx, closeTo(initialTranslation.dx, 0.01));
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.end);
+        await tester.pumpAndSettle();
+        final bounds = computePanoramicBounds(
+          viewportSize: const Size(1200, 800),
+          imageSize: const Size(800, 9000),
+          scale: initialScale,
+        );
+        expect(_translation(tester).dy, closeTo(bounds.minTy, 1.0));
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.home);
+        await tester.pumpAndSettle();
+        expect(_translation(tester).dy, closeTo(bounds.maxTy, 1.0));
+
+        // [Fit] resets scale to 1.0; [1:1] restores crisp native scale.
+        await tester.tap(find.text('Fit'));
+        await tester.pumpAndSettle();
+        expect(_scale(tester), closeTo(1.0, 0.01));
+        expect(_translation(tester), Offset.zero);
+
+        await tester.tap(find.text('1:1'));
+        await tester.pumpAndSettle();
+        expect(_scale(tester), greaterThan(4.0));
+        expect(
+          20.0 * _scale(tester) + _translation(tester).dy,
+          closeTo(20.0, 1.0),
+        );
+      },
+    );
+  });
+
+  group('RustImageCore FFI Bindings', () {
+    test('loads native library when built and verifies all 7 RGBA operations', () {
+      expect(
+        RustImageCore.isAvailable,
+        isTrue,
+        reason:
+            'snipsnap_core shared library should be built in native/snipsnap_core/target/release',
+      );
+
+      // 1. floodFillRgba (contiguous + global)
+      // 4x1 strip: [white, black, white, white]
+      final fillBuf = Uint8List.fromList([
+        255,
+        255,
+        255,
+        255,
+        0,
+        0,
+        0,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+      ]);
+      final changed = RustImageCore.floodFillRgba(
+        rgba: fillBuf,
+        width: 4,
+        height: 1,
+        startX: 0,
+        startY: 0,
+        fillRgbaPacked: 0x112233FF,
+        tolerancePercent: 0.0,
+        opacity: 1.0,
+        isGlobal: false,
+      );
+      expect(changed, isTrue);
+      // Pixel 0 filled; pixel 2 blocked by black pixel 1.
+      expect(fillBuf.sublist(0, 4), [0x11, 0x22, 0x33, 0xFF]);
+      expect(fillBuf.sublist(8, 12), [255, 255, 255, 255]);
+
+      final globalChanged = RustImageCore.floodFillRgba(
+        rgba: fillBuf,
+        width: 4,
+        height: 1,
+        startX: 2,
+        startY: 0,
+        fillRgbaPacked: 0x445566FF,
+        tolerancePercent: 0.0,
+        opacity: 1.0,
+        isGlobal: true,
+      );
+      expect(globalChanged, isTrue);
+      expect(fillBuf.sublist(8, 16), [
+        0x44,
+        0x55,
+        0x66,
+        0xFF,
+        0x44,
+        0x55,
+        0x66,
+        0xFF,
+      ]);
+
+      // 2. cropRgba (2x2 from 4x4)
+      final grid = Uint8List(4 * 4 * 4);
+      for (var y = 0; y < 4; y++) {
+        for (var x = 0; x < 4; x++) {
+          final i = (y * 4 + x) * 4;
+          grid[i] = x * 40;
+          grid[i + 1] = y * 40;
+          grid[i + 2] = 200;
+          grid[i + 3] = 255;
+        }
+      }
+      final cropped = RustImageCore.cropRgba(
+        src: grid,
+        srcWidth: 4,
+        srcHeight: 4,
+        cropX: 1,
+        cropY: 2,
+        cropWidth: 2,
+        cropHeight: 2,
+      );
+      expect(cropped, isNotNull);
+      expect(cropped!.length, 2 * 2 * 4);
+      // First cropped pixel corresponds to (1, 2) => (40, 80, 200, 255)
+      expect(cropped.sublist(0, 4), [40, 80, 200, 255]);
+
+      // 3. eraseRectRgba
+      final eraseBuf = Uint8List.fromList(grid);
+      expect(
+        RustImageCore.eraseRectRgba(
+          rgba: eraseBuf,
+          width: 4,
+          height: 4,
+          rectX: 1,
+          rectY: 1,
+          rectW: 2,
+          rectH: 2,
+        ),
+        isTrue,
+      );
+      // (1, 1) zeroed; (0, 0) untouched
+      expect(eraseBuf.sublist((1 * 4 + 1) * 4, (1 * 4 + 1) * 4 + 4), [
+        0,
+        0,
+        0,
+        0,
+      ]);
+      expect(eraseBuf.sublist(0, 4), [0, 0, 200, 255]);
+
+      // 4. compositeRgba (opaque green over black at (1, 1))
+      final dst = Uint8List.fromList([
+        0,
+        0,
+        0,
+        255,
+        0,
+        0,
+        0,
+        255,
+        0,
+        0,
+        0,
+        255,
+        0,
+        0,
+        0,
+        255,
+      ]);
+      final src = Uint8List.fromList([0, 200, 100, 255]);
+      expect(
+        RustImageCore.compositeRgba(
+          dst: dst,
+          dstWidth: 2,
+          dstHeight: 2,
+          src: src,
+          srcWidth: 1,
+          srcHeight: 1,
+          dstX: 1,
+          dstY: 1,
+        ),
+        isTrue,
+      );
+      expect(dst.sublist(12, 16), [0, 200, 100, 255]);
+      expect(dst.sublist(0, 4), [0, 0, 0, 255]);
+
+      // 5. resizeRgba (solid 2x2 blue -> 4x3 blue)
+      final solidSrc = Uint8List.fromList([
+        10,
+        20,
+        250,
+        255,
+        10,
+        20,
+        250,
+        255,
+        10,
+        20,
+        250,
+        255,
+        10,
+        20,
+        250,
+        255,
+      ]);
+      final resized = RustImageCore.resizeRgba(
+        src: solidSrc,
+        srcWidth: 2,
+        srcHeight: 2,
+        dstWidth: 4,
+        dstHeight: 3,
+      );
+      expect(resized, isNotNull);
+      expect(resized!.length, 4 * 3 * 4);
+      expect(resized.sublist(0, 4), [10, 20, 250, 255]);
+      expect(resized.sublist(resized.length - 4), [10, 20, 250, 255]);
+
+      // 6. pixelateRegionRgba
+      final pixBuf = Uint8List(4 * 4 * 4);
+      for (var y = 0; y < 4; y++) {
+        for (var x = 0; x < 4; x++) {
+          final i = (y * 4 + x) * 4;
+          pixBuf[i] = x < 2 ? 0 : 200;
+          pixBuf[i + 3] = 255;
+        }
+      }
+      expect(
+        RustImageCore.pixelateRegionRgba(
+          rgba: pixBuf,
+          width: 4,
+          height: 4,
+          rectX: 1,
+          rectY: 0,
+          rectW: 2,
+          rectH: 2,
+          blockSize: 2,
+        ),
+        isTrue,
+      );
+      // Pixels (1,0) and (2,0) inside the 2x2 block average 0 and 200 -> ~100, while (3,0) stays 200.
+      expect(pixBuf[(0 * 4 + 1) * 4], closeTo(100, 1));
+      expect(pixBuf[(0 * 4 + 2) * 4], closeTo(100, 1));
+      expect(pixBuf[(0 * 4 + 3) * 4], 200);
+
+      // 7. boxBlurRegionRgba
+      final blurBuf = Uint8List(8 * 8 * 4);
+      for (var y = 0; y < 8; y++) {
+        for (var x = 0; x < 8; x++) {
+          final i = (y * 8 + x) * 4;
+          blurBuf[i] = x < 4 ? 0 : 240;
+          blurBuf[i + 3] = 255;
+        }
+      }
+      expect(
+        RustImageCore.boxBlurRegionRgba(
+          rgba: blurBuf,
+          width: 8,
+          height: 8,
+          rectX: 2,
+          rectY: 2,
+          rectW: 4,
+          rectH: 4,
+          radius: 2,
+        ),
+        isTrue,
+      );
+      // Edge pixel inside blur rect (x=3, y=3) is no longer 0, and outside pixel (0, 0) stays 0.
+      expect(blurBuf[(3 * 8 + 3) * 4], greaterThan(0));
+      expect(blurBuf[(3 * 8 + 3) * 4], lessThan(240));
+      expect(blurBuf[0], 0);
+    });
+  });
+}

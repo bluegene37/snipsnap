@@ -8,7 +8,9 @@ mod tests {
     use std::time::Instant;
 
     use crate::ffi::{
-        snipsnap_buffer_free, snipsnap_flood_fill_rgba, snipsnap_stitcher_assemble_bgra,
+        snipsnap_box_blur_region_rgba, snipsnap_buffer_free, snipsnap_composite_rgba,
+        snipsnap_crop_rgba, snipsnap_erase_rect_rgba, snipsnap_flood_fill_rgba,
+        snipsnap_pixelate_region_rgba, snipsnap_resize_rgba, snipsnap_stitcher_assemble_bgra,
         snipsnap_stitcher_create, snipsnap_stitcher_free, snipsnap_stitcher_get_preview_bgra,
         snipsnap_stitcher_push_bgra, SnipSnapImageBuffer,
     };
@@ -424,5 +426,75 @@ mod tests {
             per_frame_ms < 2.5,
             "Expected < 2.5 ms/frame under release optimization, got {per_frame_ms:.3} ms"
         );
+    }
+
+    // Gene - Nov, 20, 2026: Tests for FFI crop, erase, composite, resize, pixelate, and 3-pass box blur operations.
+    #[test]
+    fn ffi_pixel_ops_correctness_and_4k_speed() {
+        // 4x4 checkerboard RGBA source
+        let mut src = vec![0u8; 4 * 4 * 4];
+        for y in 0..4 {
+            for x in 0..4 {
+                let i = (y * 4 + x) * 4;
+                src[i] = (x * 60) as u8;
+                src[i + 1] = (y * 60) as u8;
+                src[i + 2] = 200;
+                src[i + 3] = 255;
+            }
+        }
+
+        // Crop center 2x2 starting at (1, 1)
+        let mut cropped = vec![0u8; 2 * 2 * 4];
+        assert!(snipsnap_crop_rgba(src.as_ptr(), 4, 4, 1, 1, 2, 2, cropped.as_mut_ptr()));
+        assert_eq!(&cropped[0..4], &[60, 60, 200, 255]);
+        assert_eq!(&cropped[12..16], &[120, 120, 200, 255]);
+
+        // Erase center (1,1,2,2) on src
+        assert!(snipsnap_erase_rect_rgba(src.as_mut_ptr(), 4, 4, 1, 1, 2, 2));
+        assert_eq!(&src[(1 * 4 + 1) * 4..(1 * 4 + 1) * 4 + 4], &[0, 0, 0, 0]);
+        assert_eq!(&src[0..4], &[0, 0, 200, 255]);
+
+        // Composite semi-transparent overlay back into erased slot
+        let overlay = vec![100u8, 200, 50, 255].repeat(4);
+        assert!(snipsnap_composite_rgba(
+            src.as_mut_ptr(),
+            4,
+            4,
+            overlay.as_ptr(),
+            2,
+            2,
+            1,
+            1
+        ));
+        assert_eq!(&src[(1 * 4 + 1) * 4..(1 * 4 + 1) * 4 + 4], &[100, 200, 50, 255]);
+
+        // Downscale 4x4 -> 2x2
+        let mut resized = vec![0u8; 2 * 2 * 4];
+        assert!(snipsnap_resize_rgba(src.as_ptr(), 4, 4, resized.as_mut_ptr(), 2, 2));
+        assert_eq!(resized.len(), 16);
+
+        // Pixelate and blur on larger 64x64 image
+        let mut region_img = vec![0u8; 64 * 64 * 4];
+        for y in 0..64 {
+            for x in 0..64 {
+                let i = (y * 64 + x) * 4;
+                region_img[i] = if x < 32 { 255 } else { 20 };
+                region_img[i + 1] = (y * 3) as u8;
+                region_img[i + 2] = 128;
+                region_img[i + 3] = 255;
+            }
+        }
+        assert!(snipsnap_pixelate_region_rgba(region_img.as_mut_ptr(), 64, 64, 8, 8, 32, 32, 8));
+        assert!(snipsnap_box_blur_region_rgba(region_img.as_mut_ptr(), 64, 64, 8, 8, 32, 32, 4));
+        // Edge near x=32 should now be smoothed instead of hard 255 -> 20 discontinuity
+        let edge_r = region_img[(24 * 64 + 32) * 4];
+        assert!(edge_r > 30 && edge_r < 245, "Expected blurred boundary, got {edge_r}");
+
+        // 4K speed test
+        let mut img_4k = vec![200u8; 3840 * 2160 * 4];
+        let t0 = Instant::now();
+        assert!(snipsnap_box_blur_region_rgba(img_4k.as_mut_ptr(), 3840, 2160, 0, 0, 800, 600, 12));
+        let blur_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        println!("800x600 3-pass Rust box blur in 4K image: {blur_ms:.3} ms");
     }
 }
