@@ -66,9 +66,16 @@ jobs:
           $certPath = Join-Path $env:RUNNER_TEMP "windows_cert.pfx"
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
           try {
-            $runnerExe = "build/windows/x64/runner/Release/snipsnap.exe"
-            if (Test-Path $runnerExe) {
-              .\scripts\sign_windows.ps1 -CertPath $certPath -CertPassword "$env:WINDOWS_CERT_PASSWORD" -TargetPath $runnerExe
+            # Gene - Nov, 22, 2026: Sign bundled snipsnap_core.dll alongside snipsnap.exe.
+            # Old implementation:
+            # $runnerExe = "build/windows/x64/runner/Release/snipsnap.exe"
+            # if (Test-Path $runnerExe) {
+            #   .\scripts\sign_windows.ps1 -CertPath $certPath -CertPassword "$env:WINDOWS_CERT_PASSWORD" -TargetPath $runnerExe
+            # }
+            foreach ($bin in @("build/windows/x64/runner/Release/snipsnap.exe", "build/windows/x64/runner/Release/snipsnap_core.dll")) {
+              if (Test-Path $bin) {
+                .\scripts\sign_windows.ps1 -CertPath $certPath -CertPassword "$env:WINDOWS_CERT_PASSWORD" -TargetPath $bin
+              }
             }
           } finally {
             if (Test-Path $certPath) { Remove-Item -Force $certPath }
@@ -204,6 +211,28 @@ jobs:
 
       - name: Build Store MSIX
         run: dart run msix:create --store
+
+      # Gene - Nov, 22, 2026: Verify critical binaries (including snipsnap_core.dll) and manifest are packaged inside the Store MSIX.
+      - name: Verify Store MSIX contents
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $msix = Get-ChildItem -Path "build/windows/msix/*.msix" | Select-Object -First 1
+          if (-not $msix) {
+            throw "No MSIX file found in build/windows/msix/"
+          }
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($msix.FullName)
+          try {
+            $entries = $zip.Entries | ForEach-Object { $_.FullName.ToLowerInvariant() }
+            foreach ($req in @("snipsnap.exe", "snipsnap_core.dll", "flutter_windows.dll", "appxmanifest.xml")) {
+              if (-not ($entries -contains $req)) {
+                throw "Store MSIX $($msix.Name) is missing required entry: $req"
+              }
+            }
+            Write-Host "Verified Store MSIX ($($msix.Name)) contains all required entries."
+          } finally {
+            $zip.Dispose()
+          }
 
       - name: Upload Store MSIX artifact
         uses: actions/upload-artifact@v4

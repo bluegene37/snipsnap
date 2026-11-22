@@ -3411,7 +3411,20 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         );
         if (pixelPos == null) return;
 
-        final raw = await uiImg.toByteData(format: ui.ImageByteFormat.rawRgba);
+        // Gene - Nov, 22, 2026: Request straight (un-premultiplied) RGBA bytes and honor ByteData view bounds before passing pixels to Rust floodFillRgba and PNG encoders.
+        // Old implementation:
+        // final raw = await uiImg.toByteData(format: ui.ImageByteFormat.rawRgba);
+        // if (raw != null && mounted && widget.imagePath == path) {
+        //   final argb = widget.activeColor.toARGB32();
+        //   final packedRgba =
+        //       (((argb >> 16) & 0xFF) << 24) |
+        //       (((argb >> 8) & 0xFF) << 16) |
+        //       ((argb & 0xFF) << 8) |
+        //       ((argb >> 24) & 0xFF);
+        //   final rgba = Uint8List.fromList(raw.buffer.asUint8List());
+        final raw = await uiImg.toByteData(
+          format: ui.ImageByteFormat.rawStraightRgba,
+        );
         if (raw != null && mounted && widget.imagePath == path) {
           final argb = widget.activeColor.toARGB32();
           final packedRgba =
@@ -3419,7 +3432,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
               (((argb >> 8) & 0xFF) << 16) |
               ((argb & 0xFF) << 8) |
               ((argb >> 24) & 0xFF);
-          final rgba = Uint8List.fromList(raw.buffer.asUint8List());
+          final rgba = Uint8List.fromList(
+            raw.buffer.asUint8List(raw.offsetInBytes, raw.lengthInBytes),
+          );
           // Old order ran beforeFill() before knowing whether any pixel changed or native write succeeded,
           // which risked pushing an extra undo snapshot on fallback. Run pure in-memory fill first.
           final changed = RustImageCore.floodFillRgba(

@@ -226,16 +226,38 @@ class _RustBindings {
       }
     } catch (_) {}
 
+    // Gene - Nov, 22, 2026: Prepend executable-adjacent absolute DLL/dylib paths so Store MSIX launches (whose CWD is often System32) resolve snipsnap_core reliably without CWD search.
+    // Old implementation:
+    // final candidates = <String>[
+    //   if (Platform.isMacOS) ...[
+    //     'libsnipsnap_core.dylib',
+    //     'native/snipsnap_core/target/release/libsnipsnap_core.dylib',
+    //     'native/snipsnap_core/target/debug/libsnipsnap_core.dylib',
+    //   ] else if (Platform.isWindows) ...[
+    //     'snipsnap_core.dll',
+    //     'native/snipsnap_core/target/x86_64-pc-windows-msvc/release/snipsnap_core.dll',
+    //     'native/snipsnap_core/target/release/snipsnap_core.dll',
+    //   ] else if (Platform.isLinux) ...[
+    //     'libsnipsnap_core.so',
+    //     'native/snipsnap_core/target/release/libsnipsnap_core.so',
+    //   ],
+    // ];
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final sep = Platform.pathSeparator;
     final candidates = <String>[
       if (Platform.isMacOS) ...[
+        '$exeDir$sep..${sep}Frameworks${sep}libsnipsnap_core.dylib',
+        '$exeDir${sep}libsnipsnap_core.dylib',
         'libsnipsnap_core.dylib',
         'native/snipsnap_core/target/release/libsnipsnap_core.dylib',
         'native/snipsnap_core/target/debug/libsnipsnap_core.dylib',
       ] else if (Platform.isWindows) ...[
+        '$exeDir${sep}snipsnap_core.dll',
         'snipsnap_core.dll',
         'native/snipsnap_core/target/x86_64-pc-windows-msvc/release/snipsnap_core.dll',
         'native/snipsnap_core/target/release/snipsnap_core.dll',
       ] else if (Platform.isLinux) ...[
+        '$exeDir${sep}libsnipsnap_core.so',
         'libsnipsnap_core.so',
         'native/snipsnap_core/target/release/libsnipsnap_core.so',
       ],

@@ -72,12 +72,28 @@ class StorageService {
           );
           if (decodedUi != null) {
             try {
+              // Gene - Nov, 22, 2026: Request straight (un-premultiplied) RGBA bytes and slice exact ByteData bounds for native JPEG export.
+              // Old implementation:
+              // final rawRgba = await decodedUi.toByteData(
+              //   format: ui.ImageByteFormat.rawRgba,
+              // );
+              // if (rawRgba != null) {
+              //   nativeJpg = await CaptureService.encodeRgbaToJpg(
+              //     rgba: rawRgba.buffer.asUint8List(),
+              //     width: decodedUi.width,
+              //     height: decodedUi.height,
+              //     quality: jpgQuality,
+              //   );
+              // }
               final rawRgba = await decodedUi.toByteData(
-                format: ui.ImageByteFormat.rawRgba,
+                format: ui.ImageByteFormat.rawStraightRgba,
               );
               if (rawRgba != null) {
                 nativeJpg = await CaptureService.encodeRgbaToJpg(
-                  rgba: rawRgba.buffer.asUint8List(),
+                  rgba: rawRgba.buffer.asUint8List(
+                    rawRgba.offsetInBytes,
+                    rawRgba.lengthInBytes,
+                  ),
                   width: decodedUi.width,
                   height: decodedUi.height,
                   quality: jpgQuality,

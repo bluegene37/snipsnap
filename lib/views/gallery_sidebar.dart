@@ -161,7 +161,12 @@ class _GallerySidebarState extends State<GallerySidebar> {
   void _onScroll() {
     if (!_scrollController.hasClients) return;
     final pos = _scrollController.position;
-    if (pos.pixels <= 0 || pos.pixels < pos.maxScrollExtent - 300) return;
+    // Gene - Nov, 22, 2026: Allow loading more when filtered/non-scrollable list reaches end (maxScrollExtent <= 0) as well as near right edge.
+    // Old implementation:
+    // if (pos.pixels <= 0 || pos.pixels < pos.maxScrollExtent - 300) return;
+    if (pos.maxScrollExtent > 0 && pos.pixels < pos.maxScrollExtent - 300) {
+      return;
+    }
 
     final filtered = _filteredItems;
     final total = filtered.length;
@@ -457,6 +462,14 @@ class _GallerySidebarState extends State<GallerySidebar> {
                             if (_scrollController.hasClients) {
                               _scrollController.jumpTo(0.0);
                             }
+                            // Gene - Nov, 22, 2026: Trigger onLoadMore when switching to a sparse filter (e.g. Videos) whose matches on page 1 are below initialBatchSize.
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (!mounted) return;
+                              if (_filteredItems.length <
+                                  widget.initialBatchSize) {
+                                widget.onLoadMore?.call();
+                              }
+                            });
                           },
                           child: DecoratedBox(
                             decoration: t.controlDecoration(

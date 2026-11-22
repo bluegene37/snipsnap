@@ -68,42 +68,34 @@ void main() {
       skip: skipWithoutNativeChannel,
     );
 
-    test(
-      'returns false when native channel returns false or null',
-      () async {
-        setCaptureMock((MethodCall call) async {
-          captureCalls.add(call);
-          return false;
-        });
-        expect(
-          await ClipboardService.copyImageBytesToClipboard(pngBytes),
-          isFalse,
-        );
+    test('returns false when native channel returns false or null', () async {
+      setCaptureMock((MethodCall call) async {
+        captureCalls.add(call);
+        return false;
+      });
+      expect(
+        await ClipboardService.copyImageBytesToClipboard(pngBytes),
+        isFalse,
+      );
 
-        setCaptureMock((MethodCall call) async {
-          captureCalls.add(call);
-          return null;
-        });
-        expect(
-          await ClipboardService.copyImageBytesToClipboard(pngBytes),
-          isFalse,
-        );
-        expect(captureCalls, hasLength(2));
-      },
-      skip: skipWithoutNativeChannel,
-    );
+      setCaptureMock((MethodCall call) async {
+        captureCalls.add(call);
+        return null;
+      });
+      expect(
+        await ClipboardService.copyImageBytesToClipboard(pngBytes),
+        isFalse,
+      );
+      expect(captureCalls, hasLength(2));
+    }, skip: skipWithoutNativeChannel);
 
-    test(
-      'returns false without throwing on MissingPluginException',
-      () async {
-        setCaptureMock(null);
+    test('returns false without throwing on MissingPluginException', () async {
+      setCaptureMock(null);
 
-        final ok = await ClipboardService.copyImageBytesToClipboard(pngBytes);
+      final ok = await ClipboardService.copyImageBytesToClipboard(pngBytes);
 
-        expect(ok, isFalse);
-      },
-      skip: skipWithoutNativeChannel,
-    );
+      expect(ok, isFalse);
+    }, skip: skipWithoutNativeChannel);
 
     test(
       'returns false without throwing when native channel throws PlatformException',
@@ -182,14 +174,17 @@ void main() {
   });
 
   group('copyText', () {
-    test('writes text through Clipboard.setData on SystemChannels.platform', () async {
-      await ClipboardService.copyText('Hello SnipSnap');
+    test(
+      'writes text through Clipboard.setData on SystemChannels.platform',
+      () async {
+        await ClipboardService.copyText('Hello SnipSnap');
 
-      expect(platformCalls, hasLength(1));
-      expect(platformCalls.single.method, 'Clipboard.setData');
-      final args = platformCalls.single.arguments as Map<Object?, Object?>;
-      expect(args['text'], 'Hello SnipSnap');
-    });
+        expect(platformCalls, hasLength(1));
+        expect(platformCalls.single.method, 'Clipboard.setData');
+        final args = platformCalls.single.arguments as Map<Object?, Object?>;
+        expect(args['text'], 'Hello SnipSnap');
+      },
+    );
   });
 
   group('pasteImageFromClipboard', () {
@@ -247,19 +242,15 @@ void main() {
       skip: skipWithoutNativeChannel,
     );
 
-    test(
-      'returns null when native channel returns null',
-      () async {
-        setCaptureMock((MethodCall call) async => null);
+    test('returns null when native channel returns null', () async {
+      setCaptureMock((MethodCall call) async => null);
 
-        final saved = await ClipboardService.pasteImageFromClipboard(
-          '${tempDir.path}/none.png',
-        );
+      final saved = await ClipboardService.pasteImageFromClipboard(
+        '${tempDir.path}/none.png',
+      );
 
-        expect(saved, isNull);
-      },
-      skip: skipWithoutNativeChannel,
-    );
+      expect(saved, isNull);
+    }, skip: skipWithoutNativeChannel);
 
     test(
       'returns null without throwing on MissingPluginException and PlatformException',

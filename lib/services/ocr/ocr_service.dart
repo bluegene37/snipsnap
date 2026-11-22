@@ -114,8 +114,22 @@ class OcrService {
               format: ui.ImageByteFormat.rawRgba,
             );
             if (rawData != null) {
+              // Gene - Nov, 22, 2026: Honor ByteData view bounds when slicing rawRgba/png buffers (rawRgba stays premultiplied to match ui.PixelFormat.rgba8888 below).
+              // Old implementation:
+              // final croppedRgba = RustImageCore.cropRgba(
+              //   src: rawData.buffer.asUint8List(),
+              //   srcWidth: fullW,
+              //   srcHeight: fullH,
+              //   cropX: x,
+              //   cropY: y,
+              //   cropWidth: w,
+              //   cropHeight: h,
+              // );
               final croppedRgba = RustImageCore.cropRgba(
-                src: rawData.buffer.asUint8List(),
+                src: rawData.buffer.asUint8List(
+                  rawData.offsetInBytes,
+                  rawData.lengthInBytes,
+                ),
                 srcWidth: fullW,
                 srcHeight: fullH,
                 cropX: x,
@@ -138,8 +152,15 @@ class OcrService {
                     format: ui.ImageByteFormat.png,
                   );
                   if (croppedPng != null) {
+                    // Old implementation:
+                    // final result = await engine.recognize(
+                    //   croppedPng.buffer.asUint8List(),
+                    // );
                     final result = await engine.recognize(
-                      croppedPng.buffer.asUint8List(),
+                      croppedPng.buffer.asUint8List(
+                        croppedPng.offsetInBytes,
+                        croppedPng.lengthInBytes,
+                      ),
                     );
                     final fullImageSize = Size(
                       fullW.toDouble(),

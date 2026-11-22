@@ -35,6 +35,8 @@
 // #include <thread>
 // #include <vector>
 #include <windows.h>
+// Gene - Nov, 22, 2026: Explicitly include oleauto.h (for VariantInit) and climits (for INT_MAX/UINT_MAX overflow checks).
+#include <oleauto.h>
 #include <windowsx.h>
 #include <shlobj.h>
 #include <wincodec.h>
@@ -57,6 +59,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -311,7 +314,37 @@ bool EncodeBgraToPngBytes(const uint8_t* bgra_pixels, int width, int height,
   hr = frame->SetPixelFormat(&format);
   if (FAILED(hr)) return false;
 
-  UINT buffer_size = static_cast<UINT>(stride * height);
+  // Gene - Nov, 22, 2026: Check 32-bit byte size overflow for tall panoramic screenshots and read logical IStream byte length via STATSTG instead of GlobalSize slack.
+  // Old implementation:
+  // UINT buffer_size = static_cast<UINT>(stride * height);
+  // hr = frame->WritePixels(
+  //     static_cast<UINT>(height), static_cast<UINT>(stride), buffer_size,
+  //     const_cast<BYTE*>(reinterpret_cast<const BYTE*>(bgra_pixels)));
+  // if (FAILED(hr)) return false;
+  //
+  // hr = frame->Commit();
+  // if (FAILED(hr)) return false;
+  //
+  // hr = encoder->Commit();
+  // if (FAILED(hr)) return false;
+  //
+  // HGLOBAL hglobal = nullptr;
+  // hr = ::GetHGlobalFromStream(stream.Get(), &hglobal);
+  // if (FAILED(hr) || !hglobal) return false;
+  //
+  // SIZE_T size = ::GlobalSize(hglobal);
+  // void* ptr = ::GlobalLock(hglobal);
+  // if (!ptr || size == 0) return false;
+  //
+  // out_png->assign(static_cast<const uint8_t*>(ptr),
+  //                 static_cast<const uint8_t*>(ptr) + size);
+  // ::GlobalUnlock(hglobal);
+  // return true;
+  if (stride <= 0) return false;
+  const size_t total_bytes =
+      static_cast<size_t>(stride) * static_cast<size_t>(height);
+  if (total_bytes > UINT_MAX) return false;
+  UINT buffer_size = static_cast<UINT>(total_bytes);
   hr = frame->WritePixels(
       static_cast<UINT>(height), static_cast<UINT>(stride), buffer_size,
       const_cast<BYTE*>(reinterpret_cast<const BYTE*>(bgra_pixels)));
@@ -327,9 +360,19 @@ bool EncodeBgraToPngBytes(const uint8_t* bgra_pixels, int width, int height,
   hr = ::GetHGlobalFromStream(stream.Get(), &hglobal);
   if (FAILED(hr) || !hglobal) return false;
 
-  SIZE_T size = ::GlobalSize(hglobal);
+  SIZE_T alloc_size = ::GlobalSize(hglobal);
+  SIZE_T size = alloc_size;
+  STATSTG stat = {};
+  if (SUCCEEDED(stream->Stat(&stat, STATFLAG_NONAME)) &&
+      stat.cbSize.QuadPart > 0) {
+    size = static_cast<SIZE_T>(
+        std::min<ULONGLONG>(stat.cbSize.QuadPart, alloc_size));
+  }
   void* ptr = ::GlobalLock(hglobal);
-  if (!ptr || size == 0) return false;
+  if (!ptr || size == 0) {
+    if (ptr) ::GlobalUnlock(hglobal);
+    return false;
+  }
 
   out_png->assign(static_cast<const uint8_t*>(ptr),
                   static_cast<const uint8_t*>(ptr) + size);
@@ -4573,12 +4616,64 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
               WICPixelFormatGUID fmt = GUID_WICPixelFormat24bppBGR;
               if (FAILED(frame->SetPixelFormat(&fmt))) break;
 
+              // Gene - Nov, 22, 2026: Alpha-composite semi-transparent/erased pixels onto white before 24bpp JPEG encoding, guard UINT size overflow, and trim trailing GlobalSize slack via STATSTG.
+              // Old implementation:
+              // const size_t px_count = static_cast<size_t>(w) * h;
+              // std::vector<uint8_t> bgr(px_count * 3);
+              // for (size_t i = 0; i < px_count; ++i) {
+              //   bgr[i * 3 + 0] = pixels[i * 4 + 2];
+              //   bgr[i * 3 + 1] = pixels[i * 4 + 1];
+              //   bgr[i * 3 + 2] = pixels[i * 4 + 0];
+              // }
+              // UINT stride24 = static_cast<UINT>(w * 3);
+              // if (FAILED(frame->WritePixels(static_cast<UINT>(h), stride24,
+              //                               static_cast<UINT>(bgr.size()),
+              //                               bgr.data()))) {
+              //   break;
+              // }
+              // if (FAILED(frame->Commit())) break;
+              // if (FAILED(encoder->Commit())) break;
+              //
+              // HGLOBAL hglobal = nullptr;
+              // if (FAILED(::GetHGlobalFromStream(stream.Get(), &hglobal)) ||
+              //     !hglobal) {
+              //   break;
+              // }
+              // SIZE_T sz = ::GlobalSize(hglobal);
+              // void* ptr = ::GlobalLock(hglobal);
+              // if (ptr && sz > 0) {
+              //   out_jpg.assign(static_cast<const uint8_t*>(ptr),
+              //                  static_cast<const uint8_t*>(ptr) + sz);
+              // }
+              // if (ptr) ::GlobalUnlock(hglobal);
               const size_t px_count = static_cast<size_t>(w) * h;
+              if (static_cast<size_t>(w) > UINT_MAX / 3 ||
+                  px_count > UINT_MAX / 3) {
+                break;
+              }
               std::vector<uint8_t> bgr(px_count * 3);
               for (size_t i = 0; i < px_count; ++i) {
-                bgr[i * 3 + 0] = pixels[i * 4 + 2];
-                bgr[i * 3 + 1] = pixels[i * 4 + 1];
-                bgr[i * 3 + 2] = pixels[i * 4 + 0];
+                uint8_t r = pixels[i * 4 + 0];
+                uint8_t g = pixels[i * 4 + 1];
+                uint8_t b = pixels[i * 4 + 2];
+                uint8_t a = pixels[i * 4 + 3];
+                if (a == 255) {
+                  bgr[i * 3 + 0] = b;
+                  bgr[i * 3 + 1] = g;
+                  bgr[i * 3 + 2] = r;
+                } else if (a == 0) {
+                  bgr[i * 3 + 0] = 255;
+                  bgr[i * 3 + 1] = 255;
+                  bgr[i * 3 + 2] = 255;
+                } else {
+                  const int inv = 255 - static_cast<int>(a);
+                  bgr[i * 3 + 0] = static_cast<uint8_t>(
+                      (static_cast<int>(b) * a + 255 * inv + 127) / 255);
+                  bgr[i * 3 + 1] = static_cast<uint8_t>(
+                      (static_cast<int>(g) * a + 255 * inv + 127) / 255);
+                  bgr[i * 3 + 2] = static_cast<uint8_t>(
+                      (static_cast<int>(r) * a + 255 * inv + 127) / 255);
+                }
               }
               UINT stride24 = static_cast<UINT>(w * 3);
               if (FAILED(frame->WritePixels(static_cast<UINT>(h), stride24,
@@ -4594,7 +4689,14 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
                   !hglobal) {
                 break;
               }
-              SIZE_T sz = ::GlobalSize(hglobal);
+              SIZE_T alloc_sz = ::GlobalSize(hglobal);
+              SIZE_T sz = alloc_sz;
+              STATSTG stat = {};
+              if (SUCCEEDED(stream->Stat(&stat, STATFLAG_NONAME)) &&
+                  stat.cbSize.QuadPart > 0) {
+                sz = static_cast<SIZE_T>(
+                    std::min<ULONGLONG>(stat.cbSize.QuadPart, alloc_sz));
+              }
               void* ptr = ::GlobalLock(hglobal);
               if (ptr && sz > 0) {
                 out_jpg.assign(static_cast<const uint8_t*>(ptr),

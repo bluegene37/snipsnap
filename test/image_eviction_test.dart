@@ -35,9 +35,12 @@ void main() {
     return key;
   }
 
-  test('kGalleryThumbnailCacheWidth matches gallery thumbnail decode width', () {
-    expect(kGalleryThumbnailCacheWidth, 360);
-  });
+  test(
+    'kGalleryThumbnailCacheWidth matches gallery thumbnail decode width',
+    () {
+      expect(kGalleryThumbnailCacheWidth, 360);
+    },
+  );
 
   test(
     'evictImageFileFromCaches removes both full-res FileImage and gallery ResizeImage entries',

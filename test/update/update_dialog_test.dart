@@ -79,7 +79,9 @@ void main() {
       );
       final controller = UpdateController(service: service);
 
-      await tester.pumpWidget(_wrap(child: UpdateDialog(controller: controller)));
+      await tester.pumpWidget(
+        _wrap(child: UpdateDialog(controller: controller)),
+      );
       expect(find.byType(Dialog), findsNothing);
       expect(find.text('Update Available'), findsNothing);
 
@@ -107,7 +109,9 @@ void main() {
       final controller = UpdateController(service: service);
       await controller.checkSilently();
 
-      await tester.pumpWidget(_wrap(child: UpdateDialog(controller: controller)));
+      await tester.pumpWidget(
+        _wrap(child: UpdateDialog(controller: controller)),
+      );
 
       expect(
         find.text('SnipSnap 1.1.0 is available. You are on 1.0.0.'),
@@ -140,7 +144,9 @@ void main() {
       final controller = UpdateController(service: service);
       await controller.checkSilently();
 
-      await tester.pumpWidget(_wrap(child: UpdateDialog(controller: controller)));
+      await tester.pumpWidget(
+        _wrap(child: UpdateDialog(controller: controller)),
+      );
 
       expect(
         find.text('The download page opens in your browser.'),
@@ -156,7 +162,9 @@ void main() {
       await tester.tap(downloadBtn);
       await tester.pump();
 
-      expect(service.openedUrls, <String>['https://example.com/releases/v1.1.0']);
+      expect(service.openedUrls, <String>[
+        'https://example.com/releases/v1.1.0',
+      ]);
     },
   );
 
@@ -179,7 +187,9 @@ void main() {
       final controller = UpdateController(service: service);
       await controller.checkSilently();
 
-      await tester.pumpWidget(_wrap(child: UpdateDialog(controller: controller)));
+      await tester.pumpWidget(
+        _wrap(child: UpdateDialog(controller: controller)),
+      );
 
       await tester.tap(
         find.widgetWithText(ElevatedButton, 'Install & Restart'),
@@ -271,7 +281,9 @@ void main() {
       await tester.tap(openReleaseBtn);
       await tester.pump();
 
-      expect(service.openedUrls, <String>['https://example.com/releases/v1.1.0']);
+      expect(service.openedUrls, <String>[
+        'https://example.com/releases/v1.1.0',
+      ]);
     },
   );
 

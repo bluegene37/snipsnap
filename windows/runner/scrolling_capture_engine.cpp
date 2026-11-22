@@ -59,17 +59,55 @@ std::wstring Utf8ToWideLocal(const std::string& utf8) {
   return out;
 }
 
+// Gene - Nov, 22, 2026: Per-monitor DPI scaling helpers for HiDPI scrolling capture HUD.
+double GetHudDpiScale(HWND hwnd) {
+  using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
+  if (hwnd) {
+    HMODULE user32 = ::GetModuleHandleW(L"user32.dll");
+    if (user32) {
+      auto fn = reinterpret_cast<GetDpiForWindowFn>(
+          ::GetProcAddress(user32, "GetDpiForWindow"));
+      if (fn) {
+        UINT dpi = fn(hwnd);
+        if (dpi > 0) {
+          return std::clamp(static_cast<double>(dpi) / 96.0, 1.0, 3.0);
+        }
+      }
+    }
+  }
+  HDC dc = ::GetDC(hwnd);
+  int dpi = dc ? ::GetDeviceCaps(dc, LOGPIXELSX) : 96;
+  if (dc) {
+    ::ReleaseDC(hwnd, dc);
+  }
+  return std::clamp(static_cast<double>(dpi) / 96.0, 1.0, 3.0);
+}
+
+int ScalePx(int px, double scale) {
+  return static_cast<int>(std::lround(static_cast<double>(px) * scale));
+}
+
+// Gene - Nov, 22, 2026: Added corner radius parameter for HiDPI HUD button rendering.
+// Old implementation:
+// void DrawHudPill(HDC hdc,
+//                  const RECT& r,
+//                  COLORREF fill,
+//                  COLORREF border,
+//                  const std::wstring& label,
+//                  COLORREF text_color) {
 void DrawHudPill(HDC hdc,
                  const RECT& r,
                  COLORREF fill,
                  COLORREF border,
                  const std::wstring& label,
-                 COLORREF text_color) {
+                 COLORREF text_color,
+                 int corner = 10) {
   HBRUSH br = ::CreateSolidBrush(fill);
   HPEN pen = ::CreatePen(PS_SOLID, 1, border);
   HGDIOBJ old_br = ::SelectObject(hdc, br);
   HGDIOBJ old_pen = ::SelectObject(hdc, pen);
-  ::RoundRect(hdc, r.left, r.top, r.right, r.bottom, 10, 10);
+  // ::RoundRect(hdc, r.left, r.top, r.right, r.bottom, 10, 10);
+  ::RoundRect(hdc, r.left, r.top, r.right, r.bottom, corner, corner);
   ::SelectObject(hdc, old_br);
   ::SelectObject(hdc, old_pen);
   ::DeleteObject(br);
@@ -294,6 +332,16 @@ struct WgcMonitorSession {
       if (!frame_pool || !staging || !d3d_ctx) return false;
       auto frame = frame_pool.TryGetNextFrame();
       if (!frame) return false;
+      // Gene - Nov, 22, 2026: Ensure Direct3D11CaptureFrame is explicitly closed on all return paths so the 2-frame WGC pool never stalls.
+      struct FrameCloser {
+        winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame& f;
+        ~FrameCloser() {
+          try {
+            f.Close();
+          } catch (...) {
+          }
+        }
+      } frame_closer{frame};
 
       auto surface = frame.Surface();
       if (!surface) return false;
@@ -352,6 +400,8 @@ struct ScrollingCaptureEngine::Impl {
   std::atomic<bool> finish_requested{false};
   std::atomic<bool> cancel_requested{false};
   std::atomic<bool> has_moved_content{false};
+  // Gene - Nov, 22, 2026: Signal manual scroll pause atomically from WH_MOUSE_LL hook instead of locking/posting inside the OS hook callback.
+  std::atomic<bool> manual_scroll_paused_auto{false};
 
   std::mutex stitch_mutex;
   SnipSnapStitcher* stitcher = nullptr;
@@ -371,6 +421,9 @@ struct ScrollingCaptureEngine::Impl {
   HHOOK mouse_hook = nullptr;
   HHOOK key_hook = nullptr;
 
+  // Gene - Nov, 22, 2026: Synchronize HUD window creation vs close requests across capture/shutdown/UI threads to prevent lost WM_APP close messages and Shutdown() hangs.
+  std::mutex ui_mutex;
+  bool ui_close_requested = false;
   HWND guide_hwnd = nullptr;
   HWND hud_hwnd = nullptr;
   RECT btn_auto = {};
@@ -386,14 +439,43 @@ struct ScrollingCaptureEngine::Impl {
 
   ~Impl() { Shutdown(); }
 
+  void RequestCloseUiWindows() {
+    HWND h = nullptr;
+    {
+      std::lock_guard<std::mutex> ulk(ui_mutex);
+      ui_close_requested = true;
+      h = hud_hwnd;
+    }
+    if (h && ::IsWindow(h)) {
+      ::PostMessageW(h, kMsgCloseWindows, 0, 0);
+    }
+  }
+
+  // Gene - Nov, 22, 2026: Use synchronized RequestCloseUiWindows() in Shutdown() so quick cancel/teardown never misses hud_hwnd initialization.
+  // Old implementation:
+  // void Shutdown() {
+  //   cancel_requested.store(true);
+  //   active.store(false);
+  //   auto_scroll.store(false);
+  //
+  //   if (hud_hwnd && ::IsWindow(hud_hwnd)) {
+  //     ::PostMessageW(hud_hwnd, kMsgCloseWindows, 0, 0);
+  //   }
+  //   if (worker_thread.joinable()) {
+  //     worker_thread.join();
+  //   }
+  //   if (ui_thread.joinable()) {
+  //     ui_thread.join();
+  //   }
+  //   UninstallHooks();
+  //   FreeStitcher();
+  // }
   void Shutdown() {
     cancel_requested.store(true);
     active.store(false);
     auto_scroll.store(false);
 
-    if (hud_hwnd && ::IsWindow(hud_hwnd)) {
-      ::PostMessageW(hud_hwnd, kMsgCloseWindows, 0, 0);
-    }
+    RequestCloseUiWindows();
     if (worker_thread.joinable()) {
       worker_thread.join();
     }
@@ -424,13 +506,18 @@ struct ScrollingCaptureEngine::Impl {
           std::lock_guard<std::mutex> lk(s_hook_instance_mutex);
           self = s_hook_instance;
         }
-        if (self && self->auto_scroll.load()) {
-          self->auto_scroll.store(false);
-          {
-            std::lock_guard<std::mutex> lk(self->state_mutex);
-            self->latest_warning = "Manual scroll detected - Auto-Scroll paused";
-          }
-          self->NotifyHudAndProgress();
+        // Gene - Nov, 22, 2026: Keep WH_MOUSE_LL lock-free regarding state_mutex and Flutter callbacks; worker thread reads manual_scroll_paused_auto.
+        // Old implementation:
+        // if (self && self->auto_scroll.load()) {
+        //   self->auto_scroll.store(false);
+        //   {
+        //     std::lock_guard<std::mutex> lk(self->state_mutex);
+        //     self->latest_warning = "Manual scroll detected - Auto-Scroll paused";
+        //   }
+        //   self->NotifyHudAndProgress();
+        // }
+        if (self && self->auto_scroll.exchange(false)) {
+          self->manual_scroll_paused_auto.store(true);
         }
       }
     }
@@ -518,8 +605,18 @@ struct ScrollingCaptureEngine::Impl {
       st = latest_status;
       warn = latest_warning;
     }
-    if (hud_hwnd && ::IsWindow(hud_hwnd)) {
-      ::PostMessageW(hud_hwnd, kMsgUpdateHud, 0, 0);
+    // Gene - Nov, 22, 2026: Snapshot hud_hwnd under ui_mutex before posting HUD invalidation.
+    // Old implementation:
+    // if (hud_hwnd && ::IsWindow(hud_hwnd)) {
+    //   ::PostMessageW(hud_hwnd, kMsgUpdateHud, 0, 0);
+    // }
+    HWND target_hud = nullptr;
+    {
+      std::lock_guard<std::mutex> ulk(ui_mutex);
+      target_hud = hud_hwnd;
+    }
+    if (target_hud && ::IsWindow(target_hud)) {
+      ::PostMessageW(target_hud, kMsgUpdateHud, 0, 0);
     }
     if (callbacks.on_progress) {
       callbacks.on_progress(w, h, frames, axis, st, p, a, warn);
@@ -598,21 +695,25 @@ struct ScrollingCaptureEngine::Impl {
     bool is_paused = paused.load();
     bool is_auto = auto_scroll.load();
 
+    // Gene - Nov, 22, 2026: Scale HUD fonts, thumbnail box, text rects, and button pills by monitor DPI.
+    const double dpi_scale = GetHudDpiScale(hwnd);
+
     HFONT font = ::CreateFontW(
-        -13, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        -ScalePx(13, dpi_scale), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
     HFONT small_font = ::CreateFontW(
-        -11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        -ScalePx(11, dpi_scale), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
     HGDIOBJ old_font = ::SelectObject(mem_dc, font);
 
     // Status dot
     COLORREF dot_col = is_paused ? RGB(240, 155, 40) : RGB(235, 68, 56);
     HBRUSH dot_br = ::CreateSolidBrush(dot_col);
     HGDIOBJ old_dot_br = ::SelectObject(mem_dc, dot_br);
-    ::Ellipse(mem_dc, 14, 15, 24, 25);
+    ::Ellipse(mem_dc, ScalePx(14, dpi_scale), ScalePx(15, dpi_scale),
+              ScalePx(24, dpi_scale), ScalePx(25, dpi_scale));
     ::SelectObject(mem_dc, old_dot_br);
     ::DeleteObject(dot_br);
 
@@ -620,7 +721,8 @@ struct ScrollingCaptureEngine::Impl {
     ::SetTextColor(mem_dc, RGB(255, 255, 255));
     std::wostringstream hdr;
     hdr << w << L" x " << h << L" px  (" << frames << L" frames)";
-    RECT hdr_rc = {32, 10, cw - 92, 30};
+    RECT hdr_rc = {ScalePx(32, dpi_scale), ScalePx(10, dpi_scale),
+                   cw - ScalePx(92, dpi_scale), ScalePx(30, dpi_scale)};
     ::DrawTextW(mem_dc, hdr.str().c_str(), -1, &hdr_rc,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
@@ -630,26 +732,29 @@ struct ScrollingCaptureEngine::Impl {
             : (axis == SNIPSNAP_AXIS_VERTICAL ? L"Vertical" : L"Auto");
     ::SelectObject(mem_dc, small_font);
     ::SetTextColor(mem_dc, RGB(222, 188, 150));
-    RECT axis_rc = {cw - 92, 10, cw - 12, 30};
+    RECT axis_rc = {cw - ScalePx(92, dpi_scale), ScalePx(10, dpi_scale),
+                    cw - ScalePx(12, dpi_scale), ScalePx(30, dpi_scale)};
     ::DrawTextW(mem_dc, axis_lbl.c_str(), -1, &axis_rc,
                 DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
     // Live thumbnail box
-    RECT box = {14, 38, 108, 108};
+    RECT box = {ScalePx(14, dpi_scale), ScalePx(38, dpi_scale),
+                ScalePx(108, dpi_scale), ScalePx(108, dpi_scale)};
     HBRUSH pv_bg = ::CreateSolidBrush(RGB(15, 11, 8));
     ::FillRect(mem_dc, &box, pv_bg);
     ::DeleteObject(pv_bg);
     ::DrawEdge(mem_dc, &box, EDGE_ETCHED, BF_RECT);
 
     if (!preview_copy.empty() && pw > 0 && ph > 0) {
-      int max_w = (box.right - box.left) - 4;
-      int max_h = (box.bottom - box.top) - 4;
+      int pad = ScalePx(2, dpi_scale);
+      int max_w = (box.right - box.left) - pad * 2;
+      int max_h = (box.bottom - box.top) - pad * 2;
       double sc = std::min(static_cast<double>(max_w) / pw,
                            static_cast<double>(max_h) / ph);
       int dw = std::max(1, static_cast<int>(std::round(pw * sc)));
       int dh = std::max(1, static_cast<int>(std::round(ph * sc)));
-      int dx = box.left + 2 + (max_w - dw) / 2;
-      int dy = box.top + 2 + (max_h - dh) / 2;
+      int dx = box.left + pad + (max_w - dw) / 2;
+      int dy = box.top + pad + (max_h - dh) / 2;
 
       BITMAPINFO bmi = {};
       bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -687,30 +792,33 @@ struct ScrollingCaptureEngine::Impl {
                 : L"Capturing stitch... press Enter or Done to finish.";
     }
     ::SetTextColor(mem_dc, msg_col);
-    RECT msg_rc = {118, 42, cw - 12, 108};
+    RECT msg_rc = {ScalePx(118, dpi_scale), ScalePx(42, dpi_scale),
+                   cw - ScalePx(12, dpi_scale), ScalePx(108, dpi_scale)};
     ::DrawTextW(mem_dc, msg.c_str(), -1, &msg_rc, DT_LEFT | DT_WORDBREAK);
 
     // Action buttons row
     ::SelectObject(mem_dc, font);
-    int by = ch - 40;
-    int bh = 28;
-    btn_auto = {14, by, 106, by + bh};
-    btn_pause = {112, by, 184, by + bh};
-    btn_done = {190, by, 276, by + bh};
-    btn_cancel = {cw - 92, by, cw - 14, by + bh};
+    int by = ch - ScalePx(40, dpi_scale);
+    int bh = ScalePx(28, dpi_scale);
+    int corner = ScalePx(10, dpi_scale);
+    btn_auto = {ScalePx(14, dpi_scale), by, ScalePx(106, dpi_scale), by + bh};
+    btn_pause = {ScalePx(112, dpi_scale), by, ScalePx(184, dpi_scale), by + bh};
+    btn_done = {ScalePx(190, dpi_scale), by, ScalePx(276, dpi_scale), by + bh};
+    btn_cancel = {cw - ScalePx(92, dpi_scale), by, cw - ScalePx(14, dpi_scale),
+                  by + bh};
 
     DrawHudPill(mem_dc, btn_auto,
                 is_auto ? RGB(52, 138, 88) : RGB(56, 44, 36),
                 RGB(115, 96, 82), is_auto ? L"Auto On" : L"Auto-Scroll",
-                RGB(255, 255, 255));
+                RGB(255, 255, 255), corner);
     DrawHudPill(mem_dc, btn_pause,
                 is_paused ? RGB(111, 78, 55) : RGB(56, 44, 36),
                 RGB(115, 96, 82), is_paused ? L"Resume" : L"Pause",
-                RGB(255, 255, 255));
+                RGB(255, 255, 255), corner);
     DrawHudPill(mem_dc, btn_done, RGB(111, 78, 55), RGB(178, 136, 102),
-                L"Done", RGB(255, 255, 255));
+                L"Done", RGB(255, 255, 255), corner);
     DrawHudPill(mem_dc, btn_cancel, RGB(48, 34, 30), RGB(130, 80, 74),
-                L"Cancel", RGB(255, 255, 255));
+                L"Cancel", RGB(255, 255, 255), corner);
 
     ::BitBlt(hdc, 0, 0, cw, ch, mem_dc, 0, 0, SRCCOPY);
     ::SelectObject(mem_dc, old_font);
@@ -841,6 +949,12 @@ struct ScrollingCaptureEngine::Impl {
       case WM_DESTROY:
         if (self) {
           self->UninstallHooks();
+          if (self->guide_hwnd && ::IsWindow(self->guide_hwnd)) {
+            ::DestroyWindow(self->guide_hwnd);
+            self->guide_hwnd = nullptr;
+          }
+          // Gene - Nov, 22, 2026: Clear hud_hwnd under ui_mutex during WM_DESTROY.
+          std::lock_guard<std::mutex> ulk(self->ui_mutex);
           self->hud_hwnd = nullptr;
         }
         ::PostQuitMessage(0);
@@ -850,6 +964,14 @@ struct ScrollingCaptureEngine::Impl {
   }
 
   void RunUiThread() {
+    // Gene - Nov, 22, 2026: Bail out immediately if shutdown/cancel already ran before UI window creation, and synchronize hud_hwnd publication + HiDPI sizing.
+    {
+      std::lock_guard<std::mutex> ulk(ui_mutex);
+      if (ui_close_requested || cancel_requested.load() || !active.load()) {
+        return;
+      }
+    }
+
     static const wchar_t* kGuideClass = L"SnipSnapScrollGuideClass";
     static const wchar_t* kHudClass = L"SnipSnapScrollHudClass";
     static std::atomic<bool> classes_registered{false};
@@ -891,28 +1013,70 @@ struct ScrollingCaptureEngine::Impl {
       work = mi.rcWork;
     }
 
-    const int hud_w = 384;
-    const int hud_h = 160;
-    int hud_x = std::clamp(config.x + (config.width - hud_w) / 2,
-                           static_cast<int>(work.left + 8),
-                           static_cast<int>(work.right - hud_w - 8));
-    int hud_y = config.y + config.height + 12;
-    if (hud_y + hud_h > work.bottom - 8) {
-      int above = config.y - hud_h - 12;
-      hud_y = (above >= work.top + 8)
-                  ? above
-                  : std::max(static_cast<int>(work.top + 14),
-                             static_cast<int>(work.bottom - hud_h - 14));
+    // Old implementation:
+    // const int hud_w = 384;
+    // const int hud_h = 160;
+    // ...
+    // hud_hwnd = ::CreateWindowExW(
+    //     WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kHudClass,
+    //     L"SnipSnap Scrolling Capture", WS_POPUP | WS_VISIBLE, hud_x, hud_y,
+    //     hud_w, hud_h, nullptr, nullptr, hinst, this);
+    // if (hud_hwnd) {
+    //   ::SetWindowDisplayAffinity(hud_hwnd, WDA_EXCLUDEFROMCAPTURE);
+    //   ::SetTimer(hud_hwnd, kAutoScrollTimerId, 70, nullptr);
+    // }
+    HWND created_hud = ::CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kHudClass,
+        L"SnipSnap Scrolling Capture", WS_POPUP, center_pt.x, center_pt.y, 384,
+        160, nullptr, nullptr, hinst, this);
+    if (!created_hud) {
+      if (guide_hwnd && ::IsWindow(guide_hwnd)) {
+        ::DestroyWindow(guide_hwnd);
+        guide_hwnd = nullptr;
+      }
+      return;
     }
 
-    hud_hwnd = ::CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kHudClass,
-        L"SnipSnap Scrolling Capture", WS_POPUP | WS_VISIBLE, hud_x, hud_y,
-        hud_w, hud_h, nullptr, nullptr, hinst, this);
-    if (hud_hwnd) {
-      ::SetWindowDisplayAffinity(hud_hwnd, WDA_EXCLUDEFROMCAPTURE);
-      ::SetTimer(hud_hwnd, kAutoScrollTimerId, 70, nullptr);
+    const double dpi_scale = GetHudDpiScale(created_hud);
+    const int hud_w = ScalePx(384, dpi_scale);
+    const int hud_h = ScalePx(160, dpi_scale);
+    const int edge_pad = ScalePx(8, dpi_scale);
+    const int gap_y = ScalePx(12, dpi_scale);
+    const int fallback_pad = ScalePx(14, dpi_scale);
+    int hud_x = std::clamp(config.x + (config.width - hud_w) / 2,
+                           static_cast<int>(work.left + edge_pad),
+                           static_cast<int>(work.right - hud_w - edge_pad));
+    int hud_y = config.y + config.height + gap_y;
+    if (hud_y + hud_h > work.bottom - edge_pad) {
+      int above = config.y - hud_h - gap_y;
+      hud_y = (above >= work.top + edge_pad)
+                  ? above
+                  : std::max(static_cast<int>(work.top + fallback_pad),
+                             static_cast<int>(work.bottom - hud_h - fallback_pad));
     }
+
+    bool abort_ui = false;
+    {
+      std::lock_guard<std::mutex> ulk(ui_mutex);
+      if (ui_close_requested || cancel_requested.load() || !active.load()) {
+        abort_ui = true;
+      } else {
+        hud_hwnd = created_hud;
+      }
+    }
+    if (abort_ui) {
+      ::DestroyWindow(created_hud);
+      if (guide_hwnd && ::IsWindow(guide_hwnd)) {
+        ::DestroyWindow(guide_hwnd);
+        guide_hwnd = nullptr;
+      }
+      return;
+    }
+
+    ::SetWindowDisplayAffinity(created_hud, WDA_EXCLUDEFROMCAPTURE);
+    ::SetWindowPos(created_hud, HWND_TOPMOST, hud_x, hud_y, hud_w, hud_h,
+                   SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    ::SetTimer(created_hud, kAutoScrollTimerId, 70, nullptr);
 
     InstallHooks();
 
@@ -1044,6 +1208,14 @@ struct ScrollingCaptureEngine::Impl {
     while (active.load() && !finish_requested.load() &&
            !cancel_requested.load()) {
       auto iter_start = std::chrono::steady_clock::now();
+      // Gene - Nov, 22, 2026: Flush manual-scroll auto-pause notice safely off the OS WH_MOUSE_LL hook thread.
+      if (manual_scroll_paused_auto.exchange(false)) {
+        {
+          std::lock_guard<std::mutex> slk(state_mutex);
+          latest_warning = "Manual scroll detected - Auto-Scroll paused";
+        }
+        NotifyHudAndProgress();
+      }
       if (!paused.load()) {
         if (using_wgc) {
           bool grabbed = wgc.TryGrabFrame(
@@ -1081,9 +1253,12 @@ struct ScrollingCaptureEngine::Impl {
     wgc.Close();
     gdi.Reset();
 
-    if (hud_hwnd && ::IsWindow(hud_hwnd)) {
-      ::PostMessageW(hud_hwnd, kMsgCloseWindows, 0, 0);
-    }
+    // Gene - Nov, 22, 2026: Synchronize HUD close signal across threads.
+    // Old implementation:
+    // if (hud_hwnd && ::IsWindow(hud_hwnd)) {
+    //   ::PostMessageW(hud_hwnd, kMsgCloseWindows, 0, 0);
+    // }
+    RequestCloseUiWindows();
 
     if (cancel_requested.load() || !finish_requested.load()) {
       FreeStitcher();
@@ -1170,6 +1345,11 @@ bool ScrollingCaptureEngine::Start(const ScrollingCaptureConfig& config,
   impl_->finish_requested.store(false);
   impl_->cancel_requested.store(false);
   impl_->has_moved_content.store(false);
+  impl_->manual_scroll_paused_auto.store(false);
+  {
+    std::lock_guard<std::mutex> ulk(impl_->ui_mutex);
+    impl_->ui_close_requested = false;
+  }
   impl_->active.store(true);
 
   {

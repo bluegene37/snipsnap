@@ -100,7 +100,22 @@ add_custom_command(
   COMMENT "Building Rust snipsnap_core staticlib (x86_64-pc-windows-msvc)"
   VERBATIM
 )
-add_custom_target(snipsnap_core_rust ALL DEPENDS "${SNIPSNAP_CORE_LIB}")
+# Gene - Nov, 22, 2026: Track both snipsnap_core.lib and snipsnap_core.dll in snipsnap_core_rust target and link synchronization.lib for Rust std on Windows.
+# Old implementation:
+# add_custom_target(snipsnap_core_rust ALL DEPENDS "${SNIPSNAP_CORE_LIB}")
+# add_dependencies(${BINARY_NAME} snipsnap_core_rust)
+#
+# target_link_libraries(${BINARY_NAME} PRIVATE
+#   "${SNIPSNAP_CORE_LIB}"
+#   "d3d11.lib"
+#   "dxgi.lib"
+#   "ws2_32.lib"
+#   "userenv.lib"
+#   "bcrypt.lib"
+#   "ntdll.lib"
+#   "advapi32.lib"
+# )
+add_custom_target(snipsnap_core_rust ALL DEPENDS "${SNIPSNAP_CORE_LIB}" "${SNIPSNAP_CORE_DLL}")
 add_dependencies(${BINARY_NAME} snipsnap_core_rust)
 
 target_link_libraries(${BINARY_NAME} PRIVATE
@@ -112,6 +127,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE
   "bcrypt.lib"
   "ntdll.lib"
   "advapi32.lib"
+  "synchronization.lib"
 )
 target_include_directories(${BINARY_NAME} PRIVATE
   "${CMAKE_SOURCE_DIR}"

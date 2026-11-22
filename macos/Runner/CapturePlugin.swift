@@ -396,7 +396,44 @@ class CapturePlugin: NSObject {
       let jpgSource = typed.data
       DispatchQueue.global(qos: .userInitiated).async {
         let outData: Data? = autoreleasepool {
-          guard let provider = CGDataProvider(data: jpgSource as CFData) else { return nil }
+          // Gene - Nov, 22, 2026: Composite semi-transparent/erased straight-RGBA pixels over white before JPEG encoding so transparent regions never export as black.
+          // Old implementation:
+          // guard let provider = CGDataProvider(data: jpgSource as CFData) else { return nil }
+          let byteCount = width * height * 4
+          let hasAlpha = jpgSource.withUnsafeBytes { raw -> Bool in
+            guard let ptr = raw.bindMemory(to: UInt8.self).baseAddress else { return false }
+            var i = 3
+            while i < byteCount {
+              if ptr[i] < 255 { return true }
+              i += 4
+            }
+            return false
+          }
+          let rgbData: Data
+          if hasAlpha {
+            var composited = [UInt8](jpgSource)
+            var idx = 0
+            while idx + 3 < byteCount {
+              let a = Int(composited[idx + 3])
+              if a == 0 {
+                composited[idx] = 255
+                composited[idx + 1] = 255
+                composited[idx + 2] = 255
+                composited[idx + 3] = 255
+              } else if a < 255 {
+                let inv = 255 - a
+                composited[idx] = UInt8((Int(composited[idx]) * a + 255 * inv + 127) / 255)
+                composited[idx + 1] = UInt8((Int(composited[idx + 1]) * a + 255 * inv + 127) / 255)
+                composited[idx + 2] = UInt8((Int(composited[idx + 2]) * a + 255 * inv + 127) / 255)
+                composited[idx + 3] = 255
+              }
+              idx += 4
+            }
+            rgbData = Data(composited)
+          } else {
+            rgbData = jpgSource
+          }
+          guard let provider = CGDataProvider(data: rgbData as CFData) else { return nil }
           let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue
           guard let cgImage = CGImage(
             width: width,

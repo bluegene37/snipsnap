@@ -73,6 +73,10 @@ class UpdateService {
     bool force = false,
     bool ignoreSkipped = false,
   }) async {
+    // Gene - Nov, 22, 2026: Defensive Microsoft Store policy guard so Store builds never fetch external update feeds even if called programmatically.
+    if (AppInfo.isStoreBuild) {
+      return const UpdateCheckResult(UpdateStatus.upToDate);
+    }
     try {
       return await _checkForUpdate(force: force, ignoreSkipped: ignoreSkipped);
     } catch (e) {
@@ -238,6 +242,12 @@ class UpdateService {
     void Function(int received, int total)? onProgress,
     void Function()? exitApp,
   }) async {
+    // Gene - Nov, 22, 2026: Defensive Microsoft Store policy guard prohibiting external installer downloads/executions.
+    if (AppInfo.isStoreBuild) {
+      throw StateError(
+        'In-app self-update is disabled in Microsoft Store builds.',
+      );
+    }
     final asset = info.asset;
     if (asset == null) {
       throw StateError('No Windows installer asset on this release');
@@ -385,6 +395,12 @@ class UpdateService {
     void Function(int received, int total)? onProgress,
     void Function()? exitApp,
   }) async {
+    // Gene - Nov, 22, 2026: Defensive Microsoft Store policy guard.
+    if (AppInfo.isStoreBuild) {
+      throw StateError(
+        'In-app self-update is disabled in Microsoft Store builds.',
+      );
+    }
     final asset = info.asset;
     if (asset == null) {
       throw StateError('No macOS disk image asset on this release');
@@ -409,12 +425,21 @@ class UpdateService {
         '${workDir.path}${Platform.pathSeparator}install_update.sh',
       );
       await script.writeAsString(buildMacosInstallScript());
+      // Gene - Nov, 22, 2026: Pass interpolated dart:io pid rather than literal "\$pid" so the detached shell swap helper waits for this process to exit.
+      // Old implementation:
+      // await Process.start('/bin/sh', [
+      //   script.path,
+      //   dmg.path,
+      //   bundlePath,
+      //   workDir.path,
+      //   '\$pid',
+      // ], mode: ProcessStartMode.detached);
       await Process.start('/bin/sh', [
         script.path,
         dmg.path,
         bundlePath,
         workDir.path,
-        '\$pid',
+        '$pid',
       ], mode: ProcessStartMode.detached);
     } catch (e) {
       // A failed attempt must not strand a full-size DMG per retry.

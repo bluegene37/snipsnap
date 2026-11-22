@@ -26,11 +26,27 @@ fn empty_image_buffer() -> SnipSnapImageBuffer {
     }
 }
 
-fn into_image_buffer(mut pixels: Vec<u8>, width: usize, height: usize) -> SnipSnapImageBuffer {
-    let len = pixels.len();
+// Gene - Nov, 22, 2026: Convert pixel Vec into an exact-capacity Box<[u8]> slice before forgetting so snipsnap_buffer_free never faces Vec capacity mismatch UB.
+// Old implementation:
+// fn into_image_buffer(mut pixels: Vec<u8>, width: usize, height: usize) -> SnipSnapImageBuffer {
+//     let len = pixels.len();
+//     let stride = (width * 4) as i32;
+//     let ptr = pixels.as_mut_ptr();
+//     std::mem::forget(pixels);
+//     SnipSnapImageBuffer {
+//         data: ptr,
+//         width: width as i32,
+//         height: height as i32,
+//         stride,
+//         len,
+//     }
+// }
+fn into_image_buffer(pixels: Vec<u8>, width: usize, height: usize) -> SnipSnapImageBuffer {
+    let mut boxed = pixels.into_boxed_slice();
+    let len = boxed.len();
     let stride = (width * 4) as i32;
-    let ptr = pixels.as_mut_ptr();
-    std::mem::forget(pixels);
+    let ptr = boxed.as_mut_ptr();
+    std::mem::forget(boxed);
     SnipSnapImageBuffer {
         data: ptr,
         width: width as i32,
@@ -182,8 +198,13 @@ pub extern "C" fn snipsnap_buffer_free(buf: *mut SnipSnapImageBuffer) {
     }
     let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
         let b = &mut *buf;
+        // Gene - Nov, 22, 2026: Reclaim Box<[u8]> allocated by into_image_buffer instead of Vec::from_raw_parts(len, len) which is UB if capacity != len.
+        // Old implementation:
+        // if !b.data.is_null() && b.len > 0 {
+        //     let _ = Vec::from_raw_parts(b.data, b.len, b.len);
+        // }
         if !b.data.is_null() && b.len > 0 {
-            let _ = Vec::from_raw_parts(b.data, b.len, b.len);
+            let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(b.data, b.len));
         }
         *b = empty_image_buffer();
     }));

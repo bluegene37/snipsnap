@@ -14,13 +14,22 @@ import 'package:snipsnap/views/gallery_sidebar.dart';
 // exercising the card chrome (selection, delete/reveal buttons, the
 // extension badge) that this task converted.
 
-CaptureItem _item(String id, {int width = 0, int height = 0}) => CaptureItem(
+CaptureItem _item(
+  String id, {
+  int width = 0,
+  int height = 0,
+  // Gene - Nov, 22, 2026: Added mediaType parameter so tests can cover Videos/Images filter pagination.
+  CaptureMediaType mediaType = CaptureMediaType.image,
+}) => CaptureItem(
   id: id,
-  filePath: '/nonexistent/$id.png',
+  filePath: mediaType == CaptureMediaType.video
+      ? '/nonexistent/$id.mp4'
+      : '/nonexistent/$id.png',
   title: 'Capture $id',
   createdAt: DateTime(2026, 1, 1),
   width: width,
   height: height,
+  mediaType: mediaType,
 );
 
 // Gene - Oct, 27, 2026: Updated _pump to support testing isOpen and onToggleCollapse.
@@ -521,6 +530,35 @@ void _runStateTests(SnipThemeMode mode) {
       await tester.pump();
 
       expect(find.text('Capture item_35'), findsOneWidget);
+    },
+  );
+
+  // Gene - Nov, 22, 2026: Regression test ensuring switching to sparse Videos filter invokes onLoadMore even when list is not scrollable.
+  testWidgets(
+    '[$label] switching to Videos filter with sparse results calls onLoadMore without scrolling',
+    (tester) async {
+      final items = [
+        for (var i = 0; i < 19; i++) _item('img_$i'),
+        _item('vid_0', mediaType: CaptureMediaType.video),
+      ];
+      var loadMoreCalls = 0;
+      await _pump(
+        tester,
+        mode: mode,
+        items: items,
+        activeItem: items.first,
+        onLoadMore: () => loadMoreCalls++,
+      );
+
+      expect(loadMoreCalls, 0);
+
+      await tester.tap(find.byKey(const ValueKey('gallery-filter-videos')));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Capture vid_0'), findsOneWidget);
+      expect(find.text('Capture img_0'), findsNothing);
+      expect(loadMoreCalls, 1);
     },
   );
 }

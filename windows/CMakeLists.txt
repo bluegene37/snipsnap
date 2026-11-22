@@ -87,6 +87,11 @@ if(PLUGIN_BUNDLED_LIBRARIES)
     COMPONENT Runtime)
 endif()
 
+# Gene - Nov, 22, 2026: Install Rust snipsnap_core.dll alongside snipsnap.exe for Runtime/MSIX packaging.
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/runner/rust_target/x86_64-pc-windows-msvc/release/snipsnap_core.dll"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
