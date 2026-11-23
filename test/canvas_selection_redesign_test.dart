@@ -247,59 +247,57 @@ void main() {
       },
     );
 
-    testWidgets('action bar stays tight to a selected arrow when zoomed in 2x', (
-      tester,
-    ) async {
-      await tester.binding.setSurfaceSize(const Size(900, 800));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
+    testWidgets(
+      'action bar stays tight to a selected arrow when zoomed in 2x',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(900, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      const imageSize = Size(2400, 1600);
-      final arrow = Annotation(
-        id: 'arrow-center',
-        tool: CanvasTool.arrow,
-        color: const Color(0xFFEF4444),
-        strokeWidth: 8,
-        startPoint: const Offset(1000, 750),
-        endPoint: const Offset(1400, 850),
-      );
+        const imageSize = Size(2400, 1600);
+        final arrow = Annotation(
+          id: 'arrow-center',
+          tool: CanvasTool.arrow,
+          color: const Color(0xFFEF4444),
+          strokeWidth: 8,
+          startPoint: const Offset(1000, 750),
+          endPoint: const Offset(1400, 850),
+        );
 
-      final h = await _pumpCanvas(
-        tester,
-        seed: [arrow],
-        imageSize: imageSize,
-        zoomScale: 2.0,
-      );
-      addTearDown(() => h.dir.deleteSync(recursive: true));
+        final h = await _pumpCanvas(
+          tester,
+          seed: [arrow],
+          imageSize: imageSize,
+          zoomScale: 2.0,
+        );
+        addTearDown(() => h.dir.deleteSync(recursive: true));
 
-      final proj = _projectionFor(imageSize, h.box);
-      final canvasAnn = arrow.mappedToCanvasSpace(proj);
-      final midGlobal = h.box.localToGlobal(
-        (canvasAnn.startPoint! + canvasAnn.endPoint!) / 2,
-      );
+        final proj = _projectionFor(imageSize, h.box);
+        final canvasAnn = arrow.mappedToCanvasSpace(proj);
+        final midGlobal = h.box.localToGlobal(
+          (canvasAnn.startPoint! + canvasAnn.endPoint!) / 2,
+        );
 
-      await tester.tapAt(midGlobal, kind: PointerDeviceKind.mouse);
-      await tester.pumpAndSettle();
+        await tester.tapAt(midGlobal, kind: PointerDeviceKind.mouse);
+        await tester.pumpAndSettle();
 
-      final barFinder = find.byKey(const ValueKey('selection-action-bar'));
-      expect(barFinder, findsOneWidget);
-      final barRect = tester.getRect(barFinder);
-      final selBounds = AnnotationRenderer.rotatedSelectionBounds(
-        canvasAnn,
-        viewScale: 2.0,
-      );
-      final arrowBoundsGlobal = Rect.fromPoints(
-        h.box.localToGlobal(selBounds.topLeft),
-        h.box.localToGlobal(selBounds.bottomRight),
-      );
-      expect(
-        (barRect.center.dx - arrowBoundsGlobal.center.dx).abs(),
-        lessThan(65.0),
-      );
-      expect(
-        (barRect.top - arrowBoundsGlobal.bottom).abs(),
-        lessThan(40.0),
-      );
-    });
+        final barFinder = find.byKey(const ValueKey('selection-action-bar'));
+        expect(barFinder, findsOneWidget);
+        final barRect = tester.getRect(barFinder);
+        final selBounds = AnnotationRenderer.rotatedSelectionBounds(
+          canvasAnn,
+          viewScale: 2.0,
+        );
+        final arrowBoundsGlobal = Rect.fromPoints(
+          h.box.localToGlobal(selBounds.topLeft),
+          h.box.localToGlobal(selBounds.bottomRight),
+        );
+        expect(
+          (barRect.center.dx - arrowBoundsGlobal.center.dx).abs(),
+          lessThan(65.0),
+        );
+        expect((barRect.top - arrowBoundsGlobal.bottom).abs(), lessThan(40.0));
+      },
+    );
   });
 
   group('Action bar buttons, visibility, and synchronization', () {
@@ -543,7 +541,11 @@ void main() {
           rotation: math.pi / 2,
         );
 
-        final h = await _pumpCanvas(tester, seed: [shape], imageSize: imageSize);
+        final h = await _pumpCanvas(
+          tester,
+          seed: [shape],
+          imageSize: imageSize,
+        );
         addTearDown(() => h.dir.deleteSync(recursive: true));
 
         final proj = _projectionFor(imageSize, h.box);
@@ -560,8 +562,9 @@ void main() {
 
         // Grab rotated bottomRight handle and drag straight down 80px on screen.
         final draggedLocal = beforeSel.bottomRight;
-        final oppositeLocal = AnnotationRenderer.boundingRect(beforeCanvas)
-            .topLeft;
+        final oppositeLocal = AnnotationRenderer.boundingRect(
+          beforeCanvas,
+        ).topLeft;
         final draggedCanvasBefore = AnnotationRenderer.toCanvasSpace(
           beforeCanvas,
           draggedLocal,
@@ -589,10 +592,7 @@ void main() {
           afterLocalBounds.topLeft,
         );
 
-        expect(
-          oppositeCanvasAfter.dx,
-          closeTo(oppositeCanvasBefore.dx, 4.0),
-        );
+        expect(oppositeCanvasAfter.dx, closeTo(oppositeCanvasBefore.dx, 4.0));
         expect(
           oppositeCanvasAfter.dy,
           closeTo(oppositeCanvasBefore.dy, 4.0),

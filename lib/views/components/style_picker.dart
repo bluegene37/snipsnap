@@ -361,10 +361,7 @@ class StylePicker extends StatelessWidget {
                       Tooltip(
                         message: 'Duplicate Selected (Cmd/Ctrl+D)',
                         child: IconButton(
-                          icon: const Icon(
-                            Icons.copy_rounded,
-                            size: 16,
-                          ),
+                          icon: const Icon(Icons.copy_rounded, size: 16),
                           color: textColor,
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(

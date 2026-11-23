@@ -450,10 +450,7 @@ const _fixedWeightStrokeTools = {CanvasTool.pen};
 //   CanvasTool.highlight,
 //   CanvasTool.ruler,
 // };
-const _strokeTools = {
-  CanvasTool.pen,
-  CanvasTool.highlight,
-};
+const _strokeTools = {CanvasTool.pen, CanvasTool.highlight};
 
 /// The stroke-width range the properties slider offers. Resizing a mark that
 /// still has a slider stays inside it, so the slider can always take over
@@ -1671,7 +1668,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // }
     if (AnnotationRenderer.supportsRotation(ann.tool)) {
       final rotPos =
-          bounds.topCenter - Offset(0, AnnotationRenderer.rotationHandleGap / s);
+          bounds.topCenter -
+          Offset(0, AnnotationRenderer.rotationHandleGap / s);
       if ((local - rotPos).distance <= r) {
         return _AnnHandle.rotate;
       }
@@ -2339,10 +2337,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     );
 
     return anchorRotatedResize(
-      origin.copyWith(
-        startPoint: remap(origStart),
-        endPoint: remap(origEnd),
-      ),
+      origin.copyWith(startPoint: remap(origStart), endPoint: remap(origEnd)),
     );
   }
 

@@ -136,10 +136,7 @@ class AnnotationRenderer {
   }
 
   /// Axis-aligned canvas-space bounds enclosing the drawn selection chrome.
-  static Rect rotatedSelectionBounds(
-    Annotation ann, {
-    double viewScale = 1.0,
-  }) {
+  static Rect rotatedSelectionBounds(Annotation ann, {double viewScale = 1.0}) {
     final s = _safeScale(viewScale);
     final Rect base;
     if (ann.tool == CanvasTool.stepMarker && ann.startPoint != null) {

@@ -230,10 +230,7 @@ void main() {
           closeTo(before.startPoint!.dx, 2.0),
           reason: 'startPoint must stay anchored when dragging endPoint',
         );
-        expect(
-          afterEnd.startPoint!.dy,
-          closeTo(before.startPoint!.dy, 2.0),
-        );
+        expect(afterEnd.startPoint!.dy, closeTo(before.startPoint!.dy, 2.0));
         expect(afterEnd.endPoint!.dx, lessThan(before.endPoint!.dx - 80));
         expect(afterEnd.endPoint!.dy, greaterThan(before.endPoint!.dy + 100));
         expect(
@@ -256,12 +253,15 @@ void main() {
           closeTo(afterEnd.endPoint!.dx, 2.0),
           reason: 'endPoint must stay anchored when dragging startPoint',
         );
+        expect(afterStart.endPoint!.dy, closeTo(afterEnd.endPoint!.dy, 2.0));
         expect(
-          afterStart.endPoint!.dy,
-          closeTo(afterEnd.endPoint!.dy, 2.0),
+          afterStart.startPoint!.dx,
+          greaterThan(afterEnd.startPoint!.dx + 40),
         );
-        expect(afterStart.startPoint!.dx, greaterThan(afterEnd.startPoint!.dx + 40));
-        expect(afterStart.startPoint!.dy, lessThan(afterEnd.startPoint!.dy - 60));
+        expect(
+          afterStart.startPoint!.dy,
+          lessThan(afterEnd.startPoint!.dy - 60),
+        );
         expect(afterStart.strokeWidth, closeTo(before.strokeWidth, 0.01));
       },
     );
@@ -577,11 +577,7 @@ void main() {
       color: const Color(0xFFFDE047),
       strokeWidth: 8,
       startPoint: const Offset(250, 450),
-      points: const [
-        Offset(250, 450),
-        Offset(560, 452),
-        Offset(900, 450),
-      ],
+      points: const [Offset(250, 450), Offset(560, 452), Offset(900, 450)],
     );
 
     final h = await _pump(tester, seed);
@@ -595,7 +591,8 @@ void main() {
     expect(
       canvas.strokeWidth,
       closeTo(30.0, 0.01),
-      reason: 'highlighter has its slider restored, so drag thickness caps at 30px',
+      reason:
+          'highlighter has its slider restored, so drag thickness caps at 30px',
     );
   });
 
