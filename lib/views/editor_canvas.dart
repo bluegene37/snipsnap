@@ -238,6 +238,11 @@ class EditorCanvas extends StatefulWidget {
   final List<Annotation> annotations;
   final CanvasTool activeTool;
   final ValueChanged<CanvasTool>? onToolSelected;
+  // Gene - Nov, 23, 2026: Optional inbound selection ID and action callbacks so MainScreen & canvas action pill stay synchronized.
+  final String? selectedAnnotationId;
+  final VoidCallback? onDeleteSelected;
+  final VoidCallback? onBringToFront;
+  final VoidCallback? onSendToBack;
   final Color activeColor;
   final double strokeWidth;
   final double fontSize;
@@ -327,6 +332,10 @@ class EditorCanvas extends StatefulWidget {
     required this.annotations,
     required this.activeTool,
     this.onToolSelected,
+    this.selectedAnnotationId,
+    this.onDeleteSelected,
+    this.onBringToFront,
+    this.onSendToBack,
     this.onSelectAnnotation,
     required this.activeColor,
     this.textBackgroundColor,
@@ -384,6 +393,10 @@ enum _AnnHandle {
   bottomRight,
   rotate,
   curve,
+  // Gene - Nov, 23, 2026: Added direct endpoint handles for linear tools and single scale handle for step markers.
+  startPoint,
+  endPoint,
+  stepScale,
 }
 
 enum _CropHandle {
@@ -426,14 +439,20 @@ const _fixedWeightStrokeTools = {CanvasTool.pen};
 /// pointer exactly as it does for a line: a pure diagonal-ratio scale was
 /// tried first and a vertical pull on a wide flat arrow moved its diagonal by
 /// about one percent, so the handle simply did not follow.
-const _proportionalStrokeTools = {CanvasTool.arrow};
-
+// Gene - Nov, 23, 2026: Linear tools (line, arrow, ruler) now use direct endpoint handles; only freehand strokes remain box-resized.
+// Old:
+// const _proportionalStrokeTools = {CanvasTool.arrow};
+//
+// const _strokeTools = {
+//   CanvasTool.pen,
+//   CanvasTool.line,
+//   CanvasTool.arrow,
+//   CanvasTool.highlight,
+//   CanvasTool.ruler,
+// };
 const _strokeTools = {
   CanvasTool.pen,
-  CanvasTool.line,
-  CanvasTool.arrow,
   CanvasTool.highlight,
-  CanvasTool.ruler,
 };
 
 /// The stroke-width range the properties slider offers. Resizing a mark that
@@ -702,6 +721,18 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         !_isRotatingAnnotation &&
         _currentAnnHandle != _AnnHandle.curve) {
       _liveAnnotations = null;
+    }
+
+    // Gene - Nov, 23, 2026: Sync parent-driven selection changes (e.g., StylePicker Deselect or Duplicate) to canvas selection chrome.
+    if (oldWidget.selectedAnnotationId != widget.selectedAnnotationId) {
+      _selectedAnnotationId = widget.selectedAnnotationId;
+      if (_selectedAnnotationId == null) {
+        _isDraggingAnnotation = false;
+        _isResizingAnnotation = false;
+        _isRotatingAnnotation = false;
+        _currentAnnHandle = _AnnHandle.none;
+        _gestureOrigin = null;
+      }
     }
 
     if (oldWidget.historyRevision != widget.historyRevision) {
@@ -1586,28 +1617,64 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
   _AnnHandle _hitTestAnnotationHandles(Offset pos, Annotation ann) {
     final s = _viewScale;
-    final bounds = AnnotationRenderer.selectionRect(ann, viewScale: s);
-    if (bounds == Rect.zero) return _AnnHandle.none;
-
-    // Handles are drawn in the annotation's rotated frame, so the probe point
-    // has to be rotated into that same frame before comparing distances.
     final local = AnnotationRenderer.toLocalSpace(ann, pos);
     // Old: const r = AnnotationRenderer.handleHitRadius;
     final r = AnnotationRenderer.handleHitRadius / s;
 
-    // Curvature handle for Arrow
-    if (ann.tool == CanvasTool.arrow &&
-        ann.startPoint != null &&
-        ann.endPoint != null) {
-      final curvePos =
-          ann.controlPoint ?? ((ann.startPoint! + ann.endPoint!) / 2);
-      if ((local - curvePos).distance <= r + 4.0 / s) return _AnnHandle.curve;
+    // Gene - Nov, 23, 2026: Hit-test direct endpoints and on-curve apex for linear tools, single scale handle for step markers, and conditional rotation handle.
+    if (AnnotationRenderer.isLinearEndpointTool(ann.tool)) {
+      final start = ann.startPoint;
+      final end = ann.endPoint;
+      if (start == null || end == null) return _AnnHandle.none;
+      if ((local - end).distance <= r) return _AnnHandle.endPoint;
+      if ((local - start).distance <= r) return _AnnHandle.startPoint;
+      if (ann.tool == CanvasTool.arrow) {
+        final apex = AnnotationRenderer.arrowCurveApex(ann);
+        if ((local - apex).distance <= r + 2.0 / s) return _AnnHandle.curve;
+      }
+      if (AnnotationRenderer.hitTest(ann, pos, viewScale: s)) {
+        return _AnnHandle.body;
+      }
+      return _AnnHandle.none;
     }
 
-    final rotPos =
-        bounds.topCenter - Offset(0, AnnotationRenderer.rotationHandleGap / s);
-    if ((local - rotPos).distance <= r) {
-      return _AnnHandle.rotate;
+    if (ann.tool == CanvasTool.stepMarker) {
+      if (ann.startPoint == null) return _AnnHandle.none;
+      final scalePos = AnnotationRenderer.stepScaleHandlePosition(
+        ann,
+        viewScale: s,
+      );
+      if ((local - scalePos).distance <= r) return _AnnHandle.stepScale;
+      if (AnnotationRenderer.hitTest(ann, pos, viewScale: s)) {
+        return _AnnHandle.body;
+      }
+      return _AnnHandle.none;
+    }
+
+    final bounds = AnnotationRenderer.selectionRect(ann, viewScale: s);
+    if (bounds == Rect.zero) return _AnnHandle.none;
+
+    // Old:
+    // // Curvature handle for Arrow
+    // if (ann.tool == CanvasTool.arrow &&
+    //     ann.startPoint != null &&
+    //     ann.endPoint != null) {
+    //   final curvePos =
+    //       ann.controlPoint ?? ((ann.startPoint! + ann.endPoint!) / 2);
+    //   if ((local - curvePos).distance <= r + 4.0 / s) return _AnnHandle.curve;
+    // }
+    //
+    // final rotPos =
+    //     bounds.topCenter - Offset(0, AnnotationRenderer.rotationHandleGap / s);
+    // if ((local - rotPos).distance <= r) {
+    //   return _AnnHandle.rotate;
+    // }
+    if (AnnotationRenderer.supportsRotation(ann.tool)) {
+      final rotPos =
+          bounds.topCenter - Offset(0, AnnotationRenderer.rotationHandleGap / s);
+      if ((local - rotPos).distance <= r) {
+        return _AnnHandle.rotate;
+      }
     }
     if ((local - bounds.topLeft).distance <= r) {
       return _AnnHandle.topLeft;
@@ -1706,16 +1773,71 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     );
   }
 
+  // Gene - Nov, 23, 2026: Delegate canvas delete & z-order to parent when wired (ensuring step-marker resequencing & undo) and fix keyboard nudge persistence.
   void _deleteSelectedAnnotation() {
-    if (_selectedAnnotationId == null || widget.onAnnotationsUpdated == null) {
+    if (_selectedAnnotationId == null) return;
+    if (widget.onDeleteSelected != null) {
+      setState(() => _selectedAnnotationId = null);
+      widget.onDeleteSelected!();
       return;
     }
+    if (widget.onAnnotationsUpdated == null) return;
     final updated = widget.annotations
         .where((a) => a.id != _selectedAnnotationId)
         .toList();
     setState(() => _selectedAnnotationId = null);
     widget.onSelectAnnotation?.call(null);
     widget.onAnnotationsUpdated!(updated);
+  }
+
+  void _bringSelectedToFront() {
+    if (_selectedAnnotationId == null) return;
+    if (widget.onBringToFront != null) {
+      widget.onBringToFront!();
+      return;
+    }
+    if (widget.onAnnotationsUpdated == null) return;
+    final idx = widget.annotations.indexWhere(
+      (a) => a.id == _selectedAnnotationId,
+    );
+    if (idx == -1 || idx == widget.annotations.length - 1) return;
+    final reordered = List<Annotation>.of(widget.annotations);
+    final item = reordered.removeAt(idx);
+    reordered.add(item);
+    widget.onAnnotationsUpdated!(reordered);
+  }
+
+  void _sendSelectedToBack() {
+    if (_selectedAnnotationId == null) return;
+    if (widget.onSendToBack != null) {
+      widget.onSendToBack!();
+      return;
+    }
+    if (widget.onAnnotationsUpdated == null) return;
+    final idx = widget.annotations.indexWhere(
+      (a) => a.id == _selectedAnnotationId,
+    );
+    if (idx <= 0) return;
+    final reordered = List<Annotation>.of(widget.annotations);
+    final item = reordered.removeAt(idx);
+    reordered.insert(0, item);
+    widget.onAnnotationsUpdated!(reordered);
+  }
+
+  void _straightenSelectedArrow() {
+    final ann = _selectedAnnotation;
+    if (ann == null ||
+        ann.tool != CanvasTool.arrow ||
+        ann.controlPoint == null) {
+      return;
+    }
+    _replaceAnnotation(ann.copyWith(controlPoint: null), live: false);
+  }
+
+  void _resetSelectedRotation() {
+    final ann = _selectedAnnotation;
+    if (ann == null || ann.rotation == 0.0) return;
+    _replaceAnnotation(ann.copyWith(rotation: 0.0), live: false);
   }
 
   void _duplicateSelectedAnnotation() {
@@ -1735,8 +1857,10 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   void _nudgeSelectedAnnotation(Offset delta) {
     final ann = _selectedAnnotation;
     if (ann == null) return;
-    _pushHistoryCheckpoint();
-    _replaceAnnotation(ann.translated(delta), live: true);
+    // Old:
+    // _pushHistoryCheckpoint();
+    // _replaceAnnotation(ann.translated(delta), live: true);
+    _replaceAnnotation(ann.translated(delta), live: false);
   }
 
   // ---------------------------------------------------------------------------
@@ -1935,7 +2059,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     double across(Rect r) => runsHorizontally ? r.height : r.width;
 
     final fixedWeight = _fixedWeightStrokeTools.contains(origin.tool);
-    final proportional = _proportionalStrokeTools.contains(origin.tool);
+    // Gene - Nov, 23, 2026: Linear tools use direct endpoint handles rather than proportional box scaling.
+    // Old: final proportional = _proportionalStrokeTools.contains(origin.tool);
     final ceiling = dragSizedStrokeTools.contains(origin.tool)
         ? _maxDragStrokeWidth
         : _maxStrokeWidth;
@@ -1967,9 +2092,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // A proportional mark's weight starts from the along-scaled value, then
     // takes the across drag on top — so a sideways pull thickens it just as it
     // thickens a line, and a lengthwise pull keeps it in proportion.
-    final baseWeight = proportional
-        ? origin.strokeWidth * alongFactor
-        : origin.strokeWidth;
+    // Gene - Nov, 23, 2026: Removed dead proportional-arrow branches from freehand stroke resize.
+    // Old:
+    // final baseWeight = proportional
+    //     ? origin.strokeWidth * alongFactor
+    //     : origin.strokeWidth;
+    final baseWeight = origin.strokeWidth;
     // Old:
     // final width = fixedWeight
     //     ? origin.strokeWidth
@@ -2026,9 +2154,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     // proportional mark scales about the box corner itself: its whole outline
     // — weight and head included — is linear in the scale, so the far corner
     // of the box is exactly what stays put, as it does for a shape.
-    final anchor = proportional
-        ? _oppositeCorner(bounds, handle)
-        : _resizeAnchor(origin, bounds, handle);
+    // Old:
+    // final anchor = proportional
+    //     ? _oppositeCorner(bounds, handle)
+    //     : _resizeAnchor(origin, bounds, handle);
+    final anchor = _resizeAnchor(origin, bounds, handle);
     Offset scaled(Offset p) => anchor + (p - anchor) * factor + shift;
 
     return origin.copyWith(
@@ -2090,23 +2220,52 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     _AnnHandle handle,
     Offset totalDelta,
   ) {
+    // Gene - Nov, 23, 2026: Rotate drag delta into the annotation's local space and anchor the opposite corner in canvas space after resizing rotated items.
+    var localDelta = totalDelta;
+    if (origin.rotation != 0.0) {
+      final cos = math.cos(-origin.rotation);
+      final sin = math.sin(-origin.rotation);
+      localDelta = Offset(
+        totalDelta.dx * cos - totalDelta.dy * sin,
+        totalDelta.dx * sin + totalDelta.dy * cos,
+      );
+    }
+
+    Annotation anchorRotatedResize(Annotation resized) {
+      if (origin.rotation == 0.0) return resized;
+      final oldBounds = AnnotationRenderer.boundingRect(origin);
+      final newBounds = AnnotationRenderer.boundingRect(resized);
+      if (oldBounds == Rect.zero || newBounds == Rect.zero) return resized;
+      final anchorBefore = AnnotationRenderer.toCanvasSpace(
+        origin,
+        _oppositeCorner(oldBounds, handle),
+      );
+      final anchorAfter = AnnotationRenderer.toCanvasSpace(
+        resized,
+        _oppositeCorner(newBounds, handle),
+      );
+      return resized.translated(anchorBefore - anchorAfter);
+    }
+
     if (origin.tool == CanvasTool.text ||
         origin.tool == CanvasTool.stepMarker) {
       // Point-anchored items scale by their type size rather than by bounds.
       final grow =
           (handle == _AnnHandle.bottomRight || handle == _AnnHandle.topRight)
-          ? totalDelta.dx
-          : -totalDelta.dx;
+          ? localDelta.dx
+          : -localDelta.dx;
       // Gene - Nov, 20, 2026: Scale font resize range by 1 / _viewScale so zoomed badges don't jump to 8x viewScale.
       // Old: fontSize: (origin.fontSize + grow * 0.4).clamp(8.0, 120.0),
       final s = _viewScale;
-      return origin.copyWith(
-        fontSize: (origin.fontSize + grow * 0.4).clamp(8.0 / s, 120.0 / s),
+      return anchorRotatedResize(
+        origin.copyWith(
+          fontSize: (origin.fontSize + grow * 0.4).clamp(8.0 / s, 120.0 / s),
+        ),
       );
     }
 
     if (_strokeTools.contains(origin.tool)) {
-      return _resizeStroke(origin, handle, totalDelta);
+      return anchorRotatedResize(_resizeStroke(origin, handle, localDelta));
     }
 
     final bounds = AnnotationRenderer.boundingRect(origin);
@@ -2119,17 +2278,17 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     switch (handle) {
       case _AnnHandle.topLeft:
-        left += totalDelta.dx;
-        top += totalDelta.dy;
+        left += localDelta.dx;
+        top += localDelta.dy;
       case _AnnHandle.topRight:
-        right += totalDelta.dx;
-        top += totalDelta.dy;
+        right += localDelta.dx;
+        top += localDelta.dy;
       case _AnnHandle.bottomLeft:
-        left += totalDelta.dx;
-        bottom += totalDelta.dy;
+        left += localDelta.dx;
+        bottom += localDelta.dy;
       case _AnnHandle.bottomRight:
-        right += totalDelta.dx;
-        bottom += totalDelta.dy;
+        right += localDelta.dx;
+        bottom += localDelta.dy;
       default:
         return origin;
     }
@@ -2179,9 +2338,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 (p.dy - bounds.top) / bounds.height * newBounds.height,
     );
 
-    return origin.copyWith(
-      startPoint: remap(origStart),
-      endPoint: remap(origEnd),
+    return anchorRotatedResize(
+      origin.copyWith(
+        startPoint: remap(origStart),
+        endPoint: remap(origEnd),
+      ),
     );
   }
 
@@ -2354,8 +2515,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   /// step, matching the inline fill branch this replaced.
   @override
   void updateAnnotation(String id, Annotation updatedAnnotation) {
-    _pushHistoryCheckpoint();
-    _replaceAnnotation(updatedAnnotation, live: true);
+    // Gene - Nov, 23, 2026: Commit discrete tool updates (Fill bucket on shape) directly via live: false so parent checkpoint doesn't wipe _liveAnnotations.
+    // Old:
+    // _pushHistoryCheckpoint();
+    // _replaceAnnotation(updatedAnnotation, live: true);
+    _replaceAnnotation(updatedAnnotation, live: false);
   }
 
   /// Handlers pass canvas-space lists and the parent stores image pixels, so
@@ -2523,8 +2687,35 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       final handle = _hitTestAnnotationHandles(pos, selected);
       if (handle != _AnnHandle.none && handle != _AnnHandle.body) {
         _pushHistoryCheckpoint();
+        // Gene - Nov, 23, 2026: Bake any legacy rotation into endpoints when grabbing linear endpoint/curve handles.
+        var origin = selected;
+        if ((handle == _AnnHandle.startPoint ||
+                handle == _AnnHandle.endPoint ||
+                handle == _AnnHandle.curve) &&
+            origin.rotation != 0.0 &&
+            origin.startPoint != null &&
+            origin.endPoint != null) {
+          origin = origin.copyWith(
+            startPoint: AnnotationRenderer.toCanvasSpace(
+              origin,
+              origin.startPoint!,
+            ),
+            endPoint: AnnotationRenderer.toCanvasSpace(
+              origin,
+              origin.endPoint!,
+            ),
+            controlPoint: origin.controlPoint == null
+                ? null
+                : AnnotationRenderer.toCanvasSpace(
+                    origin,
+                    origin.controlPoint!,
+                  ),
+            rotation: 0.0,
+          );
+        }
         setState(() {
-          _gestureOrigin = selected;
+          // Old: _gestureOrigin = selected;
+          _gestureOrigin = origin;
           _isDraggingAnnotation = false;
           _isRotatingAnnotation = handle == _AnnHandle.rotate;
           _isResizingAnnotation =
@@ -2713,9 +2904,84 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
     final origin = _gestureOrigin;
 
+    // Gene - Nov, 23, 2026: Support on-curve apex dragging (with midpoint snap-to-straight), direct linear endpoint dragging (Shift angle snap), and step-badge single-handle scaling.
+    // Old:
+    // if (_currentAnnHandle == _AnnHandle.curve && origin != null) {
+    //   final local = AnnotationRenderer.toLocalSpace(origin, pos);
+    //   _replaceAnnotation(origin.copyWith(controlPoint: local), live: true);
+    //   return;
+    // }
     if (_currentAnnHandle == _AnnHandle.curve && origin != null) {
       final local = AnnotationRenderer.toLocalSpace(origin, pos);
-      _replaceAnnotation(origin.copyWith(controlPoint: local), live: true);
+      final start = origin.startPoint;
+      final end = origin.endPoint;
+      if (start != null && end != null) {
+        final mid = (start + end) / 2;
+        if ((local - mid).distance <= 6.0 / _viewScale) {
+          _replaceAnnotation(origin.copyWith(controlPoint: null), live: true);
+        } else {
+          _replaceAnnotation(
+            origin.copyWith(
+              controlPoint: AnnotationRenderer.controlPointForApex(
+                start,
+                end,
+                local,
+              ),
+            ),
+            live: true,
+          );
+        }
+      }
+      return;
+    }
+
+    if ((_currentAnnHandle == _AnnHandle.startPoint ||
+            _currentAnnHandle == _AnnHandle.endPoint) &&
+        origin != null &&
+        origin.startPoint != null &&
+        origin.endPoint != null) {
+      final isStart = _currentAnnHandle == _AnnHandle.startPoint;
+      final anchor = isStart ? origin.endPoint! : origin.startPoint!;
+      final oldEnd = isStart ? origin.startPoint! : origin.endPoint!;
+      var target = pos;
+      if (_isShiftDown) {
+        final delta = target - anchor;
+        final dist = delta.distance;
+        if (dist > 0) {
+          final snapAngle = origin.tool == CanvasTool.ruler
+              ? math.pi / 4
+              : math.pi / 12;
+          final snapped =
+              (math.atan2(delta.dy, delta.dx) / snapAngle).round() * snapAngle;
+          target = anchor + Offset(math.cos(snapped), math.sin(snapped)) * dist;
+        }
+      }
+      final movedDelta = target - oldEnd;
+      final nextCp =
+          origin.tool == CanvasTool.arrow && origin.controlPoint != null
+          ? origin.controlPoint! + movedDelta * 0.5
+          : origin.controlPoint;
+      _replaceAnnotation(
+        origin.copyWith(
+          startPoint: isStart ? target : origin.startPoint,
+          endPoint: isStart ? origin.endPoint : target,
+          controlPoint: nextCp,
+          rotation: 0.0,
+        ),
+        live: true,
+      );
+      return;
+    }
+
+    if (_currentAnnHandle == _AnnHandle.stepScale &&
+        origin != null &&
+        origin.startPoint != null) {
+      final s = _viewScale;
+      final nextRadius = ((pos - origin.startPoint!).distance - 5.0 / s).clamp(
+        8.0 / s,
+        120.0 / s,
+      );
+      _replaceAnnotation(origin.copyWith(fontSize: nextRadius), live: true);
       return;
     }
 
@@ -2903,6 +3169,24 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     final pos = details.localPosition;
     final hit = hitTestAnnotation(pos);
 
+    // Gene - Nov, 23, 2026: Handle double-click before CanvasTool.select early-return so curved arrows straighten and text annotations open inline editing in any tool mode.
+    if (_consumeDoubleTap(pos)) {
+      final selected = _selectedAnnotation;
+      if (selected != null &&
+          selected.tool == CanvasTool.arrow &&
+          selected.controlPoint != null &&
+          _hitTestAnnotationHandles(pos, selected) == _AnnHandle.curve) {
+        _replaceAnnotation(selected.copyWith(controlPoint: null), live: false);
+        return;
+      }
+      if (hit != null && hit.tool == CanvasTool.text) {
+        setState(() => _selectedAnnotationId = hit.id);
+        _notifySelectAnnotation(hit);
+        _startInlineTextEdit(hit.startPoint ?? pos, existing: hit);
+        return;
+      }
+    }
+
     if (widget.activeTool == CanvasTool.select) {
       if (_floatingSelectionRect != null &&
           !_floatingSelectionRect!.contains(pos)) {
@@ -2921,16 +3205,17 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
       return;
     }
 
-    if (_consumeDoubleTap(pos)) {
-      // Double-click a text callout to edit it in place.
-      if (hit != null && hit.tool == CanvasTool.text) {
-        setState(() => _selectedAnnotationId = hit.id);
-        // Old: widget.onSelectAnnotation?.call(hit);
-        _notifySelectAnnotation(hit);
-        _startInlineTextEdit(hit.startPoint ?? pos, existing: hit);
-        return;
-      }
-    }
+    // Old:
+    // if (_consumeDoubleTap(pos)) {
+    //   // Double-click a text callout to edit it in place.
+    //   if (hit != null && hit.tool == CanvasTool.text) {
+    //     setState(() => _selectedAnnotationId = hit.id);
+    //     // Old: widget.onSelectAnnotation?.call(hit);
+    //     _notifySelectAnnotation(hit);
+    //     _startInlineTextEdit(hit.startPoint ?? pos, existing: hit);
+    //     return;
+    //   }
+    // }
 
     // Fill and the eyedropper act on what is under the cursor, so they run
     // before the fallback below — otherwise clicking a shape with the fill
@@ -2999,8 +3284,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           .where((a) => a.id == editingId)
           .firstOrNull;
       if (existing != null) {
-        _pushHistoryCheckpoint();
-        _replaceAnnotation(existing.copyWith(text: text), live: true);
+        // Gene - Nov, 23, 2026: Commit edited inline text via live: false so parent checkpoint rebuilds don't wipe _liveAnnotations.
+        // Old:
+        // _pushHistoryCheckpoint();
+        // _replaceAnnotation(existing.copyWith(text: text), live: true);
+        _replaceAnnotation(existing.copyWith(text: text), live: false);
       }
     } else {
       final annotation = _buildAnnotationForTool(
@@ -3747,14 +4035,51 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
   // Cursor
   // ---------------------------------------------------------------------------
 
-  MouseCursor _cursorForHandle(_AnnHandle handle) {
+  // Gene - Nov, 23, 2026: Rotate resize cursors by annotation rotation and map endpoint/step handles cleanly.
+  // Old:
+  // MouseCursor _cursorForHandle(_AnnHandle handle) {
+  //   switch (handle) {
+  //     case _AnnHandle.topLeft:
+  //     case _AnnHandle.bottomRight:
+  //       return SystemMouseCursors.resizeUpLeftDownRight;
+  //     case _AnnHandle.topRight:
+  //     case _AnnHandle.bottomLeft:
+  //       return SystemMouseCursors.resizeUpRightDownLeft;
+  //     case _AnnHandle.rotate:
+  //     case _AnnHandle.curve:
+  //       return SystemMouseCursors.grab;
+  //     case _AnnHandle.body:
+  //       return SystemMouseCursors.move;
+  //     case _AnnHandle.none:
+  //       return SystemMouseCursors.basic;
+  //   }
+  // }
+  MouseCursor _cursorForHandle(_AnnHandle handle, {double rotation = 0.0}) {
     switch (handle) {
       case _AnnHandle.topLeft:
       case _AnnHandle.bottomRight:
-        return SystemMouseCursors.resizeUpLeftDownRight;
       case _AnnHandle.topRight:
       case _AnnHandle.bottomLeft:
+        final baseAngle =
+            (handle == _AnnHandle.topLeft || handle == _AnnHandle.bottomRight)
+            ? math.pi / 4
+            : 3 * math.pi / 4;
+        var a = (baseAngle + rotation) % math.pi;
+        if (a < 0) a += math.pi;
+        if (a < math.pi / 8 || a >= 7 * math.pi / 8) {
+          return SystemMouseCursors.resizeLeftRight;
+        }
+        if (a < 3 * math.pi / 8) {
+          return SystemMouseCursors.resizeUpLeftDownRight;
+        }
+        if (a < 5 * math.pi / 8) {
+          return SystemMouseCursors.resizeUpDown;
+        }
         return SystemMouseCursors.resizeUpRightDownLeft;
+      case _AnnHandle.stepScale:
+        return SystemMouseCursors.resizeUpLeftDownRight;
+      case _AnnHandle.startPoint:
+      case _AnnHandle.endPoint:
       case _AnnHandle.rotate:
       case _AnnHandle.curve:
         return SystemMouseCursors.grab;
@@ -3815,7 +4140,8 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
         : _AnnHandle.none;
 
     if (handle != _AnnHandle.none) {
-      next = _cursorForHandle(handle);
+      // Old: next = _cursorForHandle(handle);
+      next = _cursorForHandle(handle, rotation: selected!.rotation);
     } else if (widget.activeTool == CanvasTool.crop) {
       final crop = _activeCropRect;
       final cropHandle = crop != null
@@ -4178,6 +4504,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                         RepaintBoundary(
                                           child: CustomPaint(
                                             painter: _ActiveOverlayPainter(
+                                              theme: t,
                                               pixelScale: projection.scale,
                                               patchImages: _patchImages,
                                               transformationController:
@@ -4191,6 +4518,9 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                                                   _currentAnnotation != null ||
                                                   _isResizingAnnotation ||
                                                   _isDraggingAnnotation,
+                                              hideRotationHandle:
+                                                  _isDraggingAnnotation ||
+                                                  _isResizingAnnotation,
                                             ),
                                           ),
                                         ),
@@ -4261,11 +4591,11 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     );
   }
 
-  // Gene - Nov, 20, 2026: Render interactive tool chrome overlays in viewport space outside InteractiveViewer so buttons/editors stay crisp 1x size at any zoom level.
+  // Gene - Nov, 23, 2026: Eliminate double projection in viewport overlays, derive live canvasSize from viewport constraints, and render contextual action pill instead of lone delete chip.
   Widget _buildViewportToolOverlays(SnipTheme t) {
     final hasAnyOverlay =
         _activeCropRect != null ||
-        _selectedAnnotation != null ||
+        _selectedAnnotationId != null ||
         _inlineTextPos != null ||
         (widget.activeTool == CanvasTool.ocr && _ocrRegion != null) ||
         (widget.activeTool == CanvasTool.colorPicker &&
@@ -4283,20 +4613,58 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
             final rawScale = matrix.getMaxScaleOnAxis();
             final s = rawScale > 1e-4 ? rawScale : 1.0;
 
-            final selected = _selectedAnnotation;
-            Annotation? selectedCanvasAnn;
-            double? inlineFontSize;
+            // Old:
+            // final selected = _selectedAnnotation;
+            // Annotation? selectedCanvasAnn;
+            // double? inlineFontSize;
+            // if (_inlineTextPos != null && _editingAnnotationId != null) {
+            //   for (final ann in _canvasAnnotations) {
+            //     if (ann.id == _editingAnnotationId) {
+            //       inlineFontSize = (ann.fontSize * s).clamp(8.0, 160.0);
+            //       break;
+            //     }
+            //   }
+            // }
+            // if (selected != null && selected.id != _editingAnnotationId) {
+            //   final projection = _projectionFor(_canvasSize);
+            //   selectedCanvasAnn = selected.mappedToCanvasSpace(projection);
+            // }
+            final liveCanvasSize = Size(
+              viewportSize.width,
+              math.max(1.0, viewportSize.height - 40.0),
+            );
+            final projection = _projectionFor(liveCanvasSize);
+            final canvasAnnotations = _canvasAnnotationsFor(projection);
+            final isTransforming =
+                _isDraggingAnnotation ||
+                _isResizingAnnotation ||
+                _isRotatingAnnotation ||
+                _currentAnnHandle == _AnnHandle.curve;
+
+            Annotation? editingCanvasAnn;
             if (_inlineTextPos != null && _editingAnnotationId != null) {
-              for (final ann in _canvasAnnotations) {
+              for (final ann in canvasAnnotations) {
                 if (ann.id == _editingAnnotationId) {
-                  inlineFontSize = (ann.fontSize * s).clamp(8.0, 160.0);
+                  editingCanvasAnn = ann;
                   break;
                 }
               }
             }
-            if (selected != null && selected.id != _editingAnnotationId) {
-              final projection = _projectionFor(_canvasSize);
-              selectedCanvasAnn = selected.mappedToCanvasSpace(projection);
+            final inlineFontSize = editingCanvasAnn != null
+                ? (editingCanvasAnn.fontSize * s).clamp(8.0, 160.0)
+                : null;
+
+            Annotation? selectedCanvasAnn;
+            if (!isTransforming &&
+                _selectedAnnotationId != null &&
+                _selectedAnnotationId != _editingAnnotationId &&
+                projection.isValid) {
+              for (final ann in canvasAnnotations) {
+                if (ann.id == _selectedAnnotationId) {
+                  selectedCanvasAnn = ann;
+                  break;
+                }
+              }
             }
 
             Rect? vpCropRect;
@@ -4308,7 +4676,12 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
 
             Rect? vpSelectedBounds;
             if (selectedCanvasAnn != null) {
-              final rawBounds = AnnotationRenderer.selectionRect(
+              // Old:
+              // final rawBounds = AnnotationRenderer.selectionRect(
+              //   selectedCanvasAnn,
+              //   viewScale: s,
+              // );
+              final rawBounds = AnnotationRenderer.rotatedSelectionBounds(
                 selectedCanvasAnn,
                 viewScale: s,
               );
@@ -4354,13 +4727,23 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
                 ],
                 if (vpCropRect != null)
                   _buildCropActionBar(vpCropRect, viewportSize),
-                if (vpSelectedBounds != null)
-                  _buildDeleteChip(vpSelectedBounds, viewportSize),
+                // Old:
+                // if (vpSelectedBounds != null)
+                //   _buildDeleteChip(vpSelectedBounds, viewportSize),
+                if (vpSelectedBounds != null && selectedCanvasAnn != null)
+                  _buildSelectionActionBar(
+                    t,
+                    selectedCanvasAnn,
+                    vpSelectedBounds,
+                    viewportSize,
+                  ),
                 if (_inlineTextPos != null)
                   _buildInlineTextEditor(
                     _canvasToViewport(_inlineTextPos!, matrix),
                     viewportSize,
                     inlineFontSize ?? widget.fontSize,
+                    editingAnn: editingCanvasAnn,
+                    viewScale: s,
                   ),
                 if (widget.activeTool == CanvasTool.colorPicker &&
                     _hoverPos != null &&
@@ -4996,68 +5379,202 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
     );
   }
 
-  // Gene - Nov, 20, 2026: Render Delete chip, Inline text editor, and Magnifier loupe in viewport coordinates.
-  // Old: Widget _buildDeleteChip(Rect selectedBounds) {
-  Widget _buildDeleteChip(Rect selectedBounds, Size viewportSize) {
-    final t = SnipTheme.of(context);
-    final left = (selectedBounds.topRight.dx - 10)
-        .clamp(4.0, math.max(4.0, viewportSize.width - 28.0))
+  // Gene - Nov, 23, 2026: Replaced lone top-right delete chip (which collided with corner handle) with a Skeleton-themed contextual action pill anchored cleanly below/above the selected item.
+  // Old:
+  // Widget _buildDeleteChip(Rect selectedBounds, Size viewportSize) {
+  //   final t = SnipTheme.of(context);
+  //   final left = (selectedBounds.topRight.dx - 10)
+  //       .clamp(4.0, math.max(4.0, viewportSize.width - 28.0))
+  //       .toDouble();
+  //   final top = (selectedBounds.topRight.dy - 14)
+  //       .clamp(4.0, math.max(4.0, viewportSize.height - 28.0))
+  //       .toDouble();
+  //   return Positioned(
+  //     left: left,
+  //     top: top,
+  //     child: Tooltip(
+  //       message: 'Delete selected annotation (Delete / Backspace)',
+  //       child: Material(
+  //         color: t.danger,
+  //         elevation: 4,
+  //         shape: const CircleBorder(),
+  //         child: InkWell(
+  //           customBorder: const CircleBorder(),
+  //           onTap: _deleteSelectedAnnotation,
+  //           child: Padding(
+  //             padding: const EdgeInsets.all(5),
+  //             child: Icon(Icons.close_rounded, size: 14, color: t.onDanger),
+  //           ),
+  //         ),
+  //       ),
+  //     ),
+  //   );
+  // }
+  Widget _buildSelectionActionBar(
+    SnipTheme t,
+    Annotation selectedAnn,
+    Rect vpBounds,
+    Size viewportSize,
+  ) {
+    final canStraighten =
+        selectedAnn.tool == CanvasTool.arrow &&
+        selectedAnn.controlPoint != null;
+    final canResetRotation = selectedAnn.rotation.abs() > 0.005;
+    final canEditText = selectedAnn.tool == CanvasTool.text;
+
+    Widget actionButton({
+      required Key key,
+      required IconData icon,
+      required String tooltip,
+      required VoidCallback onTap,
+      Color? color,
+    }) {
+      return Tooltip(
+        message: tooltip,
+        waitDuration: const Duration(milliseconds: 450),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: key,
+            borderRadius: BorderRadius.circular(6),
+            hoverColor: t.hoverFill,
+            onTap: onTap,
+            child: SizedBox(
+              width: 28,
+              height: 28,
+              child: Icon(icon, size: 15, color: color ?? t.ink),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final buttons = <Widget>[
+      actionButton(
+        key: const ValueKey('selection-action-duplicate'),
+        icon: Icons.copy_rounded,
+        tooltip: 'Duplicate (Cmd/Ctrl+D)',
+        onTap: _duplicateSelectedAnnotation,
+      ),
+      actionButton(
+        key: const ValueKey('selection-action-front'),
+        icon: Icons.flip_to_front_rounded,
+        tooltip: 'Bring to Front',
+        onTap: _bringSelectedToFront,
+      ),
+      actionButton(
+        key: const ValueKey('selection-action-back'),
+        icon: Icons.flip_to_back_rounded,
+        tooltip: 'Send to Back',
+        onTap: _sendSelectedToBack,
+      ),
+      if (canStraighten)
+        actionButton(
+          key: const ValueKey('selection-action-straighten'),
+          icon: Icons.linear_scale_rounded,
+          tooltip: 'Straighten Arrow',
+          onTap: _straightenSelectedArrow,
+        ),
+      if (canResetRotation)
+        actionButton(
+          key: const ValueKey('selection-action-reset-rotation'),
+          icon: Icons.rotate_left_rounded,
+          tooltip: 'Reset Rotation (0°)',
+          onTap: _resetSelectedRotation,
+        ),
+      if (canEditText)
+        actionButton(
+          key: const ValueKey('selection-action-edit-text'),
+          icon: Icons.edit_rounded,
+          tooltip: 'Edit Text (Double-click)',
+          onTap: () => _startInlineTextEdit(
+            selectedAnn.startPoint ?? Offset.zero,
+            existing: selectedAnn,
+          ),
+        ),
+    ];
+
+    const barHeight = 36.0;
+    final totalButtonCount = buttons.length + 1;
+    final estimatedWidth = totalButtonCount * 30.0 + 22.0;
+
+    double top = vpBounds.bottom + 12.0;
+    if (top + barHeight > viewportSize.height - 10.0) {
+      final extraTop = AnnotationRenderer.supportsRotation(selectedAnn.tool)
+          ? AnnotationRenderer.rotationHandleGap + 14.0
+          : 12.0;
+      top = vpBounds.top - barHeight - extraTop;
+    }
+    top = top
+        .clamp(8.0, math.max(8.0, viewportSize.height - barHeight - 8.0))
         .toDouble();
-    final top = (selectedBounds.topRight.dy - 14)
-        .clamp(4.0, math.max(4.0, viewportSize.height - 28.0))
+    final left = (vpBounds.center.dx - estimatedWidth / 2)
+        .clamp(8.0, math.max(8.0, viewportSize.width - estimatedWidth - 8.0))
         .toDouble();
+
     return Positioned(
       left: left,
       top: top,
-      child: Tooltip(
-        message: 'Delete selected annotation (Delete / Backspace)',
-        child: Material(
-          color: t.danger,
-          elevation: 4,
-          shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: _deleteSelectedAnnotation,
-            child: Padding(
-              padding: const EdgeInsets.all(5),
-              child: Icon(Icons.close_rounded, size: 14, color: t.onDanger),
-            ),
+      child: Material(
+        key: const ValueKey('selection-action-bar'),
+        color: t.surfaceRaised,
+        elevation: 6,
+        shadowColor: Colors.black38,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: t.border),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (int i = 0; i < buttons.length; i++) ...[
+                if (i > 0) const SizedBox(width: 2),
+                buttons[i],
+              ],
+              Container(
+                width: 1,
+                height: 16,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                color: t.border,
+              ),
+              actionButton(
+                key: const ValueKey('selection-action-delete'),
+                icon: Icons.delete_outline_rounded,
+                tooltip: 'Delete selected annotation (Delete / Backspace)',
+                color: t.danger,
+                onTap: _deleteSelectedAnnotation,
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
+  // Gene - Nov, 23, 2026: Adopt existing text annotation styling immediately in the inline editor so double-click edits match the canvas without a 1-frame flash.
   // Old: Widget _buildInlineTextEditor() {
   Widget _buildInlineTextEditor(
     Offset vpPos,
     Size viewportSize,
-    double editorFontSize,
-  ) {
+    double editorFontSize, {
+    Annotation? editingAnn,
+    double viewScale = 1.0,
+  }) {
     if (_inlineTextPos == null) return const SizedBox.shrink();
 
     final t = SnipTheme.of(context);
-    final showBg =
-        widget.isFilled &&
-        widget.textBackgroundColor != null &&
-        widget.textBackgroundColor!.a > 0;
-    // The frame's own background is `t.surface` (a known token, high
-    // contrast against `t.ink` by construction) UNLESS `showBg` is true, in
-    // which case it is the user's own arbitrary `textBackgroundColor` —
-    // annotation data, not chrome. A fixed `t.ink` border would repeat Task
-    // 4's swatch-ring bug (a ring vanishing against a near-black or
-    // near-white real colour) the moment someone picks a dark text
-    // background in light mode or vice versa, so the border contrasts
-    // against whichever background is actually painted.
-    final frameBg = showBg
-        ? (widget.textBackgroundColor ?? Colors.black87)
-        : t.surface;
-    // frameBg can be translucent (AppDefaults.textBackgroundColor ships at
-    // alpha 0xCC, and the user can pick any alpha via the colour dialog).
-    // The true backdrop behind this floating editor is arbitrary canvas
-    // content, which ringOn can't know statically — t.surface is the same
-    // documented approximation Task 5 used elsewhere for chrome sitting on
-    // unknowable image content, and is exact whenever showBg is false.
+    final effectiveColor = editingAnn?.color ?? widget.activeColor;
+    final effectiveFilled = editingAnn?.fill ?? widget.isFilled;
+    final effectiveBg = editingAnn != null
+        ? editingAnn.backgroundColor
+        : widget.textBackgroundColor;
+    final effectiveRadius = editingAnn != null
+        ? editingAnn.borderRadius * viewScale
+        : widget.borderRadius;
+    final showBg = effectiveFilled && effectiveBg != null && effectiveBg.a > 0;
+    final frameBg = showBg ? effectiveBg : t.surface;
 
     final left = (vpPos.dx - 8)
         .clamp(10.0, math.max(10.0, viewportSize.width - 160.0))
@@ -5077,7 +5594,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
           decoration: BoxDecoration(
             color: frameBg,
             borderRadius: BorderRadius.circular(
-              widget.borderRadius.clamp(4.0, 16.0),
+              effectiveRadius.clamp(4.0, 16.0),
             ),
             border: Border.all(
               color: t.ringOn(frameBg, backdrop: t.surface),
@@ -5099,7 +5616,7 @@ class _EditorCanvasState extends State<EditorCanvas> implements ToolDelegate {
               maxLines: null,
               keyboardType: TextInputType.multiline,
               style: TextStyle(
-                color: widget.activeColor,
+                color: effectiveColor,
                 fontSize: editorFontSize,
                 fontWeight: FontWeight.w600,
                 height: 1.25,
@@ -5842,16 +6359,20 @@ class _CommittedAnnotationsPainter extends CustomPainter {
 }
 
 class _ActiveOverlayPainter extends CustomPainter {
+  // Gene - Nov, 23, 2026: Pass SnipTheme and hideRotationHandle to selection chrome & measurement HUD painters.
+  final SnipTheme theme;
   final Annotation? currentAnnotation;
   final Annotation? selectedAnnotation;
   final ui.Image? baseImage;
   final Map<String, ui.Image> patchImages;
   final double pixelScale;
   final bool showHud;
+  final bool hideRotationHandle;
   // Gene - Nov, 20, 2026: Repaint on pan/zoom without rebuilding canvas so selection chrome & HUD stay constant screen pixels at 120fps.
   final TransformationController transformationController;
 
   _ActiveOverlayPainter({
+    required this.theme,
     required this.pixelScale,
     required this.patchImages,
     required this.transformationController,
@@ -5859,6 +6380,7 @@ class _ActiveOverlayPainter extends CustomPainter {
     this.selectedAnnotation,
     this.baseImage,
     this.showHud = false,
+    this.hideRotationHandle = false,
   }) : super(repaint: transformationController);
 
   @override
@@ -5890,6 +6412,8 @@ class _ActiveOverlayPainter extends CustomPainter {
         canvas,
         selectedAnnotation!,
         viewScale: viewScale,
+        theme: theme,
+        hideRotationHandle: hideRotationHandle,
       );
       if (showHud) {
         AnnotationRenderer.paintMeasurementHud(
@@ -5897,6 +6421,7 @@ class _ActiveOverlayPainter extends CustomPainter {
           selectedAnnotation!,
           viewScale: viewScale,
           pixelScale: pixelScale,
+          theme: theme,
         );
       }
     }
@@ -5907,16 +6432,19 @@ class _ActiveOverlayPainter extends CustomPainter {
         currentAnnotation!,
         viewScale: viewScale,
         pixelScale: pixelScale,
+        theme: theme,
       );
     }
   }
 
   @override
   bool shouldRepaint(covariant _ActiveOverlayPainter oldDelegate) {
-    return oldDelegate.currentAnnotation != currentAnnotation ||
+    return oldDelegate.theme != theme ||
+        oldDelegate.currentAnnotation != currentAnnotation ||
         oldDelegate.selectedAnnotation != selectedAnnotation ||
         oldDelegate.pixelScale != pixelScale ||
         oldDelegate.showHud != showHud ||
+        oldDelegate.hideRotationHandle != hideRotationHandle ||
         oldDelegate.baseImage != baseImage ||
         oldDelegate.transformationController != transformationController ||
         !identical(oldDelegate.patchImages, patchImages);

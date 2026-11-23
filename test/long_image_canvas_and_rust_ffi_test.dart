@@ -702,15 +702,35 @@ void main() {
             await gesture.up();
             await tester.pumpAndSettle();
 
-            expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+            // Gene - Nov, 23, 2026: Assert contextual selection action pill and its Delete button live in viewport space outside InteractiveViewer.
+            // Old:
+            // expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+            // expect(
+            //   find.descendant(
+            //     of: find.byType(InteractiveViewer),
+            //     matching: find.byIcon(Icons.close_rounded),
+            //   ),
+            //   findsNothing,
+            //   reason:
+            //       'Delete chip must live in viewport space outside InteractiveViewer',
+            // );
+            expect(
+              find.byKey(const ValueKey('selection-action-bar')),
+              findsOneWidget,
+            );
+            expect(
+              find.byKey(const ValueKey('selection-action-delete')),
+              findsOneWidget,
+            );
+            expect(find.byIcon(Icons.delete_outline_rounded), findsOneWidget);
             expect(
               find.descendant(
                 of: find.byType(InteractiveViewer),
-                matching: find.byIcon(Icons.close_rounded),
+                matching: find.byKey(const ValueKey('selection-action-bar')),
               ),
               findsNothing,
               reason:
-                  'Delete chip must live in viewport space outside InteractiveViewer',
+                  'Selection action bar and Delete button must live in viewport space outside InteractiveViewer',
             );
           },
         );

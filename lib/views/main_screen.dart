@@ -1719,6 +1719,21 @@ class _MainScreenState extends State<MainScreen> {
     _showToast('Step numbers resequenced (1 to ${currentStep - 1})');
   }
 
+  // Gene - Nov, 23, 2026: Added _duplicateSelectedAnnotation so StylePicker's Duplicate action stays in sync with MainScreen and EditorCanvas.
+  void _duplicateSelectedAnnotation() {
+    final ann = _selectedAnnotation;
+    if (ann == null) return;
+    final p = _activeProjection;
+    final step = (p != null && p.isValid)
+        ? p.toImageLength(20.0 / (_zoomScale > 1e-4 ? _zoomScale : 1.0))
+        : 20.0;
+    final clone = ann
+        .translated(Offset(step, step))
+        .copyWith(id: const Uuid().v4());
+    _onAnnotationAdded(clone);
+    setState(() => _selectedAnnotationId = clone.id);
+  }
+
   /// Moves the selected annotation to the top or the bottom of the paint order.
   void _reorderSelectedAnnotation({required bool toFront}) {
     if (_selectedAnnotationId == null) return;
@@ -3694,6 +3709,11 @@ class _MainScreenState extends State<MainScreen> {
       annotations: _annotations,
       activeTool: _activeTool,
       onToolSelected: _setActiveTool,
+      // Gene - Nov, 23, 2026: Wire bidirectional selection ID and unified delete/z-order handlers between MainScreen and EditorCanvas.
+      selectedAnnotationId: _selectedAnnotationId,
+      onDeleteSelected: _deleteSelectedAnnotation,
+      onBringToFront: () => _reorderSelectedAnnotation(toFront: true),
+      onSendToBack: () => _reorderSelectedAnnotation(toFront: false),
       onSelectAnnotation: (ann) {
         setState(() {
           _selectedAnnotationId = ann?.id;
@@ -4143,6 +4163,8 @@ class _MainScreenState extends State<MainScreen> {
                                           () => _isPropertiesOpen = false,
                                         ),
                                         selectedAnnotation: _selectedAnnotation,
+                                        onDuplicateSelected:
+                                            _duplicateSelectedAnnotation,
                                         onDeleteSelected:
                                             _deleteSelectedAnnotation,
                                         onBringToFront: () =>

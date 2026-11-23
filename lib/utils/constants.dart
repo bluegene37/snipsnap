@@ -7,12 +7,15 @@ import 'package:flutter/material.dart';
 /// `EditorCanvas._resizeStroke`), which makes a slider for the same property
 /// redundant — so the panel hides it for them, and their weight is free to go
 /// well past the range a slider could offer.
-const dragSizedStrokeTools = {
-  CanvasTool.line,
-  CanvasTool.arrow,
-  CanvasTool.highlight,
-  CanvasTool.ruler,
-};
+// Gene - Nov, 23, 2026: Restore Stroke Width slider/presets for Arrow, Line, Ruler, and Highlighter alongside direct endpoint handles.
+// Old:
+// const dragSizedStrokeTools = {
+//   CanvasTool.line,
+//   CanvasTool.arrow,
+//   CanvasTool.highlight,
+//   CanvasTool.ruler,
+// };
+const dragSizedStrokeTools = <CanvasTool>{};
 
 enum CanvasTool {
   select,

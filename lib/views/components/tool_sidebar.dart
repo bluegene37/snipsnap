@@ -177,6 +177,12 @@ class ToolSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = SnipTheme.of(context);
 
+    const dividerAfterTools = {
+      CanvasTool.select,
+      CanvasTool.highlight,
+      CanvasTool.ruler,
+    };
+
     return Container(
       width: 68,
       decoration: BoxDecoration(
@@ -185,7 +191,9 @@ class ToolSidebar extends StatelessWidget {
       ),
       child: Column(
         children: [
-          const SizedBox(height: 12),
+          // Gene - Nov, 23, 2026: Group tools into Select / Draw / Annotate / Canvas sections with compact spacing and hairline dividers.
+          // Old: const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Expanded(
             // Thirteen tools at 83px each outrun every laptop-height window,
             // so the rail has always scrolled — silently. With nothing to
@@ -196,94 +204,117 @@ class ToolSidebar extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Column(
-                  children: tools.map((toolItem) {
-                    final isSelected = activeTool == toolItem.tool;
-                    final isShape = toolItem.tool == CanvasTool.shape;
+                  children: [
+                    for (final toolItem in tools) ...[
+                      () {
+                        final isSelected = activeTool == toolItem.tool;
+                        final isShape = toolItem.tool == CanvasTool.shape;
 
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Tooltip(
-                        message: isShape
-                            ? '${shapeKind.label} — click to draw, use the ▾ corner to switch shape'
-                            : toolItem.tooltip,
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(t.radius),
-                            onTap: () => onToolSelected(toolItem.tool),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 150),
-                              width: 56,
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 8,
-                                horizontal: 4,
-                              ),
-                              // The selected tool is the app's one exclusive
-                              // active control — activeFill/onActive.
-                              decoration: t.controlDecoration(
-                                active: isSelected,
-                              ),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  // The shape button previews the active shape
-                                  // and exposes a corner flyout to change it.
-                                  Stack(
-                                    clipBehavior: Clip.none,
+                        return Padding(
+                          // Old: padding: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.only(bottom: 5),
+                          child: Tooltip(
+                            message: isShape
+                                ? '${shapeKind.label} — click to draw, use the ▾ corner to switch shape'
+                                : toolItem.tooltip,
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(t.radius),
+                                onTap: () => onToolSelected(toolItem.tool),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  width: 56,
+                                  // Old:
+                                  // padding: const EdgeInsets.symmetric(
+                                  //   vertical: 8,
+                                  //   horizontal: 4,
+                                  // ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 6,
+                                    horizontal: 4,
+                                  ),
+                                  // The selected tool is the app's one exclusive
+                                  // active control — activeFill/onActive.
+                                  decoration: t.controlDecoration(
+                                    active: isSelected,
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(
-                                        isShape
-                                            ? shapeKind.icon
-                                            : toolItem.icon,
-                                        size: 22,
-                                        color: t.controlForeground(
-                                          active: isSelected,
-                                        ),
-                                      ),
-                                      if (isShape &&
-                                          onShapeKindSelected != null)
-                                        Positioned(
-                                          right: -9,
-                                          bottom: -4,
-                                          child: _ShapeKindFlyout(
-                                            selected: shapeKind,
-                                            onSelected: (kind) {
-                                              onShapeKindSelected!(kind);
-                                              onToolSelected(CanvasTool.shape);
-                                            },
+                                      // The shape button previews the active shape
+                                      // and exposes a corner flyout to change it.
+                                      Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          Icon(
+                                            isShape
+                                                ? shapeKind.icon
+                                                : toolItem.icon,
+                                            // Old: size: 22,
+                                            size: 20,
                                             color: t.controlForeground(
                                               active: isSelected,
                                             ),
                                           ),
+                                          if (isShape &&
+                                              onShapeKindSelected != null)
+                                            Positioned(
+                                              right: -9,
+                                              bottom: -4,
+                                              child: _ShapeKindFlyout(
+                                                selected: shapeKind,
+                                                onSelected: (kind) {
+                                                  onShapeKindSelected!(kind);
+                                                  onToolSelected(
+                                                    CanvasTool.shape,
+                                                  );
+                                                },
+                                                color: t.controlForeground(
+                                                  active: isSelected,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      // Old: const SizedBox(height: 3),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        toolItem.label,
+                                        style: TextStyle(
+                                          color: t.controlForeground(
+                                            active: isSelected,
+                                            dim: true,
+                                          ),
+                                          fontSize: 10,
+                                          fontWeight: isSelected
+                                              ? FontWeight.bold
+                                              : FontWeight.w500,
                                         ),
+                                        textAlign: TextAlign.center,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ],
                                   ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    toolItem.label,
-                                    style: TextStyle(
-                                      color: t.controlForeground(
-                                        active: isSelected,
-                                        dim: true,
-                                      ),
-                                      fontSize: 10,
-                                      fontWeight: isSelected
-                                          ? FontWeight.bold
-                                          : FontWeight.w500,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
+                                ),
                               ),
                             ),
                           ),
+                        );
+                      }(),
+                      if (dividerAfterTools.contains(toolItem.tool))
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 1, 8, 6),
+                          child: Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: t.border,
+                          ),
                         ),
-                      ),
-                    );
-                  }).toList(),
+                    ],
+                  ],
                 ),
               ),
             ),

@@ -42,6 +42,8 @@ class StylePicker extends StatelessWidget {
   final bool isDoubleArrow;
   final ValueChanged<bool>? onDoubleArrowChanged;
   final Annotation? selectedAnnotation;
+  // Gene - Nov, 23, 2026: Added onDuplicateSelected action for selected annotations in StylePicker.
+  final VoidCallback? onDuplicateSelected;
   final VoidCallback? onDeleteSelected;
   final VoidCallback? onBringToFront;
   final VoidCallback? onSendToBack;
@@ -97,6 +99,7 @@ class StylePicker extends StatelessWidget {
     this.isDoubleArrow = false,
     this.onDoubleArrowChanged,
     this.selectedAnnotation,
+    this.onDuplicateSelected,
     this.onDeleteSelected,
     this.onBringToFront,
     this.onSendToBack,
@@ -353,6 +356,24 @@ class StylePicker extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
+                    // Gene - Nov, 23, 2026: Expose Duplicate in StylePicker's Selected Item Quick Actions row.
+                    if (onDuplicateSelected != null)
+                      Tooltip(
+                        message: 'Duplicate Selected (Cmd/Ctrl+D)',
+                        child: IconButton(
+                          icon: const Icon(
+                            Icons.copy_rounded,
+                            size: 16,
+                          ),
+                          color: textColor,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 30,
+                          ),
+                          onPressed: onDuplicateSelected,
+                        ),
+                      ),
                     if (onBringToFront != null)
                       Tooltip(
                         message: 'Bring to Front',
