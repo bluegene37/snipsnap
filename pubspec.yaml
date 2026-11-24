@@ -12,7 +12,9 @@ publish_to: 'none'
 # Gene - Nov, 13, 2026: Bumped version to 1.0.7+6 for screen recording overhaul & native video editor release.
 # version: 1.0.7+6
 # Gene - Nov, 22, 2026: Bumped version to 1.0.8+7 for Windows Store readiness, Rust scrolling/FFI polish & QA bugfixes.
-version: 1.0.8+7
+# Gene - Nov, 23, 2026: Bumped version to 1.0.9+8 for canvas selection chrome redesign, contextual action bar, and direct linear handles release.
+# version: 1.0.8+7
+version: 1.0.9+8
 
 environment:
   sdk: ^3.12.2
@@ -127,7 +129,9 @@ msix_config:
   # Gene - Nov, 13, 2026: Bumped msix_version to 1.0.7.0 in lockstep with version 1.0.7+6.
   # msix_version: 1.0.7.0
   # Gene - Nov, 22, 2026: Bumped msix_version to 1.0.8.0 in lockstep with version 1.0.8+7.
-  msix_version: 1.0.8.0
+  # Gene - Nov, 23, 2026: Bumped msix_version to 1.0.9.0 in lockstep with version 1.0.9+8.
+  # msix_version: 1.0.8.0
+  msix_version: 1.0.9.0
   # Store requires a PNG logo; msix generates every tile/scale asset from it.
   logo_path: assets/icon/app_icon.png
   # runFullTrust (implicit) lets the Win32 runner use global hotkeys, GDI

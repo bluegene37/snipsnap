@@ -40,6 +40,11 @@ jobs:
           channel: stable
           cache: true
 
+      # Gene - Nov, 24, 2026: Build and test native Rust snipsnap_core before flutter test so FFI tests find snipsnap_core.dll.
+      - name: Build & test Rust native core
+        shell: bash
+        run: cargo build --manifest-path native/snipsnap_core/Cargo.toml --release && cargo test --manifest-path native/snipsnap_core/Cargo.toml --release -- --nocapture
+
       - name: Install dependencies
         shell: bash
         run: bash scripts/ci_retry.sh flutter pub get
@@ -134,6 +139,10 @@ jobs:
           channel: stable
           cache: true
 
+      # Gene - Nov, 24, 2026: Build and test native Rust snipsnap_core before flutter test so FFI tests find libsnipsnap_core.dylib.
+      - name: Build & test Rust native core
+        run: cargo build --manifest-path native/snipsnap_core/Cargo.toml --release && cargo test --manifest-path native/snipsnap_core/Cargo.toml --release -- --nocapture
+
       - name: Install dependencies
         run: bash scripts/ci_retry.sh flutter pub get
 
@@ -206,6 +215,11 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
+      # Gene - Nov, 24, 2026: Build and test native Rust snipsnap_core before flutter test so FFI tests find snipsnap_core.dll.
+      - name: Build & test Rust native core
+        shell: bash
+        run: cargo build --manifest-path native/snipsnap_core/Cargo.toml --release && cargo test --manifest-path native/snipsnap_core/Cargo.toml --release -- --nocapture
 
       - name: Install dependencies
         shell: bash

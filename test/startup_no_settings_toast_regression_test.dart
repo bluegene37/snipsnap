@@ -52,6 +52,10 @@ void main() {
               return false;
             case 'listAudioInputDevices':
               return <dynamic>[];
+            // Gene - Nov, 24, 2026: Record Windows native hotkey registration so Windows CI regression tests verify registration cleanly.
+            case 'registerWindowsHotKeys':
+              recordedHotKeyMethods.add('registerWindowsHotKeys');
+              return <String>[];
             default:
               return null;
           }
@@ -95,7 +99,12 @@ void main() {
       expect(find.text('Open Settings'), findsNothing);
       expect(find.textContaining('Accessibility'), findsNothing);
       expect(find.byType(SnackBar), findsNothing);
-      expect(recordedHotKeyMethods, contains('register'));
+      // Gene - Nov, 24, 2026: Expect native Win32 hotkey registration on Windows and hotkey_manager elsewhere.
+      // expect(recordedHotKeyMethods, contains('register'));
+      expect(
+        recordedHotKeyMethods,
+        contains(Platform.isWindows ? 'registerWindowsHotKeys' : 'register'),
+      );
 
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
