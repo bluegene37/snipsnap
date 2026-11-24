@@ -184,10 +184,25 @@ struct PersistentGdiGrabber {
     return true;
   }
 
+  // Gene - Nov, 24, 2026: Flush GDI pipeline and force opaque 0xFF alpha on BitBlt captures.
+  // Old implementation:
+  // const uint8_t* Capture(int x, int y, int w, int h, int* out_stride) {
+  //   if (!EnsureSize(w, h)) return nullptr;
+  //   if (!::BitBlt(mem_dc, 0, 0, w, h, screen_dc, x, y, SRCCOPY)) {
+  //     return nullptr;
+  //   }
+  //   if (out_stride) *out_stride = w * 4;
+  //   return bits;
+  // }
   const uint8_t* Capture(int x, int y, int w, int h, int* out_stride) {
     if (!EnsureSize(w, h)) return nullptr;
     if (!::BitBlt(mem_dc, 0, 0, w, h, screen_dc, x, y, SRCCOPY)) {
       return nullptr;
+    }
+    ::GdiFlush();
+    size_t byte_count = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+    for (size_t i = 3; i < byte_count; i += 4) {
+      bits[i] = 0xFF;
     }
     if (out_stride) *out_stride = w * 4;
     return bits;
@@ -314,8 +329,21 @@ struct WgcMonitorSession {
       session = frame_pool.CreateCaptureSession(item);
       if (!session) return false;
 
+      // Gene - Nov, 24, 2026: Disable Windows 11 yellow WGC border when supported by SDK/OS.
+      // Old implementation:
+      // try {
+      //   session.IsCursorCaptureEnabled(false);
+      // } catch (...) {
+      // }
       try {
         session.IsCursorCaptureEnabled(false);
+        if constexpr (requires(
+                          winrt::Windows::Graphics::Capture::
+                              GraphicsCaptureSession s) {
+                        s.IsBorderRequired(false);
+                      }) {
+          session.IsBorderRequired(false);
+        }
       } catch (...) {
       }
       session.StartCapture();
@@ -434,8 +462,12 @@ struct ScrollingCaptureEngine::Impl {
   std::thread worker_thread;
   std::thread ui_thread;
 
-  static Impl* s_hook_instance;
-  static std::mutex s_hook_instance_mutex;
+  // Gene - Nov, 24, 2026: Lock-free atomic hook pointer, auto-scroll one-time focus warp, and modifier-safe VK_RETURN.
+  // Old implementation:
+  // static Impl* s_hook_instance;
+  // static std::mutex s_hook_instance_mutex;
+  std::atomic<bool> auto_scroll_needs_focus{false};
+  static std::atomic<Impl*> s_hook_instance;
 
   ~Impl() { Shutdown(); }
 
@@ -494,6 +526,13 @@ struct ScrollingCaptureEngine::Impl {
     }
   }
 
+  // Gene - Nov, 24, 2026: Lock-free WH_MOUSE_LL/WH_KEYBOARD_LL hook lookup, Ctrl/Alt/Shift guard on VK_RETURN, one-time focus warp + HUD hover pause, and standard WHEEL_DELTA scrolling.
+  // Old implementation:
+  // static LRESULT CALLBACK LowLevelMouseProc(int ncode, WPARAM wparam, LPARAM lparam) { ... std::lock_guard<std::mutex> lk(s_hook_instance_mutex); self = s_hook_instance; ... }
+  // static LRESULT CALLBACK LowLevelKeyboardProc(...) { ... if (kb->vkCode == VK_RETURN) ... }
+  // void InstallHooks() { ... std::lock_guard<std::mutex> il(s_hook_instance_mutex); s_hook_instance = this; ... }
+  // void UninstallHooks() { ... }
+  // void PerformAutoScrollStep() { ... ::SetCursorPos(cx, cy); ... mouseData = 60 / -60; }
   static LRESULT CALLBACK LowLevelMouseProc(int ncode,
                                             WPARAM wparam,
                                             LPARAM lparam) {
@@ -501,21 +540,7 @@ struct ScrollingCaptureEngine::Impl {
         (wparam == WM_MOUSEWHEEL || wparam == WM_MOUSEHWHEEL)) {
       const auto* ms = reinterpret_cast<const MSLLHOOKSTRUCT*>(lparam);
       if (ms && (ms->flags & LLMHF_INJECTED) == 0) {
-        Impl* self = nullptr;
-        {
-          std::lock_guard<std::mutex> lk(s_hook_instance_mutex);
-          self = s_hook_instance;
-        }
-        // Gene - Nov, 22, 2026: Keep WH_MOUSE_LL lock-free regarding state_mutex and Flutter callbacks; worker thread reads manual_scroll_paused_auto.
-        // Old implementation:
-        // if (self && self->auto_scroll.load()) {
-        //   self->auto_scroll.store(false);
-        //   {
-        //     std::lock_guard<std::mutex> lk(self->state_mutex);
-        //     self->latest_warning = "Manual scroll detected - Auto-Scroll paused";
-        //   }
-        //   self->NotifyHudAndProgress();
-        // }
+        Impl* self = s_hook_instance.load(std::memory_order_acquire);
         if (self && self->auto_scroll.exchange(false)) {
           self->manual_scroll_paused_auto.store(true);
         }
@@ -529,19 +554,21 @@ struct ScrollingCaptureEngine::Impl {
                                                LPARAM lparam) {
     if (ncode == HC_ACTION && (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN)) {
       const auto* kb = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);
-      Impl* self = nullptr;
-      {
-        std::lock_guard<std::mutex> lk(s_hook_instance_mutex);
-        self = s_hook_instance;
-      }
+      Impl* self = s_hook_instance.load(std::memory_order_acquire);
       if (self && kb && self->active.load()) {
         if (kb->vkCode == VK_ESCAPE) {
           self->RequestCancel();
           return 1;
         }
         if (kb->vkCode == VK_RETURN) {
-          self->RequestFinish();
-          return 1;
+          bool mod_held =
+              (::GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 ||
+              (::GetAsyncKeyState(VK_MENU) & 0x8000) != 0 ||
+              (::GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+          if (!mod_held) {
+            self->RequestFinish();
+            return 1;
+          }
         }
       }
     }
@@ -550,10 +577,7 @@ struct ScrollingCaptureEngine::Impl {
 
   void InstallHooks() {
     std::lock_guard<std::mutex> lk(hook_mutex);
-    {
-      std::lock_guard<std::mutex> il(s_hook_instance_mutex);
-      s_hook_instance = this;
-    }
+    s_hook_instance.store(this, std::memory_order_release);
     HINSTANCE mod = ::GetModuleHandleW(nullptr);
     if (!mouse_hook) {
       mouse_hook = ::SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, mod, 0);
@@ -565,6 +589,10 @@ struct ScrollingCaptureEngine::Impl {
 
   void UninstallHooks() {
     std::lock_guard<std::mutex> lk(hook_mutex);
+    Impl* expected = this;
+    s_hook_instance.compare_exchange_strong(expected, nullptr,
+                                            std::memory_order_release,
+                                            std::memory_order_relaxed);
     if (mouse_hook) {
       ::UnhookWindowsHookEx(mouse_hook);
       mouse_hook = nullptr;
@@ -572,10 +600,6 @@ struct ScrollingCaptureEngine::Impl {
     if (key_hook) {
       ::UnhookWindowsHookEx(key_hook);
       key_hook = nullptr;
-    }
-    std::lock_guard<std::mutex> il(s_hook_instance_mutex);
-    if (s_hook_instance == this) {
-      s_hook_instance = nullptr;
     }
   }
 
@@ -623,16 +647,41 @@ struct ScrollingCaptureEngine::Impl {
     }
   }
 
+  // Gene - Nov, 24, 2026: Focus-warp once when enabling auto-scroll, skip wheel/warp while cursor hovers HUD, and emit standard +/-WHEEL_DELTA (120).
+  // Old implementation:
+  // void PerformAutoScrollStep() {
+  //   if (!active.load() || paused.load() || !auto_scroll.load()) return;
+  //   int cx = config.x + config.width / 2;
+  //   int cy = config.y + config.height / 2;
+  //   POINT cur = {};
+  //   if (::GetCursorPos(&cur)) {
+  //     if (cur.x < config.x || cur.x > config.x + config.width ||
+  //         cur.y < config.y || cur.y > config.y + config.height) {
+  //       ::SetCursorPos(cx, cy);
+  //     }
+  //   }
+  //   ...
+  //   input.mi.mouseData = static_cast<DWORD>(60); / static_cast<DWORD>(-60);
+  // }
   void PerformAutoScrollStep() {
     if (!active.load() || paused.load() || !auto_scroll.load()) return;
 
-    int cx = config.x + config.width / 2;
-    int cy = config.y + config.height / 2;
-    POINT cur = {};
-    if (::GetCursorPos(&cur)) {
-      if (cur.x < config.x || cur.x > config.x + config.width ||
-          cur.y < config.y || cur.y > config.y + config.height) {
-        ::SetCursorPos(cx, cy);
+    if (auto_scroll_needs_focus.exchange(false)) {
+      int cx = config.x + config.width / 2;
+      int cy = config.y + config.height / 2;
+      ::SetCursorPos(cx, cy);
+    } else {
+      HWND target_hud = nullptr;
+      {
+        std::lock_guard<std::mutex> ulk(ui_mutex);
+        target_hud = hud_hwnd;
+      }
+      POINT cur = {};
+      RECT hud_rc = {};
+      if (target_hud && ::IsWindow(target_hud) &&
+          ::GetWindowRect(target_hud, &hud_rc) && ::GetCursorPos(&cur) &&
+          ::PtInRect(&hud_rc, cur)) {
+        return;
       }
     }
 
@@ -646,10 +695,10 @@ struct ScrollingCaptureEngine::Impl {
     input.type = INPUT_MOUSE;
     if (axis == SNIPSNAP_AXIS_HORIZONTAL) {
       input.mi.dwFlags = MOUSEEVENTF_HWHEEL;
-      input.mi.mouseData = static_cast<DWORD>(60);
+      input.mi.mouseData = static_cast<DWORD>(WHEEL_DELTA);
     } else {
       input.mi.dwFlags = MOUSEEVENTF_WHEEL;
-      input.mi.mouseData = static_cast<DWORD>(-60);
+      input.mi.mouseData = static_cast<DWORD>(-WHEEL_DELTA);
     }
     ::SendInput(1, &input, sizeof(INPUT));
   }
@@ -922,7 +971,10 @@ struct ScrollingCaptureEngine::Impl {
           }
           if (::PtInRect(&self->btn_auto, pt)) {
             bool next = !self->auto_scroll.load();
-            if (next) self->paused.store(false);
+            if (next) {
+              self->paused.store(false);
+              self->auto_scroll_needs_focus.store(true);
+            }
             self->auto_scroll.store(next);
             self->NotifyHudAndProgress();
             return 0;
@@ -1076,7 +1128,9 @@ struct ScrollingCaptureEngine::Impl {
     ::SetWindowDisplayAffinity(created_hud, WDA_EXCLUDEFROMCAPTURE);
     ::SetWindowPos(created_hud, HWND_TOPMOST, hud_x, hud_y, hud_w, hud_h,
                    SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    ::SetTimer(created_hud, kAutoScrollTimerId, 70, nullptr);
+    // Gene - Nov, 24, 2026: Pace auto-scroll timer at 95ms so targets settle smoothly between standard WHEEL_DELTA ticks.
+    // ::SetTimer(created_hud, kAutoScrollTimerId, 70, nullptr);
+    ::SetTimer(created_hud, kAutoScrollTimerId, 95, nullptr);
 
     InstallHooks();
 
@@ -1313,9 +1367,13 @@ struct ScrollingCaptureEngine::Impl {
   }
 };
 
-ScrollingCaptureEngine::Impl* ScrollingCaptureEngine::Impl::s_hook_instance =
-    nullptr;
-std::mutex ScrollingCaptureEngine::Impl::s_hook_instance_mutex;
+// Gene - Nov, 24, 2026: Atomic lock-free s_hook_instance definition and one-time focus warp reset in Start/SetAutoScroll.
+// Old implementation:
+// ScrollingCaptureEngine::Impl* ScrollingCaptureEngine::Impl::s_hook_instance =
+//     nullptr;
+// std::mutex ScrollingCaptureEngine::Impl::s_hook_instance_mutex;
+std::atomic<ScrollingCaptureEngine::Impl*>
+    ScrollingCaptureEngine::Impl::s_hook_instance{nullptr};
 
 ScrollingCaptureEngine::ScrollingCaptureEngine() : impl_(new Impl()) {}
 
@@ -1342,6 +1400,7 @@ bool ScrollingCaptureEngine::Start(const ScrollingCaptureConfig& config,
   impl_->callbacks = callbacks;
   impl_->paused.store(false);
   impl_->auto_scroll.store(false);
+  impl_->auto_scroll_needs_focus.store(false);
   impl_->finish_requested.store(false);
   impl_->cancel_requested.store(false);
   impl_->has_moved_content.store(false);
@@ -1381,6 +1440,7 @@ void ScrollingCaptureEngine::SetAutoScroll(bool enabled) {
   if (!impl_->active.load()) return;
   if (enabled) {
     impl_->paused.store(false);
+    impl_->auto_scroll_needs_focus.store(true);
   }
   impl_->auto_scroll.store(enabled);
   {

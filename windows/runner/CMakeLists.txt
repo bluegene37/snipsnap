@@ -30,8 +30,23 @@ project(runner LANGUAGES CXX)
 #   "Runner.rc"
 #   "runner.exe.manifest"
 # )
+# Gene - Nov, 24, 2026: Added dxgi_capture.cpp for fast DXGI Desktop Duplication & persistent GDI fallback capture.
+# Old implementation:
+# add_executable(${BINARY_NAME} WIN32
+#   "capture_handler.cpp"
+#   "scrolling_capture_engine.cpp"
+#   "flutter_window.cpp"
+#   "main.cpp"
+#   "ocr_handler.cpp"
+#   "utils.cpp"
+#   "win32_window.cpp"
+#   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
+#   "Runner.rc"
+#   "runner.exe.manifest"
+# )
 add_executable(${BINARY_NAME} WIN32
   "capture_handler.cpp"
+  "dxgi_capture.cpp"
   "scrolling_capture_engine.cpp"
   "flutter_window.cpp"
   "main.cpp"
@@ -87,6 +102,21 @@ set(SNIPSNAP_CORE_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_co
 set(SNIPSNAP_CORE_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/rust_target")
 set(SNIPSNAP_CORE_LIB "${SNIPSNAP_CORE_TARGET_DIR}/x86_64-pc-windows-msvc/release/snipsnap_core.lib")
 set(SNIPSNAP_CORE_DLL "${SNIPSNAP_CORE_TARGET_DIR}/x86_64-pc-windows-msvc/release/snipsnap_core.dll")
+# Gene - Nov, 24, 2026: Track capture_ops.rs in Rust build dependencies.
+# Old implementation:
+# add_custom_command(
+#   OUTPUT "${SNIPSNAP_CORE_LIB}" "${SNIPSNAP_CORE_DLL}"
+#   COMMAND "${CARGO_EXECUTABLE}" build --manifest-path "${SNIPSNAP_CORE_MANIFEST}" --release --target x86_64-pc-windows-msvc --target-dir "${SNIPSNAP_CORE_TARGET_DIR}"
+#   DEPENDS
+#     "${SNIPSNAP_CORE_MANIFEST}"
+#     "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/include/snipsnap_core.h"
+#     "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/lib.rs"
+#     "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/stitcher.rs"
+#     "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/image_ops.rs"
+#     "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/ffi.rs"
+#   COMMENT "Building Rust snipsnap_core staticlib (x86_64-pc-windows-msvc)"
+#   VERBATIM
+# )
 add_custom_command(
   OUTPUT "${SNIPSNAP_CORE_LIB}" "${SNIPSNAP_CORE_DLL}"
   COMMAND "${CARGO_EXECUTABLE}" build --manifest-path "${SNIPSNAP_CORE_MANIFEST}" --release --target x86_64-pc-windows-msvc --target-dir "${SNIPSNAP_CORE_TARGET_DIR}"
@@ -94,6 +124,7 @@ add_custom_command(
     "${SNIPSNAP_CORE_MANIFEST}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/include/snipsnap_core.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/lib.rs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/capture_ops.rs"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/stitcher.rs"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/image_ops.rs"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../native/snipsnap_core/src/ffi.rs"

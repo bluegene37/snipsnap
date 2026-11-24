@@ -663,8 +663,12 @@ class CapturePlugin: NSObject {
     case "stopScreenRecording":
       stopNativeScreenRecording(cancel: false, result: result)
 
+    // Gene - Nov, 24, 2026: Honor optional restoreWindow argument when cancelling a recording (e.g. false during restartRecording).
+    // case "cancelScreenRecording":
+    //   stopNativeScreenRecording(cancel: true, result: result)
     case "cancelScreenRecording":
-      stopNativeScreenRecording(cancel: true, result: result)
+      let restoreWindow = (call.arguments as? [String: Any])?["restoreWindow"] as? Bool ?? true
+      stopNativeScreenRecording(cancel: true, restoreWindow: restoreWindow, result: result)
 
     case "extractVideoFrame":
       guard
@@ -3518,8 +3522,11 @@ private class CaptureOverlayView: NSView {
       settleCancelled()
     case returnKey, keypadEnter, space:
       // Gene - Nov, 08, 2026: Confirm selection as Record if initialMode == "record", otherwise Capture.
+      // Gene - Nov, 24, 2026: Support initialMode == "scrolling" to confirm Panoramic Scroll on Enter/Space.
       if initialMode == "record" {
         startRecordSelection()
+      } else if initialMode == "scrolling" {
+        startPanoramicCapture()
       } else {
         captureCurrentSelection()
       }
@@ -4252,7 +4259,10 @@ private class CaptureOverlayView: NSView {
     let recTextSize = recAttrString.size()
     let recPillW = padH * 2 + iconW + gap + recTextSize.width
 
-    let scrollLabel = "Scroll"
+    // Gene - Nov, 24, 2026: Highlight primary "Start Scroll" button when initialMode == "scrolling".
+    // Old implementation:
+    // let scrollLabel = "Scroll"
+    let scrollLabel = initialMode == "scrolling" ? "Start Scroll" : "Scroll"
     let scrollAttrString = NSAttributedString(string: scrollLabel, attributes: attrs)
     let scrollTextSize = scrollAttrString.size()
     let scrollPillW = padH * 2 + iconW + gap + scrollTextSize.width
@@ -4313,8 +4323,10 @@ private class CaptureOverlayView: NSView {
     )
 
     // 1. Draw Capture button
+    let neutralPillFill = NSColor(red: 0.24, green: 0.20, blue: 0.17, alpha: 0.96)
     let capturePath = NSBezierPath(roundedRect: captureRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
-    (captureButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : accent).setFill()
+    let captureBaseFill = initialMode == "scrolling" ? neutralPillFill : accent
+    (captureButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : captureBaseFill).setFill()
     capturePath.fill()
     NSColor(white: 1.0, alpha: 0.35).setStroke()
     capturePath.lineWidth = 1
@@ -4345,7 +4357,7 @@ private class CaptureOverlayView: NSView {
 
     // 3. Draw Scroll button beside Video
     let scrollPath = NSBezierPath(roundedRect: scrollRect, xRadius: buttonH / 2, yRadius: buttonH / 2)
-    let scrollFill = NSColor(red: 0.24, green: 0.20, blue: 0.17, alpha: 0.96)
+    let scrollFill = initialMode == "scrolling" ? accent : neutralPillFill
     (panoramicButtonHot ? accent.blended(withFraction: 0.35, of: crema) ?? accent : scrollFill).setFill()
     scrollPath.fill()
     NSColor(white: 1.0, alpha: 0.35).setStroke()

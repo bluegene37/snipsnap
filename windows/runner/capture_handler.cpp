@@ -39,6 +39,10 @@
 #include <oleauto.h>
 #include <windowsx.h>
 #include <shlobj.h>
+// Gene - Nov, 24, 2026: Added dwmapi, knownfolders, shellapi, dxgi_capture, resource, and snipsnap_core headers for DXGI capture, native hotkeys, tray icon, dark titlebar, Known Folders, and Rust pixel/audio ops.
+#include <dwmapi.h>
+#include <knownfolders.h>
+#include <shellapi.h>
 #include <wincodec.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -57,6 +61,8 @@
 #include <flutter/texture_registrar.h>
 
 #include <algorithm>
+// Gene - Nov, 24, 2026: Include <array> for WinVideoTexturePlayer::decode_pool.
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <climits>
@@ -76,13 +82,29 @@
 #include <vector>
 
 // Gene - Nov, 20, 2026: Native Windows scrolling capture engine backed by Rust snipsnap_core staticlib.
+#include "dxgi_capture.h"
+#include "resource.h"
 #include "scrolling_capture_engine.h"
+#include "snipsnap_core.h"
 
 #ifndef WDA_EXCLUDEFROMCAPTURE
 #define WDA_EXCLUDEFROMCAPTURE 0x00000011
 #endif
+// Gene - Nov, 24, 2026: Avoid redefining <dwmapi.h> enum DWMWA_USE_IMMERSIVE_DARK_MODE as a preprocessor macro across Windows SDK versions.
+// #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+// #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+// #endif
+#ifndef MOD_NOREPEAT
+#define MOD_NOREPEAT 0x4000
+#endif
+#ifndef CF_DIBV5
+#define CF_DIBV5 17
+#endif
 
 namespace {
+
+constexpr DWORD kDwmwaUseImmersiveDarkMode = 20;
+constexpr DWORD kDwmwaUseImmersiveDarkModeLegacy = 19;
 
 using flutter::EncodableList;
 using flutter::EncodableMap;
@@ -155,7 +177,59 @@ std::string UriEncodeUtf8(const std::string& input) {
   return out;
 }
 
+// Gene - Nov, 24, 2026: Added reliable foreground activation, DWM dark titlebar sync, Known Folder Desktop lookup, native WM_HOTKEY + precapture, tray icon, and async audio cache.
+constexpr UINT kMsgTrayIcon = WM_APP + 201;
+constexpr UINT kTrayIconId = 1;
+constexpr UINT kTrayCmdOpen = 4001;
+constexpr UINT kTrayCmdArea = 4002;
+constexpr UINT kTrayCmdFull = 4003;
+constexpr UINT kTrayCmdScroll = 4004;
+constexpr UINT kTrayCmdRecord = 4005;
+constexpr UINT kTrayCmdToggleTray = 4006;
+constexpr UINT kTrayCmdQuit = 4007;
+
+HWND g_main_hwnd = nullptr;
+bool g_tray_registered = false;
+UINT g_show_window_msg = 0;
+std::atomic<bool> g_close_to_tray{true};
+std::atomic<bool> g_force_quit{false};
+std::atomic<bool> g_overlay_active{false};
+
+struct NativeHotKeyEntry {
+  int id = 0;
+  std::string action;
+  UINT vk = 0;
+  UINT mods = 0;
+};
+std::mutex g_hotkey_mutex;
+std::map<int, NativeHotKeyEntry> g_native_hotkeys;
+int g_next_hotkey_id = 1000;
+
+struct PrecaptureSnapshot {
+  bool valid = false;
+  std::chrono::steady_clock::time_point captured_at{};
+  bool is_single_monitor = false;
+  HMONITOR single_hmon = nullptr;
+  RECT single_rect = {0, 0, 0, 0};
+  std::vector<uint8_t> single_bgra;
+  std::vector<CapturedMonitorFrame> monitors;
+};
+std::mutex g_precapture_mutex;
+PrecaptureSnapshot g_precapture;
+
+std::mutex g_audio_cache_mutex;
+std::vector<std::pair<std::string, std::string>> g_cached_audio_devices;
+std::string g_cached_default_audio_id;
+std::atomic<bool> g_audio_refresh_in_flight{false};
+
+void PostToPlatformThread(std::function<void()> fn);
+void InvokeDartMethod(const std::string& method, const EncodableValue& args);
+void InvalidateActiveOverlayWindows();
+
 HWND FindMainAppHwnd() {
+  if (g_main_hwnd && ::IsWindow(g_main_hwnd)) {
+    return g_main_hwnd;
+  }
   auto gate = Gate();
   if (gate) {
     std::lock_guard<std::mutex> lock(gate->mutex);
@@ -163,101 +237,504 @@ HWND FindMainAppHwnd() {
       HWND view_hwnd = gate->registrar->GetView()->GetNativeWindow();
       if (view_hwnd) {
         HWND root = ::GetAncestor(view_hwnd, GA_ROOT);
-        return root ? root : view_hwnd;
+        g_main_hwnd = root ? root : view_hwnd;
+        return g_main_hwnd;
       }
     }
   }
-  return ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
+  g_main_hwnd = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
+  return g_main_hwnd;
 }
 
+void ForceForegroundWindow(HWND hwnd) {
+  if (!hwnd || !::IsWindow(hwnd)) return;
+  if (::IsIconic(hwnd)) {
+    ::ShowWindow(hwnd, SW_RESTORE);
+  } else if (!::IsWindowVisible(hwnd)) {
+    ::ShowWindow(hwnd, SW_SHOW);
+  }
+  HWND fg = ::GetForegroundWindow();
+  if (fg != hwnd) {
+    DWORD fg_tid = fg ? ::GetWindowThreadProcessId(fg, nullptr) : 0;
+    DWORD cur_tid = ::GetCurrentThreadId();
+    bool attached = (fg_tid != 0 && fg_tid != cur_tid)
+                        ? (::AttachThreadInput(cur_tid, fg_tid, TRUE) == TRUE)
+                        : false;
+    ::BringWindowToTop(hwnd);
+    ::SetForegroundWindow(hwnd);
+    ::SetFocus(hwnd);
+    if (attached) {
+      ::AttachThreadInput(cur_tid, fg_tid, FALSE);
+    }
+  }
+}
+
+// Old implementation:
+// void SetMainWindowVisible(bool visible) {
+//   HWND hwnd = FindMainAppHwnd();
+//   if (!hwnd || !::IsWindow(hwnd)) return;
+//   if (visible) {
+//     ::ShowWindow(hwnd, SW_SHOW);
+//     if (::IsIconic(hwnd)) {
+//       ::ShowWindow(hwnd, SW_RESTORE);
+//     }
+//     ::SetForegroundWindow(hwnd);
+//   } else {
+//     ::ShowWindow(hwnd, SW_HIDE);
+//   }
+// }
 void SetMainWindowVisible(bool visible) {
   HWND hwnd = FindMainAppHwnd();
   if (!hwnd || !::IsWindow(hwnd)) return;
   if (visible) {
-    ::ShowWindow(hwnd, SW_SHOW);
-    if (::IsIconic(hwnd)) {
-      ::ShowWindow(hwnd, SW_RESTORE);
-    }
-    ::SetForegroundWindow(hwnd);
+    ForceForegroundWindow(hwnd);
   } else {
     ::ShowWindow(hwnd, SW_HIDE);
   }
 }
 
-EncodableList EnumerateWindowsAudioInputDevices() {
-  EncodableList list;
-  HRESULT com_hr = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-  bool did_init = (com_hr == S_OK || com_hr == S_FALSE);
+void SetMainWindowDarkMode(bool dark_mode) {
+  HWND hwnd = FindMainAppHwnd();
+  if (!hwnd || !::IsWindow(hwnd)) return;
+  BOOL enable_dark = dark_mode ? TRUE : FALSE;
+  // Gene - Nov, 24, 2026: Use constexpr DWM attribute values to prevent <dwmapi.h> enum/macro collisions on MSVC /W4 /WX.
+  // HRESULT hr = ::DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+  //                                      &enable_dark, sizeof(enable_dark));
+  // if (FAILED(hr)) {
+  //   ::DwmSetWindowAttribute(hwnd, 19, &enable_dark, sizeof(enable_dark));
+  // }
+  HRESULT hr = ::DwmSetWindowAttribute(hwnd, kDwmwaUseImmersiveDarkMode,
+                                       &enable_dark, sizeof(enable_dark));
+  if (FAILED(hr)) {
+    ::DwmSetWindowAttribute(hwnd, kDwmwaUseImmersiveDarkModeLegacy,
+                            &enable_dark, sizeof(enable_dark));
+  }
+}
 
-  ComPtr<IMMDeviceEnumerator> enumerator;
-  HRESULT hr = ::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
-                                  CLSCTX_ALL, IID_PPV_ARGS(&enumerator));
-  if (SUCCEEDED(hr) && enumerator) {
-    std::wstring default_id;
-    ComPtr<IMMDevice> def_dev;
-    if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eCapture, eConsole,
-                                                      &def_dev)) &&
-        def_dev) {
-      LPWSTR raw_def_id = nullptr;
-      if (SUCCEEDED(def_dev->GetId(&raw_def_id)) && raw_def_id) {
-        default_id = raw_def_id;
-        ::CoTaskMemFree(raw_def_id);
+std::string GetKnownDesktopPathUtf8() {
+  PWSTR raw_path = nullptr;
+  std::string out;
+  if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_Desktop, 0, nullptr,
+                                       &raw_path)) &&
+      raw_path) {
+    out = WideToUtf8(raw_path);
+    ::CoTaskMemFree(raw_path);
+  }
+  return out;
+}
+
+void InstallTrayIcon(HWND hwnd) {
+  if (g_tray_registered || !hwnd || !::IsWindow(hwnd)) return;
+  NOTIFYICONDATAW nid = {};
+  nid.cbSize = sizeof(nid);
+  nid.hWnd = hwnd;
+  nid.uID = kTrayIconId;
+  nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+  nid.uCallbackMessage = kMsgTrayIcon;
+  nid.hIcon = ::LoadIconW(::GetModuleHandleW(nullptr),
+                          MAKEINTRESOURCEW(IDI_APP_ICON));
+  wcscpy_s(nid.szTip, L"SnipSnap — Press shortcut to capture");
+  if (::Shell_NotifyIconW(NIM_ADD, &nid)) {
+    g_tray_registered = true;
+  }
+}
+
+void RemoveTrayIcon() {
+  if (!g_tray_registered) return;
+  NOTIFYICONDATAW nid = {};
+  nid.cbSize = sizeof(nid);
+  nid.hWnd = g_main_hwnd;
+  nid.uID = kTrayIconId;
+  ::Shell_NotifyIconW(NIM_DELETE, &nid);
+  g_tray_registered = false;
+}
+
+void TriggerTrayAction(const std::string& action) {
+  EncodableMap args;
+  args[EncodableValue("action")] = EncodableValue(action);
+  InvokeDartMethod("onGlobalHotKey", EncodableValue(args));
+}
+
+void ShowTrayContextMenu(HWND hwnd) {
+  HMENU menu = ::CreatePopupMenu();
+  if (!menu) return;
+  ::AppendMenuW(menu, MF_STRING, kTrayCmdOpen, L"Open SnipSnap");
+  ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  ::AppendMenuW(menu, MF_STRING, kTrayCmdArea, L"Area Snip");
+  ::AppendMenuW(menu, MF_STRING, kTrayCmdFull, L"Full Screen Snip");
+  ::AppendMenuW(menu, MF_STRING, kTrayCmdScroll, L"Panoramic Scroll");
+  ::AppendMenuW(menu, MF_STRING, kTrayCmdRecord, L"Record Area");
+  ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  UINT tray_flags =
+      MF_STRING | (g_close_to_tray.load() ? MF_CHECKED : MF_UNCHECKED);
+  ::AppendMenuW(menu, tray_flags, kTrayCmdToggleTray,
+                L"Keep in Tray on Close");
+  ::AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  ::AppendMenuW(menu, MF_STRING, kTrayCmdQuit, L"Quit SnipSnap");
+
+  POINT pt = {};
+  ::GetCursorPos(&pt);
+  ::SetForegroundWindow(hwnd);
+  UINT cmd = static_cast<UINT>(
+      ::TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+                       pt.x, pt.y, 0, hwnd, nullptr));
+  ::PostMessageW(hwnd, WM_NULL, 0, 0);
+  ::DestroyMenu(menu);
+
+  switch (cmd) {
+    case kTrayCmdOpen:
+      SetMainWindowVisible(true);
+      break;
+    case kTrayCmdArea:
+      TriggerTrayAction("interactiveSnip");
+      break;
+    case kTrayCmdFull:
+      TriggerTrayAction("fullScreenSnip");
+      break;
+    case kTrayCmdScroll:
+      TriggerTrayAction("scrollingSnip");
+      break;
+    case kTrayCmdRecord:
+      TriggerTrayAction("recordArea");
+      break;
+    case kTrayCmdToggleTray:
+      g_close_to_tray.store(!g_close_to_tray.load());
+      break;
+    case kTrayCmdQuit:
+      g_force_quit.store(true);
+      RemoveTrayIcon();
+      ::PostMessageW(hwnd, WM_CLOSE, 0, 0);
+      break;
+    default:
+      break;
+  }
+}
+
+void UnregisterAllNativeHotKeys() {
+  std::lock_guard<std::mutex> lock(g_hotkey_mutex);
+  HWND hwnd = FindMainAppHwnd();
+  for (const auto& kv : g_native_hotkeys) {
+    if (hwnd && ::IsWindow(hwnd)) {
+      ::UnregisterHotKey(hwnd, kv.first);
+    }
+  }
+  g_native_hotkeys.clear();
+}
+
+EncodableList RegisterNativeHotKeys(const EncodableList& entries) {
+  UnregisterAllNativeHotKeys();
+  EncodableList failed;
+  HWND hwnd = FindMainAppHwnd();
+  if (!hwnd || !::IsWindow(hwnd)) {
+    for (const auto& item : entries) {
+      const auto* m = std::get_if<EncodableMap>(&item);
+      if (!m) continue;
+      auto it = m->find(EncodableValue("action"));
+      if (it != m->end()) {
+        if (const auto* s = std::get_if<std::string>(&it->second)) {
+          failed.push_back(EncodableValue(*s));
+        }
       }
     }
+    return failed;
+  }
 
-    static const PROPERTYKEY kDevPKeyFriendlyName = {
-        {0xa45c254e,
-         0xdf1c,
-         0x4efd,
-         {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}},
-        14};
+  std::lock_guard<std::mutex> lock(g_hotkey_mutex);
+  for (const auto& item : entries) {
+    const auto* m = std::get_if<EncodableMap>(&item);
+    if (!m) continue;
+    std::string action;
+    int vk = 0;
+    int mods = 0;
+    auto it_act = m->find(EncodableValue("action"));
+    if (it_act != m->end()) {
+      if (const auto* s = std::get_if<std::string>(&it_act->second)) action = *s;
+    }
+    auto it_vk = m->find(EncodableValue("vk"));
+    if (it_vk != m->end()) {
+      if (const auto* v = std::get_if<int32_t>(&it_vk->second)) vk = *v;
+    }
+    auto it_mods = m->find(EncodableValue("modifiers"));
+    if (it_mods != m->end()) {
+      if (const auto* mv = std::get_if<int32_t>(&it_mods->second)) mods = *mv;
+    }
+    if (action.empty() || vk <= 0) {
+      if (!action.empty()) failed.push_back(EncodableValue(action));
+      continue;
+    }
+    int id = ++g_next_hotkey_id;
+    UINT win_mods = static_cast<UINT>(mods) | MOD_NOREPEAT;
+    if (::RegisterHotKey(hwnd, id, win_mods, static_cast<UINT>(vk))) {
+      NativeHotKeyEntry entry;
+      entry.id = id;
+      entry.action = action;
+      entry.vk = static_cast<UINT>(vk);
+      entry.mods = static_cast<UINT>(mods);
+      g_native_hotkeys[id] = std::move(entry);
+    } else {
+      failed.push_back(EncodableValue(action));
+    }
+  }
+  return failed;
+}
 
-    ComPtr<IMMDeviceCollection> collection;
-    if (SUCCEEDED(enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE,
-                                                 &collection)) &&
-        collection) {
-      UINT count = 0;
-      collection->GetCount(&count);
-      for (UINT i = 0; i < count; ++i) {
-        ComPtr<IMMDevice> dev;
-        if (FAILED(collection->Item(i, &dev)) || !dev) continue;
-
-        LPWSTR raw_id = nullptr;
-        std::wstring dev_id;
-        if (SUCCEEDED(dev->GetId(&raw_id)) && raw_id) {
-          dev_id = raw_id;
-          ::CoTaskMemFree(raw_id);
-        }
-        if (dev_id.empty()) continue;
-
-        std::wstring friendly_name = dev_id;
-        ComPtr<IPropertyStore> props;
-        if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &props)) && props) {
-          PROPVARIANT var_name;
-          ::PropVariantInit(&var_name);
-          if (SUCCEEDED(props->GetValue(kDevPKeyFriendlyName, &var_name))) {
-            if (var_name.vt == VT_LPWSTR && var_name.pwszVal) {
-              friendly_name = var_name.pwszVal;
-            }
-            ::PropVariantClear(&var_name);
-          }
-        }
-
-        EncodableMap item;
-        item[EncodableValue("id")] = EncodableValue(WideToUtf8(dev_id));
-        item[EncodableValue("name")] = EncodableValue(WideToUtf8(friendly_name));
-        item[EncodableValue("isDefault")] =
-            EncodableValue(!default_id.empty() && dev_id == default_id);
-        list.push_back(EncodableValue(item));
+void CapturePrecaptureForAction(const std::string& action) {
+  if (action == "interactiveSnip" || action == "scrollingSnip") {
+    std::vector<CapturedMonitorFrame> mons;
+    if (CaptureAllMonitorsFast(&mons)) {
+      std::lock_guard<std::mutex> lock(g_precapture_mutex);
+      g_precapture = PrecaptureSnapshot{};
+      g_precapture.valid = true;
+      g_precapture.captured_at = std::chrono::steady_clock::now();
+      g_precapture.is_single_monitor = false;
+      g_precapture.monitors = std::move(mons);
+    }
+  } else if (action == "fullScreenSnip") {
+    POINT pt = {};
+    if (!::GetCursorPos(&pt)) {
+      pt.x = 0;
+      pt.y = 0;
+    }
+    HMONITOR hmon = ::MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    if (hmon && ::GetMonitorInfoW(hmon, &mi)) {
+      std::vector<uint8_t> bgra;
+      if (CaptureSingleMonitorFast(hmon, mi.rcMonitor, &bgra)) {
+        std::lock_guard<std::mutex> lock(g_precapture_mutex);
+        g_precapture = PrecaptureSnapshot{};
+        g_precapture.valid = true;
+        g_precapture.captured_at = std::chrono::steady_clock::now();
+        g_precapture.is_single_monitor = true;
+        g_precapture.single_hmon = hmon;
+        g_precapture.single_rect = mi.rcMonitor;
+        g_precapture.single_bgra = std::move(bgra);
       }
     }
   }
+}
 
-  if (did_init) {
-    ::CoUninitialize();
+bool ConsumePrecaptureMonitors(std::vector<CapturedMonitorFrame>* out_mons) {
+  if (!out_mons) return false;
+  std::lock_guard<std::mutex> lock(g_precapture_mutex);
+  if (!g_precapture.valid || g_precapture.is_single_monitor) return false;
+  auto age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - g_precapture.captured_at)
+                    .count();
+  if (age_ms > 1500 || g_precapture.monitors.empty()) {
+    g_precapture = PrecaptureSnapshot{};
+    return false;
+  }
+  *out_mons = std::move(g_precapture.monitors);
+  g_precapture = PrecaptureSnapshot{};
+  return true;
+}
+
+bool ConsumePrecaptureSingleMonitor(HMONITOR* out_hmon, RECT* out_rect,
+                                    std::vector<uint8_t>* out_bgra) {
+  if (!out_hmon || !out_rect || !out_bgra) return false;
+  std::lock_guard<std::mutex> lock(g_precapture_mutex);
+  if (!g_precapture.valid || !g_precapture.is_single_monitor) return false;
+  auto age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - g_precapture.captured_at)
+                    .count();
+  if (age_ms > 1500 || g_precapture.single_bgra.empty()) {
+    g_precapture = PrecaptureSnapshot{};
+    return false;
+  }
+  *out_hmon = g_precapture.single_hmon;
+  *out_rect = g_precapture.single_rect;
+  *out_bgra = std::move(g_precapture.single_bgra);
+  g_precapture = PrecaptureSnapshot{};
+  return true;
+}
+
+// Gene - Nov, 24, 2026: Worker-thread WASAPI audio device enumerator that updates g_cached_audio_devices without blocking the Win32 UI thread.
+EncodableList BuildAudioDeviceListFromCache() {
+  std::lock_guard<std::mutex> lock(g_audio_cache_mutex);
+  EncodableList list;
+  for (const auto& kv : g_cached_audio_devices) {
+    EncodableMap item;
+    item[EncodableValue("id")] = EncodableValue(kv.first);
+    item[EncodableValue("name")] = EncodableValue(kv.second);
+    item[EncodableValue("isDefault")] = EncodableValue(
+        !g_cached_default_audio_id.empty() &&
+        kv.first == g_cached_default_audio_id);
+    list.push_back(EncodableValue(item));
   }
   return list;
 }
+
+void EnumerateWindowsAudioDevicesWorker(
+    std::shared_ptr<CaptureMethodResult> opt_result, bool invalidate_overlay) {
+  std::thread([opt_result, invalidate_overlay]() {
+    HRESULT com_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    bool did_init = (com_hr == S_OK || com_hr == S_FALSE);
+
+    std::vector<std::pair<std::string, std::string>> devices;
+    std::string default_id_utf8;
+
+    ComPtr<IMMDeviceEnumerator> enumerator;
+    HRESULT hr = ::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
+                                    CLSCTX_ALL, IID_PPV_ARGS(&enumerator));
+    if (SUCCEEDED(hr) && enumerator) {
+      std::wstring default_id;
+      ComPtr<IMMDevice> def_dev;
+      if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eCapture, eConsole,
+                                                        &def_dev)) &&
+          def_dev) {
+        LPWSTR raw_def_id = nullptr;
+        if (SUCCEEDED(def_dev->GetId(&raw_def_id)) && raw_def_id) {
+          default_id = raw_def_id;
+          default_id_utf8 = WideToUtf8(default_id);
+          ::CoTaskMemFree(raw_def_id);
+        }
+      }
+
+      static const PROPERTYKEY kDevPKeyFriendlyName = {
+          {0xa45c254e,
+           0xdf1c,
+           0x4efd,
+           {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}},
+          14};
+
+      ComPtr<IMMDeviceCollection> collection;
+      if (SUCCEEDED(enumerator->EnumAudioEndpoints(
+              eCapture, DEVICE_STATE_ACTIVE, &collection)) &&
+          collection) {
+        UINT count = 0;
+        collection->GetCount(&count);
+        for (UINT i = 0; i < count; ++i) {
+          ComPtr<IMMDevice> dev;
+          if (FAILED(collection->Item(i, &dev)) || !dev) continue;
+
+          LPWSTR raw_id = nullptr;
+          std::wstring dev_id;
+          if (SUCCEEDED(dev->GetId(&raw_id)) && raw_id) {
+            dev_id = raw_id;
+            ::CoTaskMemFree(raw_id);
+          }
+          if (dev_id.empty()) continue;
+
+          std::wstring friendly_name = dev_id;
+          ComPtr<IPropertyStore> props;
+          if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &props)) && props) {
+            PROPVARIANT var_name;
+            ::PropVariantInit(&var_name);
+            if (SUCCEEDED(props->GetValue(kDevPKeyFriendlyName, &var_name))) {
+              if (var_name.vt == VT_LPWSTR && var_name.pwszVal) {
+                friendly_name = var_name.pwszVal;
+              }
+              ::PropVariantClear(&var_name);
+            }
+          }
+
+          std::string id_u8 = WideToUtf8(dev_id);
+          std::string name_u8 = WideToUtf8(friendly_name);
+          devices.emplace_back(id_u8, name_u8.empty() ? id_u8 : name_u8);
+        }
+      }
+    }
+
+    if (did_init) {
+      ::CoUninitialize();
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(g_audio_cache_mutex);
+      g_cached_audio_devices = std::move(devices);
+      g_cached_default_audio_id = std::move(default_id_utf8);
+    }
+    g_audio_refresh_in_flight.store(false);
+
+    if (opt_result || invalidate_overlay) {
+      PostToPlatformThread([opt_result, invalidate_overlay]() {
+        if (invalidate_overlay) {
+          InvalidateActiveOverlayWindows();
+        }
+        if (opt_result) {
+          opt_result->Success(EncodableValue(BuildAudioDeviceListFromCache()));
+        }
+      });
+    }
+  }).detach();
+}
+
+// Old synchronous EnumerateWindowsAudioInputDevices implementation (retained commented per policy):
+// EncodableList EnumerateWindowsAudioInputDevices() {
+//   EncodableList list;
+//   HRESULT com_hr = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+//   bool did_init = (com_hr == S_OK || com_hr == S_FALSE);
+//
+//   ComPtr<IMMDeviceEnumerator> enumerator;
+//   HRESULT hr = ::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
+//                                   CLSCTX_ALL, IID_PPV_ARGS(&enumerator));
+//   if (SUCCEEDED(hr) && enumerator) {
+//     std::wstring default_id;
+//     ComPtr<IMMDevice> def_dev;
+//     if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eCapture, eConsole,
+//                                                       &def_dev)) &&
+//         def_dev) {
+//       LPWSTR raw_def_id = nullptr;
+//       if (SUCCEEDED(def_dev->GetId(&raw_def_id)) && raw_def_id) {
+//         default_id = raw_def_id;
+//         ::CoTaskMemFree(raw_def_id);
+//       }
+//     }
+//
+//     static const PROPERTYKEY kDevPKeyFriendlyName = {
+//         {0xa45c254e,
+//          0xdf1c,
+//          0x4efd,
+//          {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}},
+//         14};
+//
+//     ComPtr<IMMDeviceCollection> collection;
+//     if (SUCCEEDED(enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE,
+//                                                  &collection)) &&
+//         collection) {
+//       UINT count = 0;
+//       collection->GetCount(&count);
+//       for (UINT i = 0; i < count; ++i) {
+//         ComPtr<IMMDevice> dev;
+//         if (FAILED(collection->Item(i, &dev)) || !dev) continue;
+//
+//         LPWSTR raw_id = nullptr;
+//         std::wstring dev_id;
+//         if (SUCCEEDED(dev->GetId(&raw_id)) && raw_id) {
+//           dev_id = raw_id;
+//           ::CoTaskMemFree(raw_id);
+//         }
+//         if (dev_id.empty()) continue;
+//
+//         std::wstring friendly_name = dev_id;
+//         ComPtr<IPropertyStore> props;
+//         if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &props)) && props) {
+//           PROPVARIANT var_name;
+//           ::PropVariantInit(&var_name);
+//           if (SUCCEEDED(props->GetValue(kDevPKeyFriendlyName, &var_name))) {
+//             if (var_name.vt == VT_LPWSTR && var_name.pwszVal) {
+//               friendly_name = var_name.pwszVal;
+//             }
+//             ::PropVariantClear(&var_name);
+//           }
+//         }
+//
+//         EncodableMap item;
+//         item[EncodableValue("id")] = EncodableValue(WideToUtf8(dev_id));
+//         item[EncodableValue("name")] = EncodableValue(WideToUtf8(friendly_name));
+//         item[EncodableValue("isDefault")] =
+//             EncodableValue(!default_id.empty() && dev_id == default_id);
+//         list.push_back(EncodableValue(item));
+//       }
+//     }
+//   }
+//
+//   if (did_init) {
+//     ::CoUninitialize();
+//   }
+//   return list;
+// }
 
 void PostToPlatformThread(std::function<void()> fn) {
   auto gate = Gate();
@@ -452,72 +929,77 @@ bool DecodeImageBytesToBgra(const uint8_t* bytes, size_t size,
 // Fast GDI Screen Capture (Top-Down 32-bit BGRA)
 // ---------------------------------------------------------------------------
 
-bool CaptureScreenRectBgra(int x, int y, int width, int height,
-                           std::vector<uint8_t>* out_bgra) {
-  if (width <= 0 || height <= 0 || !out_bgra) return false;
+// Gene - Nov, 24, 2026: Delegate screen capture to reusable DXGI/persistent-GDI helper, add OpenClipboardWithRetry/ClipboardGuard, verify SetClipboardData return values, and decode CF_DIB/CF_DIBV5 safely in Rust.
+// Old implementation:
+// bool CaptureScreenRectBgra(int x, int y, int width, int height,
+//                            std::vector<uint8_t>* out_bgra) {
+//   ...
+// }
+//
+// bool CopyPngBytesToWin32Clipboard(const uint8_t* png_bytes, size_t png_size) {
+//   std::vector<uint8_t> bgra;
+//   int width = 0, height = 0;
+//   if (!DecodeImageBytesToBgra(png_bytes, png_size, &bgra, &width, &height)) {
+//     return false;
+//   }
+//   if (!::OpenClipboard(nullptr)) return false;
+//   ::EmptyClipboard();
+//   ...
+//   ::CloseClipboard();
+//   return true;
+// }
+//
+// bool PasteWin32ClipboardToPngFile(const std::wstring& target_path) {
+//   ...
+// }
+//
+// bool CopyFileToWin32Clipboard(const std::wstring& file_path) {
+//   ...
+// }
+// Gene - Nov, 24, 2026: Comment out obsolete unreferenced wrapper CaptureScreenRectBgra so MSVC /W4 /WX never emits C4505.
+// bool CaptureScreenRectBgra(int x, int y, int width, int height,
+//                            std::vector<uint8_t>* out_bgra) {
+//   return CaptureRectFast(x, y, width, height, false, false, nullptr, out_bgra);
+// }
 
-  HDC screen_dc = ::GetDC(nullptr);
-  if (!screen_dc) return false;
-
-  HDC mem_dc = ::CreateCompatibleDC(screen_dc);
-  if (!mem_dc) {
-    ::ReleaseDC(nullptr, screen_dc);
-    return false;
-  }
-
-  BITMAPINFO bmi = {};
-  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  bmi.bmiHeader.biWidth = width;
-  bmi.bmiHeader.biHeight = -height;  // Top-down DIB
-  bmi.bmiHeader.biPlanes = 1;
-  bmi.bmiHeader.biBitCount = 32;
-  bmi.bmiHeader.biCompression = BI_RGB;
-
-  void* bits = nullptr;
-  HBITMAP dib =
-      ::CreateDIBSection(screen_dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-  if (!dib || !bits) {
-    if (dib) ::DeleteObject(dib);
-    ::DeleteDC(mem_dc);
-    ::ReleaseDC(nullptr, screen_dc);
-    return false;
-  }
-
-  HGDIOBJ old_obj = ::SelectObject(mem_dc, dib);
-  BOOL blt_ok =
-      ::BitBlt(mem_dc, 0, 0, width, height, screen_dc, x, y, SRCCOPY);
-
-  size_t byte_count = static_cast<size_t>(width) * height * 4;
-  if (blt_ok) {
-    out_bgra->resize(byte_count);
-    std::memcpy(out_bgra->data(), bits, byte_count);
-    // Ensure alpha channel is 0xFF for opaque desktop pixels
-    uint8_t* p = out_bgra->data();
-    for (size_t i = 3; i < byte_count; i += 4) {
-      p[i] = 0xFF;
+bool OpenClipboardWithRetry(HWND owner) {
+  HWND hwnd = (owner && ::IsWindow(owner)) ? owner : FindMainAppHwnd();
+  for (int attempt = 0; attempt < 8; ++attempt) {
+    if (::OpenClipboard(hwnd)) {
+      return true;
     }
+    ::Sleep(10);
   }
-
-  ::SelectObject(mem_dc, old_obj);
-  ::DeleteObject(dib);
-  ::DeleteDC(mem_dc);
-  ::ReleaseDC(nullptr, screen_dc);
-  return blt_ok == TRUE;
+  return ::OpenClipboard(nullptr) == TRUE;
 }
 
-// ---------------------------------------------------------------------------
-// Native Win32 Clipboard (Zero PowerShell)
-// ---------------------------------------------------------------------------
+struct ClipboardGuard {
+  bool opened = false;
+  explicit ClipboardGuard(HWND owner) : opened(OpenClipboardWithRetry(owner)) {}
+  ~ClipboardGuard() {
+    if (opened) {
+      ::CloseClipboard();
+      opened = false;
+    }
+  }
+  ClipboardGuard(const ClipboardGuard&) = delete;
+  ClipboardGuard& operator=(const ClipboardGuard&) = delete;
+};
 
 bool CopyPngBytesToWin32Clipboard(const uint8_t* png_bytes, size_t png_size) {
+  if (!png_bytes || png_size == 0) return false;
   std::vector<uint8_t> bgra;
   int width = 0, height = 0;
-  if (!DecodeImageBytesToBgra(png_bytes, png_size, &bgra, &width, &height)) {
+  if (!DecodeImageBytesToBgra(png_bytes, png_size, &bgra, &width, &height) ||
+      width <= 0 || height <= 0) {
     return false;
   }
 
-  if (!::OpenClipboard(nullptr)) return false;
-  ::EmptyClipboard();
+  ClipboardGuard clip(FindMainAppHwnd());
+  if (!clip.opened) return false;
+  if (!::EmptyClipboard()) return false;
+
+  bool wrote_any = false;
 
   // 1. Register and set "PNG" clipboard format for modern apps
   UINT png_format = ::RegisterClipboardFormatW(L"PNG");
@@ -528,15 +1010,20 @@ bool CopyPngBytesToWin32Clipboard(const uint8_t* png_bytes, size_t png_size) {
       if (ptr) {
         std::memcpy(ptr, png_bytes, png_size);
         ::GlobalUnlock(hpng);
-        ::SetClipboardData(png_format, hpng);
+        if (::SetClipboardData(png_format, hpng) != nullptr) {
+          wrote_any = true;
+        } else {
+          ::GlobalFree(hpng);
+        }
       } else {
         ::GlobalFree(hpng);
       }
     }
   }
 
-  // 2. Also set standard CF_DIB (bottom-up 32bpp) for universal Win32 compatibility
-  size_t pixel_bytes = static_cast<size_t>(width) * height * 4;
+  // 2. Also set standard CF_DIB (bottom-up 32bpp BGRX) via Rust converter
+  size_t pixel_bytes =
+      static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
   size_t dib_size = sizeof(BITMAPINFOHEADER) + pixel_bytes;
   HGLOBAL hdib = ::GlobalAlloc(GMEM_MOVEABLE, dib_size);
   if (hdib) {
@@ -554,102 +1041,91 @@ bool CopyPngBytesToWin32Clipboard(const uint8_t* png_bytes, size_t png_size) {
 
       uint8_t* dst_pixels = ptr + sizeof(BITMAPINFOHEADER);
       int stride = width * 4;
-      for (int row = 0; row < height; ++row) {
-        const uint8_t* src_row = bgra.data() + (height - 1 - row) * stride;
-        std::memcpy(dst_pixels + row * stride, src_row, stride);
-      }
+      bool conv_ok = snipsnap_bgra_to_bottom_up_bgrx(
+          bgra.data(), width, height, stride, dst_pixels, stride);
       ::GlobalUnlock(hdib);
-      ::SetClipboardData(CF_DIB, hdib);
+      if (conv_ok && ::SetClipboardData(CF_DIB, hdib) != nullptr) {
+        wrote_any = true;
+      } else {
+        ::GlobalFree(hdib);
+      }
     } else {
       ::GlobalFree(hdib);
     }
   }
 
-  ::CloseClipboard();
-  return true;
+  return wrote_any;
 }
 
 bool PasteWin32ClipboardToPngFile(const std::wstring& target_path) {
-  if (!::OpenClipboard(nullptr)) return false;
+  std::vector<uint8_t> bgra;
+  int w = 0;
+  int h = 0;
+  bool decoded = false;
 
-  UINT png_format = ::RegisterClipboardFormatW(L"PNG");
-  if (png_format != 0 && ::IsClipboardFormatAvailable(png_format)) {
-    HANDLE hdata = ::GetClipboardData(png_format);
-    if (hdata) {
-      SIZE_T size = ::GlobalSize(hdata);
-      const uint8_t* ptr = static_cast<const uint8_t*>(::GlobalLock(hdata));
-      if (ptr && size > 0) {
-        std::vector<uint8_t> bgra;
-        int w = 0, h = 0;
-        bool ok = DecodeImageBytesToBgra(ptr, size, &bgra, &w, &h) &&
-                  SaveBgraToPngFile(bgra.data(), w, h, w * 4, target_path);
-        ::GlobalUnlock(hdata);
-        ::CloseClipboard();
-        if (ok) return true;
-      } else {
+  {
+    ClipboardGuard clip(FindMainAppHwnd());
+    if (!clip.opened) return false;
+
+    UINT png_format = ::RegisterClipboardFormatW(L"PNG");
+    if (png_format != 0 && ::IsClipboardFormatAvailable(png_format)) {
+      HANDLE hdata = ::GetClipboardData(png_format);
+      if (hdata) {
+        SIZE_T size = ::GlobalSize(hdata);
+        const uint8_t* ptr = static_cast<const uint8_t*>(::GlobalLock(hdata));
+        if (ptr && size > 0) {
+          decoded = DecodeImageBytesToBgra(ptr, size, &bgra, &w, &h);
+        }
         if (ptr) ::GlobalUnlock(hdata);
       }
     }
-  }
 
-  if (::IsClipboardFormatAvailable(CF_DIB)) {
-    HANDLE hdib = ::GetClipboardData(CF_DIB);
-    if (hdib) {
-      const BITMAPINFO* bmi = static_cast<const BITMAPINFO*>(::GlobalLock(hdib));
-      if (bmi) {
-        int w = bmi->bmiHeader.biWidth;
-        int h = std::abs(bmi->bmiHeader.biHeight);
-        bool top_down = bmi->bmiHeader.biHeight < 0;
-        int bpp = bmi->bmiHeader.biBitCount;
-        if (w > 0 && h > 0 && (bpp == 32 || bpp == 24)) {
-          const uint8_t* src = reinterpret_cast<const uint8_t*>(bmi) +
-                               bmi->bmiHeader.biSize;
-          if (bmi->bmiHeader.biCompression == BI_BITFIELDS) {
-            src += 12;
+    if (!decoded) {
+      UINT dib_formats[] = {CF_DIBV5, CF_DIB};
+      for (UINT fmt : dib_formats) {
+        if (!::IsClipboardFormatAvailable(fmt)) continue;
+        HANDLE hdib = ::GetClipboardData(fmt);
+        if (!hdib) continue;
+        SIZE_T dib_size = ::GlobalSize(hdib);
+        const uint8_t* ptr = static_cast<const uint8_t*>(::GlobalLock(hdib));
+        if (ptr && dib_size >= 40) {
+          SnipSnapImageBuffer rust_buf = {};
+          if (snipsnap_decode_dib_to_bgra(ptr, static_cast<size_t>(dib_size),
+                                          &rust_buf) &&
+              rust_buf.data && rust_buf.width > 0 && rust_buf.height > 0) {
+            w = rust_buf.width;
+            h = rust_buf.height;
+            bgra.assign(rust_buf.data, rust_buf.data + rust_buf.len);
+            decoded = true;
           }
-          std::vector<uint8_t> bgra(static_cast<size_t>(w) * h * 4);
-          int src_stride = ((w * bpp + 31) / 32) * 4;
-          for (int y = 0; y < h; ++y) {
-            int sy = top_down ? y : (h - 1 - y);
-            const uint8_t* srow = src + sy * src_stride;
-            uint8_t* drow = bgra.data() + y * w * 4;
-            for (int x = 0; x < w; ++x) {
-              drow[x * 4 + 0] = srow[x * (bpp / 8) + 0];
-              drow[x * 4 + 1] = srow[x * (bpp / 8) + 1];
-              drow[x * 4 + 2] = srow[x * (bpp / 8) + 2];
-              drow[x * 4 + 3] = (bpp == 32) ? srow[x * 4 + 3] : 0xFF;
-            }
-          }
-          ::GlobalUnlock(hdib);
-          ::CloseClipboard();
-          return SaveBgraToPngFile(bgra.data(), w, h, w * 4, target_path);
+          snipsnap_buffer_free(&rust_buf);
         }
-        ::GlobalUnlock(hdib);
+        if (ptr) ::GlobalUnlock(hdib);
+        if (decoded) break;
       }
     }
   }
 
-  ::CloseClipboard();
-  return false;
+  if (!decoded || bgra.empty() || w <= 0 || h <= 0) {
+    return false;
+  }
+  return SaveBgraToPngFile(bgra.data(), w, h, w * 4, target_path);
 }
 
 bool CopyFileToWin32Clipboard(const std::wstring& file_path) {
   if (file_path.empty()) return false;
-  if (!::OpenClipboard(nullptr)) return false;
-  ::EmptyClipboard();
+  ClipboardGuard clip(FindMainAppHwnd());
+  if (!clip.opened) return false;
+  if (!::EmptyClipboard()) return false;
 
   size_t path_bytes = (file_path.size() + 2) * sizeof(wchar_t);
   size_t total_bytes = sizeof(DROPFILES) + path_bytes;
   HGLOBAL hdrop = ::GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, total_bytes);
-  if (!hdrop) {
-    ::CloseClipboard();
-    return false;
-  }
+  if (!hdrop) return false;
 
   uint8_t* ptr = static_cast<uint8_t*>(::GlobalLock(hdrop));
   if (!ptr) {
     ::GlobalFree(hdrop);
-    ::CloseClipboard();
     return false;
   }
 
@@ -664,7 +1140,6 @@ bool CopyFileToWin32Clipboard(const std::wstring& file_path) {
   ::GlobalUnlock(hdrop);
   bool ok = ::SetClipboardData(CF_HDROP, hdrop) != nullptr;
   if (!ok) ::GlobalFree(hdrop);
-  ::CloseClipboard();
   return ok;
 }
 
@@ -700,6 +1175,59 @@ bool CopyFileToWin32Clipboard(const std::wstring& file_path) {
 //   bool settled = false;
 // };
 // Gene - Nov, 13, 2026: Added multi-monitor helpers, 8-handle resize grips, WM_SETCURSOR/WM_ERASEBKGND, zero-copy DIB overlay capture + pre-darkened dim bitmap + persistent backbuffer, and active-monitor presets/toolbar.
+// Gene - Nov, 24, 2026: Per-monitor HiDPI interactive overlay using DXGI/precapture frames, Rust pixel dimming, cached GDI backbuffers, dirty-rect painting, scrolling initialMode, and temporary WH_KEYBOARD_LL hook.
+// Old single-virtual-desktop InteractiveOverlayState + OverlayWndProc + StartWin32InteractiveOverlay implementation retained commented per policy:
+// RECT GetMonitorRectForScreenPoint(POINT screen_pt) {
+//   HMONITOR hmon = ::MonitorFromPoint(screen_pt, MONITOR_DEFAULTTONEAREST);
+//   MONITORINFO mi = {};
+//   mi.cbSize = sizeof(mi);
+//   if (hmon && ::GetMonitorInfoW(hmon, &mi)) {
+//     return mi.rcMonitor;
+//   }
+//   int vx = ::GetSystemMetrics(SM_XVIRTUALSCREEN);
+//   int vy = ::GetSystemMetrics(SM_YVIRTUALSCREEN);
+//   int vw = ::GetSystemMetrics(SM_CXVIRTUALSCREEN);
+//   int vh = ::GetSystemMetrics(SM_CYVIRTUALSCREEN);
+//   return RECT{vx, vy, vx + vw, vy + vh};
+// }
+//
+// RECT GetCursorMonitorScreenRect() {
+//   POINT pt = {};
+//   if (!::GetCursorPos(&pt)) {
+//     pt.x = 0;
+//     pt.y = 0;
+//   }
+//   return GetMonitorRectForScreenPoint(pt);
+// }
+//
+// struct InteractiveOverlayState {
+//   HWND hwnd = nullptr;
+//   int virt_x = 0;
+//   int virt_y = 0;
+//   int virt_w = 0;
+//   int virt_h = 0;
+//   HBITMAP screen_bitmap = nullptr;
+//   uint8_t* screen_bits = nullptr;
+//   HBITMAP dim_bitmap = nullptr;
+//   HDC backbuf_dc = nullptr;
+//   HBITMAP backbuf_bitmap = nullptr;
+//   HGDIOBJ backbuf_old_bmp = nullptr;
+//   std::wstring target_path;
+//   std::string initial_mode = "capture";
+//   std::unique_ptr<CaptureMethodResult> pending_result;
+//   ...
+// };
+
+constexpr UINT kMsgOverlayCancel = WM_APP + 210;
+constexpr UINT kMsgOverlayConfirm = WM_APP + 211;
+
+std::atomic<bool> g_overlay_hook_active{false};
+std::atomic<HWND> g_overlay_primary_hwnd{nullptr};
+
+int OverlayScalePx(int px, double scale) {
+  return static_cast<int>(std::lround(static_cast<double>(px) * scale));
+}
+
 RECT GetMonitorRectForScreenPoint(POINT screen_pt) {
   HMONITOR hmon = ::MonitorFromPoint(screen_pt, MONITOR_DEFAULTTONEAREST);
   MONITORINFO mi = {};
@@ -723,57 +1251,88 @@ RECT GetCursorMonitorScreenRect() {
   return GetMonitorRectForScreenPoint(pt);
 }
 
-// Old InteractiveOverlayState + StartWin32InteractiveOverlay implementation (retained commented per policy):
-// struct InteractiveOverlayState {
-//   HWND hwnd = nullptr;
-//   int virt_x = 0;
-//   int virt_y = 0;
-//   int virt_w = 0;
-//   int virt_h = 0;
-//   std::vector<uint8_t> screen_bgra;
-//   HBITMAP screen_bitmap = nullptr;
-//   std::wstring target_path;
-//   std::string initial_mode = "capture";
-//   std::unique_ptr<CaptureMethodResult> pending_result;
-//   int selected_fps = 60;
-//   bool record_mic = false;
-//   std::string mic_device_id;
-//   bool record_sys_audio = true;
-//   bool record_cursor = true;
-//   bool highlight_clicks = true;
-//   bool is_full_screen_preset = false;
-//   enum class Mode { kIdle, kDrawing, kAdjusting, kMoving, kResizing };
-//   Mode mode = Mode::kIdle;
-//   bool has_selection = false;
-//   RECT sel = {0, 0, 0, 0};
-//   POINT drag_start = {0, 0};
-//   RECT sel_at_start = {0, 0, 0, 0};
-//   int active_grip = -1;
-//   RECT capture_btn = {0, 0, 0, 0};
-//   RECT record_btn = {0, 0, 0, 0};
-//   RECT cancel_btn = {0, 0, 0, 0};
-//   RECT preset_full_btn = {0, 0, 0, 0};
-//   RECT preset_1080_btn = {0, 0, 0, 0};
-//   RECT preset_720_btn = {0, 0, 0, 0};
-//   RECT fps_btn = {0, 0, 0, 0};
-//   RECT mic_btn = {0, 0, 0, 0};
-//   RECT sys_audio_btn = {0, 0, 0, 0};
-//   RECT cursor_btn = {0, 0, 0, 0};
-//   RECT mode_snip_btn = {0, 0, 0, 0};
-//   bool settled = false;
-// };
-struct InteractiveOverlayState {
+struct OverlayMonitorPane {
   HWND hwnd = nullptr;
-  int virt_x = 0;
-  int virt_y = 0;
-  int virt_w = 0;
-  int virt_h = 0;
+  HMONITOR hmon = nullptr;
+  RECT screen_rect = {0, 0, 0, 0};
+  int width = 0;
+  int height = 0;
+  double dpi_scale = 1.0;
+
   HBITMAP screen_bitmap = nullptr;
   uint8_t* screen_bits = nullptr;
   HBITMAP dim_bitmap = nullptr;
+
+  HDC scr_dc = nullptr;
+  HGDIOBJ scr_old_bmp = nullptr;
+  HDC dim_dc = nullptr;
+  HGDIOBJ dim_old_bmp = nullptr;
   HDC backbuf_dc = nullptr;
   HBITMAP backbuf_bitmap = nullptr;
   HGDIOBJ backbuf_old_bmp = nullptr;
+
+  HFONT font_ui = nullptr;
+  HFONT font_bold = nullptr;
+  bool has_last_chrome = false;
+  RECT last_chrome_bounds = {0, 0, 0, 0};
+
+  void CleanupResources() {
+    if (hwnd) {
+      ::DestroyWindow(hwnd);
+      hwnd = nullptr;
+    }
+    if (scr_dc) {
+      if (scr_old_bmp) {
+        ::SelectObject(scr_dc, scr_old_bmp);
+        scr_old_bmp = nullptr;
+      }
+      ::DeleteDC(scr_dc);
+      scr_dc = nullptr;
+    }
+    if (dim_dc) {
+      if (dim_old_bmp) {
+        ::SelectObject(dim_dc, dim_old_bmp);
+        dim_old_bmp = nullptr;
+      }
+      ::DeleteDC(dim_dc);
+      dim_dc = nullptr;
+    }
+    if (backbuf_dc) {
+      if (backbuf_old_bmp) {
+        ::SelectObject(backbuf_dc, backbuf_old_bmp);
+        backbuf_old_bmp = nullptr;
+      }
+      ::DeleteDC(backbuf_dc);
+      backbuf_dc = nullptr;
+    }
+    if (backbuf_bitmap) {
+      ::DeleteObject(backbuf_bitmap);
+      backbuf_bitmap = nullptr;
+    }
+    if (dim_bitmap) {
+      ::DeleteObject(dim_bitmap);
+      dim_bitmap = nullptr;
+    }
+    if (screen_bitmap) {
+      ::DeleteObject(screen_bitmap);
+      screen_bitmap = nullptr;
+    }
+    if (font_ui) {
+      ::DeleteObject(font_ui);
+      font_ui = nullptr;
+    }
+    if (font_bold) {
+      ::DeleteObject(font_bold);
+      font_bold = nullptr;
+    }
+    screen_bits = nullptr;
+  }
+};
+
+struct InteractiveOverlayState {
+  std::vector<OverlayMonitorPane> panes;
+  int active_pane = 0;
+
   std::wstring target_path;
   std::string initial_mode = "capture";
   std::unique_ptr<CaptureMethodResult> pending_result;
@@ -790,14 +1349,13 @@ struct InteractiveOverlayState {
   enum class Mode { kIdle, kDrawing, kAdjusting, kMoving, kResizing };
   Mode mode = Mode::kIdle;
   bool has_selection = false;
-  RECT sel = {0, 0, 0, 0};
+  RECT sel = {0, 0, 0, 0};  // Local pixels in panes[active_pane]
   POINT drag_start = {0, 0};
   RECT sel_at_start = {0, 0, 0, 0};
   int active_grip = -1;  // 0..7 corners/edges
 
   RECT capture_btn = {0, 0, 0, 0};
   RECT record_btn = {0, 0, 0, 0};
-  // Gene - Nov, 20, 2026: Added scroll_btn to interactive capture overlay.
   RECT scroll_btn = {0, 0, 0, 0};
   RECT cancel_btn = {0, 0, 0, 0};
   RECT preset_full_btn = {0, 0, 0, 0};
@@ -812,32 +1370,18 @@ struct InteractiveOverlayState {
   RECT sys_audio_btn = {0, 0, 0, 0};
   RECT cursor_btn = {0, 0, 0, 0};
   RECT mode_snip_btn = {0, 0, 0, 0};
+  HHOOK key_hook = nullptr;
   bool settled = false;
 };
 
 InteractiveOverlayState g_overlay;
 
-RECT ScreenRectToOverlayRect(const RECT& sr) {
-  return RECT{sr.left - g_overlay.virt_x, sr.top - g_overlay.virt_y,
-              sr.right - g_overlay.virt_x, sr.bottom - g_overlay.virt_y};
-}
-
-RECT GetCurrentReferenceMonitorOverlayRect() {
-  POINT screen_pt = {};
-  if (g_overlay.has_selection &&
-      g_overlay.sel.right > g_overlay.sel.left &&
-      g_overlay.sel.bottom > g_overlay.sel.top) {
-    screen_pt.x =
-        g_overlay.virt_x +
-        static_cast<int>((g_overlay.sel.left + g_overlay.sel.right) / 2);
-    screen_pt.y =
-        g_overlay.virt_y +
-        static_cast<int>((g_overlay.sel.top + g_overlay.sel.bottom) / 2);
-  } else if (!::GetCursorPos(&screen_pt)) {
-    screen_pt.x = g_overlay.virt_x + g_overlay.virt_w / 2;
-    screen_pt.y = g_overlay.virt_y + g_overlay.virt_h / 2;
+OverlayMonitorPane* ActiveOverlayPane() {
+  if (g_overlay.active_pane < 0 ||
+      g_overlay.active_pane >= static_cast<int>(g_overlay.panes.size())) {
+    return nullptr;
   }
-  return ScreenRectToOverlayRect(GetMonitorRectForScreenPoint(screen_pt));
+  return &g_overlay.panes[static_cast<size_t>(g_overlay.active_pane)];
 }
 
 void ComputeOverlayGripPoints(const RECT& s, POINT out_pts[8]) {
@@ -853,14 +1397,14 @@ void ComputeOverlayGripPoints(const RECT& s, POINT out_pts[8]) {
   out_pts[7] = {s.left, cy};         // W
 }
 
-int HitTestOverlayGrip(const RECT& s, POINT pt) {
+int HitTestOverlayGrip(const RECT& s, POINT pt, double dpi_scale) {
   if ((s.right - s.left) < 12 || (s.bottom - s.top) < 12) return -1;
   POINT pts[8];
   ComputeOverlayGripPoints(s, pts);
-  constexpr LONG kHitHalf = 7;
+  LONG hit_half = static_cast<LONG>(OverlayScalePx(7, dpi_scale));
   for (int i = 0; i < 8; ++i) {
-    RECT r = {pts[i].x - kHitHalf, pts[i].y - kHitHalf,
-              pts[i].x + kHitHalf, pts[i].y + kHitHalf};
+    RECT r = {pts[i].x - hit_half, pts[i].y - hit_half,
+              pts[i].x + hit_half, pts[i].y + hit_half};
     if (::PtInRect(&r, pt)) return i;
   }
   return -1;
@@ -885,32 +1429,120 @@ void ClearOverlayButtonRects() {
   g_overlay.mode_snip_btn = {0, 0, 0, 0};
 }
 
-void CloseInteractiveOverlay() {
-  if (g_overlay.hwnd) {
-    ::DestroyWindow(g_overlay.hwnd);
-    g_overlay.hwnd = nullptr;
+void InvalidateOverlayPaneDirty(int pane_idx, bool force_full = false) {
+  if (pane_idx < 0 ||
+      pane_idx >= static_cast<int>(g_overlay.panes.size())) {
+    return;
   }
-  if (g_overlay.backbuf_dc) {
-    if (g_overlay.backbuf_old_bmp) {
-      ::SelectObject(g_overlay.backbuf_dc, g_overlay.backbuf_old_bmp);
-      g_overlay.backbuf_old_bmp = nullptr;
+  OverlayMonitorPane& pane = g_overlay.panes[static_cast<size_t>(pane_idx)];
+  if (!pane.hwnd || !::IsWindow(pane.hwnd)) return;
+
+  if (force_full || !pane.has_last_chrome) {
+    ::InvalidateRect(pane.hwnd, nullptr, FALSE);
+    return;
+  }
+
+  RECT next_est = {0, 0, 0, 0};
+  if (pane_idx == g_overlay.active_pane) {
+    if (g_overlay.has_selection) {
+      int pad_x = OverlayScalePx(24, pane.dpi_scale);
+      int pad_top = OverlayScalePx(44, pane.dpi_scale);
+      int pad_bot = OverlayScalePx(84, pane.dpi_scale);
+      int sl = static_cast<int>(g_overlay.sel.left);
+      int st = static_cast<int>(g_overlay.sel.top);
+      int sr = static_cast<int>(g_overlay.sel.right);
+      int sb = static_cast<int>(g_overlay.sel.bottom);
+      RECT sel_band = {
+          std::max(0, sl - pad_x),
+          std::max(0, st - pad_top),
+          std::min(pane.width, sr + pad_x),
+          std::min(pane.height, sb + pad_bot),
+      };
+      // Include horizontal span for wide centered/clamped toolbars near selection edge
+      RECT tb_band = {
+          0,
+          std::max(0, std::min(st - pad_top, sb - OverlayScalePx(90, pane.dpi_scale))),
+          pane.width,
+          std::min(pane.height, sb + pad_bot),
+      };
+      ::UnionRect(&next_est, &sel_band, &tb_band);
+    } else if (g_overlay.initial_mode == "record") {
+      next_est = {
+          0,
+          std::max(0, pane.height - OverlayScalePx(120, pane.dpi_scale)),
+          pane.width,
+          pane.height,
+      };
     }
-    ::DeleteDC(g_overlay.backbuf_dc);
-    g_overlay.backbuf_dc = nullptr;
   }
-  if (g_overlay.backbuf_bitmap) {
-    ::DeleteObject(g_overlay.backbuf_bitmap);
-    g_overlay.backbuf_bitmap = nullptr;
+
+  RECT dirty = {};
+  if (::IsRectEmpty(&next_est)) {
+    dirty = pane.last_chrome_bounds;
+  } else {
+    ::UnionRect(&dirty, &pane.last_chrome_bounds, &next_est);
   }
-  if (g_overlay.dim_bitmap) {
-    ::DeleteObject(g_overlay.dim_bitmap);
-    g_overlay.dim_bitmap = nullptr;
+  if (::IsRectEmpty(&dirty)) {
+    ::InvalidateRect(pane.hwnd, nullptr, FALSE);
+    return;
   }
-  if (g_overlay.screen_bitmap) {
-    ::DeleteObject(g_overlay.screen_bitmap);
-    g_overlay.screen_bitmap = nullptr;
+  dirty.left = std::clamp<LONG>(dirty.left, 0, pane.width);
+  dirty.top = std::clamp<LONG>(dirty.top, 0, pane.height);
+  dirty.right = std::clamp<LONG>(dirty.right, 0, pane.width);
+  dirty.bottom = std::clamp<LONG>(dirty.bottom, 0, pane.height);
+  if (dirty.right > dirty.left && dirty.bottom > dirty.top) {
+    ::InvalidateRect(pane.hwnd, &dirty, FALSE);
   }
-  g_overlay.screen_bits = nullptr;
+}
+
+void InvalidateActiveOverlayWindows() {
+  if (!g_overlay_active.load()) return;
+  InvalidateOverlayPaneDirty(g_overlay.active_pane, true);
+}
+
+LRESULT CALLBACK OverlayLowLevelKeyboardProc(int ncode, WPARAM wparam,
+                                             LPARAM lparam) {
+  if (ncode == HC_ACTION &&
+      (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN) &&
+      g_overlay_hook_active.load(std::memory_order_relaxed)) {
+    const auto* kb = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);
+    HWND target = g_overlay_primary_hwnd.load(std::memory_order_relaxed);
+    if (kb && target) {
+      if (kb->vkCode == VK_ESCAPE) {
+        ::PostMessageW(target, kMsgOverlayCancel, 0, 0);
+        return 1;
+      }
+      if (kb->vkCode == VK_RETURN || kb->vkCode == VK_SPACE) {
+        bool mod_down = (::GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 ||
+                        (::GetAsyncKeyState(VK_MENU) & 0x8000) != 0 ||
+                        (::GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (!mod_down) {
+          ::PostMessageW(target, kMsgOverlayConfirm, 0, 0);
+          return 1;
+        }
+      }
+    }
+  }
+  return ::CallNextHookEx(nullptr, ncode, wparam, lparam);
+}
+
+void UninstallOverlayKeyboardHook() {
+  g_overlay_hook_active.store(false);
+  g_overlay_primary_hwnd.store(nullptr);
+  if (g_overlay.key_hook) {
+    ::UnhookWindowsHookEx(g_overlay.key_hook);
+    g_overlay.key_hook = nullptr;
+  }
+}
+
+void CloseInteractiveOverlay() {
+  g_overlay_active.store(false);
+  UninstallOverlayKeyboardHook();
+  for (auto& pane : g_overlay.panes) {
+    pane.CleanupResources();
+  }
+  g_overlay.panes.clear();
+  g_overlay.active_pane = 0;
   g_overlay.mic_devices.clear();
 }
 
@@ -930,27 +1562,25 @@ void FinishOverlayCancelled() {
   if (res) res->Success(EncodableValue());
 }
 
-void SettleOverlayCapture(RECT r) {
-  if (!g_overlay.screen_bits) {
+void SettleOverlayCapture(OverlayMonitorPane* pane, RECT r) {
+  if (!pane || !pane->screen_bits) {
     FinishOverlayCancelled();
     return;
   }
-  int rx = std::clamp(static_cast<int>(r.left), 0, g_overlay.virt_w);
-  int ry = std::clamp(static_cast<int>(r.top), 0, g_overlay.virt_h);
-  int rw = std::clamp(static_cast<int>(r.right - r.left), 0,
-                      g_overlay.virt_w - rx);
-  int rh = std::clamp(static_cast<int>(r.bottom - r.top), 0,
-                      g_overlay.virt_h - ry);
+  int rx = std::clamp(static_cast<int>(r.left), 0, pane->width);
+  int ry = std::clamp(static_cast<int>(r.top), 0, pane->height);
+  int rw = std::clamp(static_cast<int>(r.right - r.left), 0, pane->width - rx);
+  int rh = std::clamp(static_cast<int>(r.bottom - r.top), 0, pane->height - ry);
   if (rw <= 0 || rh <= 0) {
     FinishOverlayCancelled();
     return;
   }
 
   std::vector<uint8_t> cropped(static_cast<size_t>(rw) * rh * 4);
-  size_t src_stride = static_cast<size_t>(g_overlay.virt_w) * 4;
+  size_t src_stride = static_cast<size_t>(pane->width) * 4;
   size_t dst_stride = static_cast<size_t>(rw) * 4;
   for (int row = 0; row < rh; ++row) {
-    const uint8_t* s = g_overlay.screen_bits +
+    const uint8_t* s = pane->screen_bits +
                        static_cast<size_t>(ry + row) * src_stride +
                        static_cast<size_t>(rx) * 4;
     uint8_t* d = cropped.data() + static_cast<size_t>(row) * dst_stride;
@@ -960,14 +1590,6 @@ void SettleOverlayCapture(RECT r) {
     cropped[i] = 0xFF;
   }
 
-  // Gene - Nov, 20, 2026: Dismiss interactive overlay immediately and offload WIC PNG encoding + disk write to a worker thread so UI closing has zero latency.
-  // Old implementation:
-  // if (SaveBgraToPngFile(cropped.data(), rw, rh, static_cast<int>(dst_stride),
-  //                       g_overlay.target_path)) {
-  //   FinishOverlayWithString(WideToUtf8(g_overlay.target_path));
-  // } else {
-  //   FinishOverlayCancelled();
-  // }
   if (g_overlay.settled) return;
   g_overlay.settled = true;
   auto res = std::move(g_overlay.pending_result);
@@ -978,7 +1600,7 @@ void SettleOverlayCapture(RECT r) {
   std::thread([pixels = std::move(cropped), rw, rh, dst_stride, target_w,
                shared_res]() mutable {
     HRESULT co_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    bool did_init = SUCCEEDED(co_hr);
+    bool did_init = (co_hr == S_OK || co_hr == S_FALSE);
     bool ok = SaveBgraToPngFile(pixels.data(), rw, rh,
                                 static_cast<int>(dst_stride), target_w);
     if (did_init) {
@@ -996,15 +1618,18 @@ void SettleOverlayCapture(RECT r) {
   }).detach();
 }
 
-void SettleOverlayRecord(RECT r, bool full_screen_flag) {
-  int rx = g_overlay.virt_x +
-           std::clamp(static_cast<int>(r.left), 0, g_overlay.virt_w);
-  int ry = g_overlay.virt_y +
-           std::clamp(static_cast<int>(r.top), 0, g_overlay.virt_h);
-  int rw =
-      std::clamp(static_cast<int>(r.right - r.left), 16, g_overlay.virt_w);
-  int rh =
-      std::clamp(static_cast<int>(r.bottom - r.top), 16, g_overlay.virt_h);
+void SettleOverlayRecord(OverlayMonitorPane* pane, RECT r,
+                         bool full_screen_flag) {
+  if (!pane) {
+    FinishOverlayCancelled();
+    return;
+  }
+  int rx = static_cast<int>(pane->screen_rect.left) +
+           std::clamp(static_cast<int>(r.left), 0, pane->width);
+  int ry = static_cast<int>(pane->screen_rect.top) +
+           std::clamp(static_cast<int>(r.top), 0, pane->height);
+  int rw = std::clamp(static_cast<int>(r.right - r.left), 16, pane->width);
+  int rh = std::clamp(static_cast<int>(r.bottom - r.top), 16, pane->height);
   std::ostringstream oss;
   oss << "record:" << rx << ":" << ry << ":" << rw << ":" << rh << ":"
       << g_overlay.selected_fps << ":" << (g_overlay.record_mic ? 1 : 0) << ":"
@@ -1016,43 +1641,62 @@ void SettleOverlayRecord(RECT r, bool full_screen_flag) {
   FinishOverlayWithString(oss.str());
 }
 
-// Gene - Nov, 20, 2026: Settle interactive overlay for native panoramic scrolling capture.
-void SettleOverlayScroll(RECT r) {
-  int rx = g_overlay.virt_x +
-           std::clamp(static_cast<int>(r.left), 0, g_overlay.virt_w);
-  int ry = g_overlay.virt_y +
-           std::clamp(static_cast<int>(r.top), 0, g_overlay.virt_h);
-  int rw =
-      std::clamp(static_cast<int>(r.right - r.left), 24, g_overlay.virt_w);
-  int rh =
-      std::clamp(static_cast<int>(r.bottom - r.top), 24, g_overlay.virt_h);
+void SettleOverlayScroll(OverlayMonitorPane* pane, RECT r) {
+  if (!pane) {
+    FinishOverlayCancelled();
+    return;
+  }
+  int rx = static_cast<int>(pane->screen_rect.left) +
+           std::clamp(static_cast<int>(r.left), 0, pane->width);
+  int ry = static_cast<int>(pane->screen_rect.top) +
+           std::clamp(static_cast<int>(r.top), 0, pane->height);
+  int rw = std::clamp(static_cast<int>(r.right - r.left), 24, pane->width);
+  int rh = std::clamp(static_cast<int>(r.bottom - r.top), 24, pane->height);
   std::ostringstream oss;
   oss << "scrolling:" << rx << ":" << ry << ":" << rw << ":" << rh;
   FinishOverlayWithString(oss.str());
   SetMainWindowVisible(false);
 }
 
+void ConfirmOverlaySelection() {
+  OverlayMonitorPane* pane = ActiveOverlayPane();
+  if (!pane) {
+    FinishOverlayCancelled();
+    return;
+  }
+  bool full = !g_overlay.has_selection || g_overlay.is_full_screen_preset;
+  RECT target = g_overlay.has_selection
+                    ? g_overlay.sel
+                    : RECT{0, 0, pane->width, pane->height};
+  if (g_overlay.initial_mode == "record") {
+    SettleOverlayRecord(pane, target, full);
+  } else if (g_overlay.initial_mode == "scrolling") {
+    SettleOverlayScroll(pane, target);
+  } else {
+    SettleOverlayCapture(pane, target);
+  }
+}
+
 void ApplyOverlayPresetSize(int target_w, int target_h, bool full_screen) {
-  RECT mon = GetCurrentReferenceMonitorOverlayRect();
-  int mon_w = std::max(16, static_cast<int>(mon.right - mon.left));
-  int mon_h = std::max(16, static_cast<int>(mon.bottom - mon.top));
+  OverlayMonitorPane* pane = ActiveOverlayPane();
+  if (!pane) return;
+  int mon_w = std::max(16, pane->width);
+  int mon_h = std::max(16, pane->height);
   if (full_screen || target_w <= 0 || target_h <= 0) {
-    g_overlay.sel = mon;
+    g_overlay.sel = {0, 0, mon_w, mon_h};
     g_overlay.is_full_screen_preset = true;
   } else {
     int rw = std::min(target_w, mon_w);
     int rh = std::min(target_h, mon_h);
-    int left = static_cast<int>(mon.left) + std::max(0, (mon_w - rw) / 2);
-    int top = static_cast<int>(mon.top) + std::max(0, (mon_h - rh) / 2);
+    int left = std::max(0, (mon_w - rw) / 2);
+    int top = std::max(0, (mon_h - rh) / 2);
     g_overlay.sel = {left, top, left + rw, top + rh};
     g_overlay.is_full_screen_preset = (rw == mon_w && rh == mon_h);
   }
   g_overlay.has_selection = true;
   g_overlay.mode = InteractiveOverlayState::Mode::kAdjusting;
   g_overlay.active_grip = -1;
-  if (g_overlay.hwnd) {
-    ::InvalidateRect(g_overlay.hwnd, nullptr, FALSE);
-  }
+  InvalidateOverlayPaneDirty(g_overlay.active_pane, true);
 }
 
 void CycleOverlayMicDevice() {
@@ -1088,12 +1732,13 @@ std::wstring GetOverlaySelectedMicLabel() {
 }
 
 void DrawRoundedPill(HDC hdc, const RECT& r, COLORREF fill, COLORREF border,
-                     const std::wstring& label, COLORREF text_color) {
+                     const std::wstring& label, COLORREF text_color,
+                     int corner = 10) {
   HBRUSH br = ::CreateSolidBrush(fill);
   HPEN pen = ::CreatePen(PS_SOLID, 1, border);
   HGDIOBJ old_br = ::SelectObject(hdc, br);
   HGDIOBJ old_pen = ::SelectObject(hdc, pen);
-  ::RoundRect(hdc, r.left, r.top, r.right, r.bottom, 10, 10);
+  ::RoundRect(hdc, r.left, r.top, r.right, r.bottom, corner, corner);
   ::SelectObject(hdc, old_br);
   ::SelectObject(hdc, old_pen);
   ::DeleteObject(br);
@@ -1105,17 +1750,57 @@ void DrawRoundedPill(HDC hdc, const RECT& r, COLORREF fill, COLORREF border,
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 }
 
-// Gene - Nov, 13, 2026: Forward-declare PopulateOverlayMicDevices before OverlayWndProc to fix MSVC C3861 identifier not found error.
-void PopulateOverlayMicDevices();
+void PopulateOverlayMicDevices() {
+  {
+    std::lock_guard<std::mutex> lock(g_audio_cache_mutex);
+    g_overlay.mic_devices = g_cached_audio_devices;
+  }
+  if (g_overlay.mic_devices.empty() &&
+      !g_audio_refresh_in_flight.exchange(true)) {
+    EnumerateWindowsAudioDevicesWorker(nullptr, true);
+  }
+}
+
+void UpdateChromeUnion(RECT* acc, bool* has_acc, const RECT& r) {
+  if (r.right <= r.left || r.bottom <= r.top) return;
+  if (!*has_acc) {
+    *acc = r;
+    *has_acc = true;
+  } else {
+    ::UnionRect(acc, acc, &r);
+  }
+}
 
 LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
                                 LPARAM lparam) {
+  if (msg == WM_NCCREATE) {
+    auto* cs = reinterpret_cast<const CREATESTRUCTW*>(lparam);
+    ::SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                        reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+    return ::DefWindowProcW(hwnd, msg, wparam, lparam);
+  }
+
+  int pane_idx = static_cast<int>(
+      reinterpret_cast<intptr_t>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA)));
+  OverlayMonitorPane* pane =
+      (pane_idx >= 0 && pane_idx < static_cast<int>(g_overlay.panes.size()))
+          ? &g_overlay.panes[static_cast<size_t>(pane_idx)]
+          : nullptr;
+
   switch (msg) {
     case WM_ERASEBKGND:
       return 1;
 
+    case kMsgOverlayCancel:
+      FinishOverlayCancelled();
+      return 0;
+
+    case kMsgOverlayConfirm:
+      ConfirmOverlaySelection();
+      return 0;
+
     case WM_SETCURSOR: {
-      if (LOWORD(lparam) == HTCLIENT) {
+      if (LOWORD(lparam) == HTCLIENT && pane) {
         POINT pt = {};
         ::GetCursorPos(&pt);
         ::ScreenToClient(hwnd, &pt);
@@ -1123,36 +1808,41 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
         auto in_btn = [&](const RECT& r) {
           return (r.right > r.left && r.bottom > r.top) && ::PtInRect(&r, pt);
         };
-        if (in_btn(g_overlay.cancel_btn) || in_btn(g_overlay.capture_btn) ||
-            in_btn(g_overlay.record_btn) || in_btn(g_overlay.scroll_btn) ||
-            in_btn(g_overlay.preset_full_btn) ||
-            in_btn(g_overlay.preset_1080_btn) ||
-            in_btn(g_overlay.preset_720_btn) || in_btn(g_overlay.tb_full_btn) ||
-            in_btn(g_overlay.tb_1080_btn) || in_btn(g_overlay.tb_720_btn) ||
-            in_btn(g_overlay.fps_btn) || in_btn(g_overlay.mic_btn) ||
-            in_btn(g_overlay.mic_cycle_btn) ||
-            in_btn(g_overlay.sys_audio_btn) || in_btn(g_overlay.cursor_btn) ||
-            in_btn(g_overlay.mode_snip_btn)) {
-          cur = IDC_HAND;
-        } else if (g_overlay.has_selection &&
-                   (g_overlay.mode == InteractiveOverlayState::Mode::kAdjusting ||
-                    g_overlay.mode == InteractiveOverlayState::Mode::kResizing)) {
-          int grip = (g_overlay.mode == InteractiveOverlayState::Mode::kResizing)
-                         ? g_overlay.active_grip
-                         : HitTestOverlayGrip(g_overlay.sel, pt);
-          if (grip == 0 || grip == 4) {
-            cur = IDC_SIZENWSE;
-          } else if (grip == 1 || grip == 5) {
-            cur = IDC_SIZENS;
-          } else if (grip == 2 || grip == 6) {
-            cur = IDC_SIZENESW;
-          } else if (grip == 3 || grip == 7) {
-            cur = IDC_SIZEWE;
-          } else if (::PtInRect(&g_overlay.sel, pt)) {
+        if (pane_idx == g_overlay.active_pane) {
+          if (in_btn(g_overlay.cancel_btn) || in_btn(g_overlay.capture_btn) ||
+              in_btn(g_overlay.record_btn) || in_btn(g_overlay.scroll_btn) ||
+              in_btn(g_overlay.preset_full_btn) ||
+              in_btn(g_overlay.preset_1080_btn) ||
+              in_btn(g_overlay.preset_720_btn) ||
+              in_btn(g_overlay.tb_full_btn) ||
+              in_btn(g_overlay.tb_1080_btn) ||
+              in_btn(g_overlay.tb_720_btn) || in_btn(g_overlay.fps_btn) ||
+              in_btn(g_overlay.mic_btn) || in_btn(g_overlay.mic_cycle_btn) ||
+              in_btn(g_overlay.sys_audio_btn) ||
+              in_btn(g_overlay.cursor_btn) ||
+              in_btn(g_overlay.mode_snip_btn)) {
+            cur = IDC_HAND;
+          } else if (g_overlay.has_selection &&
+                     (g_overlay.mode == InteractiveOverlayState::Mode::kAdjusting ||
+                      g_overlay.mode == InteractiveOverlayState::Mode::kResizing)) {
+            int grip =
+                (g_overlay.mode == InteractiveOverlayState::Mode::kResizing)
+                    ? g_overlay.active_grip
+                    : HitTestOverlayGrip(g_overlay.sel, pt, pane->dpi_scale);
+            if (grip == 0 || grip == 4) {
+              cur = IDC_SIZENWSE;
+            } else if (grip == 1 || grip == 5) {
+              cur = IDC_SIZENS;
+            } else if (grip == 2 || grip == 6) {
+              cur = IDC_SIZENESW;
+            } else if (grip == 3 || grip == 7) {
+              cur = IDC_SIZEWE;
+            } else if (::PtInRect(&g_overlay.sel, pt)) {
+              cur = IDC_SIZEALL;
+            }
+          } else if (g_overlay.mode == InteractiveOverlayState::Mode::kMoving) {
             cur = IDC_SIZEALL;
           }
-        } else if (g_overlay.mode == InteractiveOverlayState::Mode::kMoving) {
-          cur = IDC_SIZEALL;
         }
         ::SetCursor(::LoadCursorW(nullptr, cur));
         return TRUE;
@@ -1166,15 +1856,7 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
         return 0;
       }
       if (wparam == VK_RETURN || wparam == VK_SPACE) {
-        bool full = !g_overlay.has_selection || g_overlay.is_full_screen_preset;
-        RECT target = g_overlay.has_selection
-                          ? g_overlay.sel
-                          : ScreenRectToOverlayRect(GetCursorMonitorScreenRect());
-        if (g_overlay.initial_mode == "record") {
-          SettleOverlayRecord(target, full);
-        } else {
-          SettleOverlayCapture(target);
-        }
+        ConfirmOverlaySelection();
         return 0;
       }
       break;
@@ -1185,7 +1867,19 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
       return 0;
 
     case WM_LBUTTONDOWN: {
+      if (!pane) return 0;
       POINT pt = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+      int prev_active = g_overlay.active_pane;
+      if (prev_active != pane_idx) {
+        g_overlay.active_pane = pane_idx;
+        g_overlay.has_selection = false;
+        g_overlay.mode = InteractiveOverlayState::Mode::kIdle;
+        g_overlay.active_grip = -1;
+        g_overlay.is_full_screen_preset = false;
+        ClearOverlayButtonRects();
+        InvalidateOverlayPaneDirty(prev_active, true);
+      }
+
       g_overlay.drag_start = pt;
       if (!g_overlay.has_selection && g_overlay.initial_mode == "record") {
         if (::PtInRect(&g_overlay.cancel_btn, pt)) {
@@ -1226,72 +1920,64 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
           }
           if (::PtInRect(&g_overlay.fps_btn, pt)) {
             g_overlay.selected_fps = (g_overlay.selected_fps == 60) ? 30 : 60;
-            ::InvalidateRect(hwnd, nullptr, FALSE);
+            InvalidateOverlayPaneDirty(pane_idx);
             return 0;
           }
           if (::PtInRect(&g_overlay.mic_btn, pt)) {
             g_overlay.record_mic = !g_overlay.record_mic;
-            ::InvalidateRect(hwnd, nullptr, FALSE);
+            InvalidateOverlayPaneDirty(pane_idx);
             return 0;
           }
           if (::PtInRect(&g_overlay.mic_cycle_btn, pt)) {
             CycleOverlayMicDevice();
-            ::InvalidateRect(hwnd, nullptr, FALSE);
+            InvalidateOverlayPaneDirty(pane_idx);
             return 0;
           }
           if (::PtInRect(&g_overlay.sys_audio_btn, pt)) {
             g_overlay.record_sys_audio = !g_overlay.record_sys_audio;
-            ::InvalidateRect(hwnd, nullptr, FALSE);
+            InvalidateOverlayPaneDirty(pane_idx);
             return 0;
           }
           if (::PtInRect(&g_overlay.cursor_btn, pt)) {
             g_overlay.record_cursor = !g_overlay.record_cursor;
             g_overlay.highlight_clicks = g_overlay.record_cursor;
-            ::InvalidateRect(hwnd, nullptr, FALSE);
+            InvalidateOverlayPaneDirty(pane_idx);
             return 0;
           }
           if (::PtInRect(&g_overlay.mode_snip_btn, pt)) {
             g_overlay.initial_mode = "capture";
-            ::InvalidateRect(hwnd, nullptr, FALSE);
+            InvalidateOverlayPaneDirty(pane_idx);
             return 0;
           }
           if (::PtInRect(&g_overlay.record_btn, pt)) {
-            SettleOverlayRecord(g_overlay.sel, g_overlay.is_full_screen_preset);
+            SettleOverlayRecord(pane, g_overlay.sel,
+                                g_overlay.is_full_screen_preset);
             return 0;
           }
         } else {
           if (::PtInRect(&g_overlay.capture_btn, pt)) {
-            SettleOverlayCapture(g_overlay.sel);
+            SettleOverlayCapture(pane, g_overlay.sel);
             return 0;
           }
-          // Gene - Nov, 13, 2026: Clicking Video in capture mode switches in-place to Snagit Pre-Recording Toolbar on the current selection instead of starting recording immediately.
-          // Old implementation:
-          // if (::PtInRect(&g_overlay.record_btn, pt)) {
-          //   SettleOverlayRecord(g_overlay.sel, false);
-          //   return 0;
-          // }
           if (::PtInRect(&g_overlay.record_btn, pt)) {
-            if (g_overlay.mic_devices.empty()) {
-              PopulateOverlayMicDevices();
-            }
+            PopulateOverlayMicDevices();
             g_overlay.initial_mode = "record";
-            ::InvalidateRect(hwnd, nullptr, FALSE);
+            InvalidateOverlayPaneDirty(pane_idx);
             return 0;
           }
-          // Gene - Nov, 20, 2026: Trigger panoramic scrolling capture when [Scroll] pill is clicked.
           if (::PtInRect(&g_overlay.scroll_btn, pt)) {
-            SettleOverlayScroll(g_overlay.sel);
+            SettleOverlayScroll(pane, g_overlay.sel);
             return 0;
           }
         }
-        int grip = HitTestOverlayGrip(g_overlay.sel, pt);
+        int grip = HitTestOverlayGrip(g_overlay.sel, pt, pane->dpi_scale);
         if (grip >= 0) {
           g_overlay.active_grip = grip;
           g_overlay.sel_at_start = g_overlay.sel;
           g_overlay.is_full_screen_preset = false;
           g_overlay.mode = InteractiveOverlayState::Mode::kResizing;
           ::SetCapture(hwnd);
-          ::InvalidateRect(hwnd, nullptr, FALSE);
+          InvalidateOverlayPaneDirty(pane_idx);
           return 0;
         }
         if (::PtInRect(&g_overlay.sel, pt)) {
@@ -1299,7 +1985,7 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
           g_overlay.is_full_screen_preset = false;
           g_overlay.mode = InteractiveOverlayState::Mode::kMoving;
           ::SetCapture(hwnd);
-          ::InvalidateRect(hwnd, nullptr, FALSE);
+          InvalidateOverlayPaneDirty(pane_idx);
           return 0;
         }
       }
@@ -1309,26 +1995,36 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
       g_overlay.has_selection = true;
       g_overlay.mode = InteractiveOverlayState::Mode::kDrawing;
       ::SetCapture(hwnd);
-      ::InvalidateRect(hwnd, nullptr, FALSE);
+      InvalidateOverlayPaneDirty(pane_idx);
       return 0;
     }
 
     case WM_MOUSEMOVE: {
+      if (!pane) return 0;
       POINT pt = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+      if (g_overlay.mode == InteractiveOverlayState::Mode::kIdle &&
+          !g_overlay.has_selection && g_overlay.active_pane != pane_idx) {
+        int prev_active = g_overlay.active_pane;
+        g_overlay.active_pane = pane_idx;
+        if (g_overlay.initial_mode == "record") {
+          InvalidateOverlayPaneDirty(prev_active);
+          InvalidateOverlayPaneDirty(pane_idx);
+        }
+        return 0;
+      }
+      if (pane_idx != g_overlay.active_pane) return 0;
+
       if (g_overlay.mode == InteractiveOverlayState::Mode::kDrawing) {
-        g_overlay.sel.left =
-            std::clamp(std::min(g_overlay.drag_start.x, pt.x), 0L,
-                       static_cast<LONG>(g_overlay.virt_w));
-        g_overlay.sel.top =
-            std::clamp(std::min(g_overlay.drag_start.y, pt.y), 0L,
-                       static_cast<LONG>(g_overlay.virt_h));
-        g_overlay.sel.right =
-            std::clamp(std::max(g_overlay.drag_start.x, pt.x), 0L,
-                       static_cast<LONG>(g_overlay.virt_w));
-        g_overlay.sel.bottom =
-            std::clamp(std::max(g_overlay.drag_start.y, pt.y), 0L,
-                       static_cast<LONG>(g_overlay.virt_h));
-        ::InvalidateRect(hwnd, nullptr, FALSE);
+        g_overlay.sel.left = std::clamp(std::min(g_overlay.drag_start.x, pt.x),
+                                        0L, static_cast<LONG>(pane->width));
+        g_overlay.sel.top = std::clamp(std::min(g_overlay.drag_start.y, pt.y),
+                                       0L, static_cast<LONG>(pane->height));
+        g_overlay.sel.right = std::clamp(std::max(g_overlay.drag_start.x, pt.x),
+                                         0L, static_cast<LONG>(pane->width));
+        g_overlay.sel.bottom = std::clamp(
+            std::max(g_overlay.drag_start.y, pt.y), 0L,
+            static_cast<LONG>(pane->height));
+        InvalidateOverlayPaneDirty(pane_idx);
       } else if (g_overlay.mode == InteractiveOverlayState::Mode::kResizing &&
                  g_overlay.active_grip >= 0 && g_overlay.active_grip < 8) {
         int dx = pt.x - g_overlay.drag_start.x;
@@ -1364,8 +2060,8 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
             r.left += dx;
             break;
         }
-        LONG max_w = static_cast<LONG>(g_overlay.virt_w);
-        LONG max_h = static_cast<LONG>(g_overlay.virt_h);
+        LONG max_w = static_cast<LONG>(pane->width);
+        LONG max_h = static_cast<LONG>(pane->height);
         LONG nl = std::clamp(std::min(r.left, r.right), 0L, max_w);
         LONG nr = std::clamp(std::max(r.left, r.right), 0L, max_w);
         LONG nt = std::clamp(std::min(r.top, r.bottom), 0L, max_h);
@@ -1373,7 +2069,7 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
         if (nr - nl < 4) nr = std::min(max_w, nl + 4);
         if (nb - nt < 4) nb = std::min(max_h, nt + 4);
         g_overlay.sel = {nl, nt, nr, nb};
-        ::InvalidateRect(hwnd, nullptr, FALSE);
+        InvalidateOverlayPaneDirty(pane_idx);
       } else if (g_overlay.mode == InteractiveOverlayState::Mode::kMoving) {
         int dx = pt.x - g_overlay.drag_start.x;
         int dy = pt.y - g_overlay.drag_start.y;
@@ -1381,52 +2077,36 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
         int w = static_cast<int>(r.right - r.left);
         int h = static_cast<int>(r.bottom - r.top);
         int nl = std::clamp(static_cast<int>(r.left) + dx, 0,
-                            std::max(0, g_overlay.virt_w - w));
+                            std::max(0, pane->width - w));
         int nt = std::clamp(static_cast<int>(r.top) + dy, 0,
-                            std::max(0, g_overlay.virt_h - h));
+                            std::max(0, pane->height - h));
         g_overlay.sel = {nl, nt, nl + w, nt + h};
-        ::InvalidateRect(hwnd, nullptr, FALSE);
+        InvalidateOverlayPaneDirty(pane_idx);
       }
       return 0;
     }
 
     case WM_LBUTTONUP: {
+      if (!pane || pane_idx != g_overlay.active_pane) return 0;
       ::ReleaseCapture();
       if (g_overlay.mode == InteractiveOverlayState::Mode::kDrawing) {
         int w = static_cast<int>(g_overlay.sel.right - g_overlay.sel.left);
         int h = static_cast<int>(g_overlay.sel.bottom - g_overlay.sel.top);
         if (w < 8 || h < 8) {
-          POINT screen_pt = {
-              g_overlay.virt_x + g_overlay.drag_start.x,
-              g_overlay.virt_y + g_overlay.drag_start.y,
-          };
-          RECT mon = ScreenRectToOverlayRect(
-              GetMonitorRectForScreenPoint(screen_pt));
-          // Gene - Nov, 13, 2026: Settle full-monitor selection on click without drag in both capture and record modes so the [Capture] / [Video] selector appears.
-          // Old implementation:
-          // if (g_overlay.initial_mode == "record") {
-          //   g_overlay.sel = mon;
-          //   g_overlay.has_selection = true;
-          //   g_overlay.is_full_screen_preset = true;
-          //   g_overlay.mode = InteractiveOverlayState::Mode::kAdjusting;
-          //   ::InvalidateRect(hwnd, nullptr, FALSE);
-          // } else {
-          //   SettleOverlayCapture(mon);
-          // }
-          g_overlay.sel = mon;
+          g_overlay.sel = {0, 0, pane->width, pane->height};
           g_overlay.has_selection = true;
           g_overlay.is_full_screen_preset = true;
           g_overlay.mode = InteractiveOverlayState::Mode::kAdjusting;
-          ::InvalidateRect(hwnd, nullptr, FALSE);
+          InvalidateOverlayPaneDirty(pane_idx, true);
           return 0;
         }
         g_overlay.mode = InteractiveOverlayState::Mode::kAdjusting;
-        ::InvalidateRect(hwnd, nullptr, FALSE);
+        InvalidateOverlayPaneDirty(pane_idx);
       } else if (g_overlay.mode == InteractiveOverlayState::Mode::kMoving ||
                  g_overlay.mode == InteractiveOverlayState::Mode::kResizing) {
         g_overlay.active_grip = -1;
         g_overlay.mode = InteractiveOverlayState::Mode::kAdjusting;
-        ::InvalidateRect(hwnd, nullptr, FALSE);
+        InvalidateOverlayPaneDirty(pane_idx);
       }
       return 0;
     }
@@ -1434,364 +2114,388 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
     case WM_PAINT: {
       PAINTSTRUCT ps;
       HDC hdc = ::BeginPaint(hwnd, &ps);
-      ClearOverlayButtonRects();
+      if (!pane) {
+        ::EndPaint(hwnd, &ps);
+        return 0;
+      }
 
-      HDC mem_dc = g_overlay.backbuf_dc;
+      RECT rc_paint = ps.rcPaint;
+      rc_paint.left = std::clamp<LONG>(rc_paint.left, 0, pane->width);
+      rc_paint.top = std::clamp<LONG>(rc_paint.top, 0, pane->height);
+      rc_paint.right = std::clamp<LONG>(rc_paint.right, 0, pane->width);
+      rc_paint.bottom = std::clamp<LONG>(rc_paint.bottom, 0, pane->height);
+      int dirty_w = static_cast<int>(rc_paint.right - rc_paint.left);
+      int dirty_h = static_cast<int>(rc_paint.bottom - rc_paint.top);
+      if (dirty_w <= 0 || dirty_h <= 0) {
+        ::EndPaint(hwnd, &ps);
+        return 0;
+      }
+
+      HDC mem_dc = pane->backbuf_dc;
       HBITMAP temp_bmp = nullptr;
       HGDIOBJ temp_old = nullptr;
       if (!mem_dc) {
         mem_dc = ::CreateCompatibleDC(hdc);
-        temp_bmp =
-            ::CreateCompatibleBitmap(hdc, g_overlay.virt_w, g_overlay.virt_h);
+        temp_bmp = ::CreateCompatibleBitmap(hdc, pane->width, pane->height);
         temp_old = ::SelectObject(mem_dc, temp_bmp);
       }
 
-      // Blit pre-darkened desktop background in one SRCCOPY pass.
-      if (g_overlay.dim_bitmap) {
-        HDC dim_dc = ::CreateCompatibleDC(hdc);
-        HGDIOBJ old_dim = ::SelectObject(dim_dc, g_overlay.dim_bitmap);
-        ::BitBlt(mem_dc, 0, 0, g_overlay.virt_w, g_overlay.virt_h, dim_dc, 0, 0,
-                 SRCCOPY);
-        ::SelectObject(dim_dc, old_dim);
-        ::DeleteDC(dim_dc);
-      } else if (g_overlay.screen_bitmap) {
-        HDC scr_dc = ::CreateCompatibleDC(hdc);
-        HGDIOBJ old_scr = ::SelectObject(scr_dc, g_overlay.screen_bitmap);
-        ::BitBlt(mem_dc, 0, 0, g_overlay.virt_w, g_overlay.virt_h, scr_dc, 0, 0,
-                 SRCCOPY);
-        ::SelectObject(scr_dc, old_scr);
-        ::DeleteDC(scr_dc);
+      if (pane->dim_dc) {
+        ::BitBlt(mem_dc, rc_paint.left, rc_paint.top, dirty_w, dirty_h,
+                 pane->dim_dc, rc_paint.left, rc_paint.top, SRCCOPY);
+      } else if (pane->scr_dc) {
+        ::BitBlt(mem_dc, rc_paint.left, rc_paint.top, dirty_w, dirty_h,
+                 pane->scr_dc, rc_paint.left, rc_paint.top, SRCCOPY);
       }
 
-      // Punch bright un-dimmed selection area straight from screen_bitmap.
-      int sl = 0;
-      int st = 0;
-      int sr = 0;
-      int sb = 0;
-      if (g_overlay.has_selection) {
-        sl = std::clamp(static_cast<int>(g_overlay.sel.left), 0,
-                        g_overlay.virt_w);
-        st = std::clamp(static_cast<int>(g_overlay.sel.top), 0,
-                        g_overlay.virt_h);
-        sr = std::clamp(static_cast<int>(g_overlay.sel.right), 0,
-                        g_overlay.virt_w);
-        sb = std::clamp(static_cast<int>(g_overlay.sel.bottom), 0,
-                        g_overlay.virt_h);
-        if (sr > sl && sb > st && g_overlay.screen_bitmap) {
-          HDC scr_dc = ::CreateCompatibleDC(hdc);
-          HGDIOBJ old_scr = ::SelectObject(scr_dc, g_overlay.screen_bitmap);
-          ::BitBlt(mem_dc, sl, st, sr - sl, sb - st, scr_dc, sl, st, SRCCOPY);
-          ::SelectObject(scr_dc, old_scr);
-          ::DeleteDC(scr_dc);
-        }
-      }
+      const bool is_active = (pane_idx == g_overlay.active_pane);
+      RECT chrome_bounds = {0, 0, 0, 0};
+      bool has_chrome = false;
 
-      RECT cur_mon = GetCurrentReferenceMonitorOverlayRect();
-      int cur_mon_l = static_cast<int>(cur_mon.left);
-      int cur_mon_r = static_cast<int>(cur_mon.right);
-      int cur_mon_b = static_cast<int>(cur_mon.bottom);
-      int cur_mon_w = std::max(1, cur_mon_r - cur_mon_l);
-      // Gene - Nov, 13, 2026: Track monitor height to detect full-monitor selection accurately.
-      int cur_mon_h = std::max(1, static_cast<int>(cur_mon.bottom - cur_mon.top));
+      if (is_active) {
+        ClearOverlayButtonRects();
+        HGDIOBJ old_font =
+            pane->font_ui ? ::SelectObject(mem_dc, pane->font_ui) : nullptr;
+        const double s = pane->dpi_scale;
+        const int corner = OverlayScalePx(10, s);
 
-      if (!g_overlay.has_selection && g_overlay.initial_mode == "record") {
-        int btn_h = 34;
-        int w_full = 104;
-        int w_1080 = 96;
-        int w_720 = 92;
-        int w_can = 76;
-        int gap = 8;
-        int total_w = w_full + w_1080 + w_720 + w_can + gap * 3;
-        int bx = cur_mon_l + std::max(12, (cur_mon_w - total_w) / 2);
-        int by = std::max(12, cur_mon_b - btn_h - 48);
-
-        g_overlay.preset_full_btn = {bx, by, bx + w_full, by + btn_h};
-        int x2 = bx + w_full + gap;
-        g_overlay.preset_1080_btn = {x2, by, x2 + w_1080, by + btn_h};
-        int x3 = x2 + w_1080 + gap;
-        g_overlay.preset_720_btn = {x3, by, x3 + w_720, by + btn_h};
-        int x4 = x3 + w_720 + gap;
-        g_overlay.cancel_btn = {x4, by, x4 + w_can, by + btn_h};
-
-        DrawRoundedPill(mem_dc, g_overlay.preset_full_btn, RGB(34, 30, 28),
-                        RGB(140, 118, 102), L"Full Screen",
-                        RGB(255, 255, 255));
-        DrawRoundedPill(mem_dc, g_overlay.preset_1080_btn, RGB(34, 30, 28),
-                        RGB(140, 118, 102), L"1920x1080", RGB(255, 255, 255));
-        DrawRoundedPill(mem_dc, g_overlay.preset_720_btn, RGB(34, 30, 28),
-                        RGB(140, 118, 102), L"1280x720", RGB(255, 255, 255));
-        DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(50, 32, 32),
-                        RGB(185, 70, 70), L"Cancel", RGB(255, 220, 220));
-      }
-
-      if (g_overlay.has_selection && sr > sl && sb > st) {
-        HPEN pen = ::CreatePen(PS_SOLID, 2, RGB(215, 65, 55));
-        HGDIOBJ old_pen = ::SelectObject(mem_dc, pen);
-        HGDIOBJ old_brush =
-            ::SelectObject(mem_dc, ::GetStockObject(NULL_BRUSH));
-        ::Rectangle(mem_dc, sl, st, sr, sb);
-        ::SelectObject(mem_dc, old_brush);
-        ::SelectObject(mem_dc, old_pen);
-        ::DeleteObject(pen);
-
-        if (g_overlay.mode == InteractiveOverlayState::Mode::kAdjusting ||
-            g_overlay.mode == InteractiveOverlayState::Mode::kResizing) {
-          if ((sr - sl) >= 16 && (sb - st) >= 16) {
-            POINT pts[8];
-            ComputeOverlayGripPoints(RECT{sl, st, sr, sb}, pts);
-            HBRUSH grip_fill = ::CreateSolidBrush(RGB(255, 255, 255));
-            HPEN grip_pen = ::CreatePen(PS_SOLID, 1, RGB(215, 65, 55));
-            HGDIOBJ old_gf = ::SelectObject(mem_dc, grip_fill);
-            HGDIOBJ old_gp = ::SelectObject(mem_dc, grip_pen);
-            for (int i = 0; i < 8; ++i) {
-              ::Rectangle(mem_dc, pts[i].x - 4, pts[i].y - 4, pts[i].x + 5,
-                          pts[i].y + 5);
+        int sl = 0;
+        int st = 0;
+        int sr = 0;
+        int sb = 0;
+        if (g_overlay.has_selection) {
+          sl = std::clamp(static_cast<int>(g_overlay.sel.left), 0, pane->width);
+          st = std::clamp(static_cast<int>(g_overlay.sel.top), 0, pane->height);
+          sr = std::clamp(static_cast<int>(g_overlay.sel.right), 0,
+                          pane->width);
+          sb = std::clamp(static_cast<int>(g_overlay.sel.bottom), 0,
+                          pane->height);
+          if (sr > sl && sb > st && pane->scr_dc) {
+            RECT sel_rc = {sl, st, sr, sb};
+            RECT punch = {};
+            if (::IntersectRect(&punch, &sel_rc, &rc_paint)) {
+              ::BitBlt(mem_dc, punch.left, punch.top, punch.right - punch.left,
+                       punch.bottom - punch.top, pane->scr_dc, punch.left,
+                       punch.top, SRCCOPY);
             }
-            ::SelectObject(mem_dc, old_gf);
-            ::SelectObject(mem_dc, old_gp);
-            ::DeleteObject(grip_fill);
-            ::DeleteObject(grip_pen);
           }
         }
 
-        int sel_w = sr - sl;
-        int sel_h = sb - st;
-        std::wostringstream dim_oss;
-        dim_oss << sel_w << L" x " << sel_h;
-        if (g_overlay.initial_mode == "record" && g_overlay.record_mic) {
-          dim_oss << L"  |  " << GetOverlaySelectedMicLabel();
+        if (!g_overlay.has_selection && g_overlay.initial_mode == "record") {
+          int btn_h = OverlayScalePx(34, s);
+          int w_full = OverlayScalePx(104, s);
+          int w_1080 = OverlayScalePx(96, s);
+          int w_720 = OverlayScalePx(92, s);
+          int w_can = OverlayScalePx(76, s);
+          int gap = OverlayScalePx(8, s);
+          int total_w = w_full + w_1080 + w_720 + w_can + gap * 3;
+          int bx = std::max(OverlayScalePx(12, s), (pane->width - total_w) / 2);
+          int by = std::max(OverlayScalePx(12, s),
+                            pane->height - btn_h - OverlayScalePx(48, s));
+
+          g_overlay.preset_full_btn = {bx, by, bx + w_full, by + btn_h};
+          int x2 = bx + w_full + gap;
+          g_overlay.preset_1080_btn = {x2, by, x2 + w_1080, by + btn_h};
+          int x3 = x2 + w_1080 + gap;
+          g_overlay.preset_720_btn = {x3, by, x3 + w_720, by + btn_h};
+          int x4 = x3 + w_720 + gap;
+          g_overlay.cancel_btn = {x4, by, x4 + w_can, by + btn_h};
+
+          UpdateChromeUnion(&chrome_bounds, &has_chrome,
+                            {bx - 4, by - 4, x4 + w_can + 4, by + btn_h + 4});
+
+          DrawRoundedPill(mem_dc, g_overlay.preset_full_btn, RGB(34, 30, 28),
+                          RGB(140, 118, 102), L"Full Screen",
+                          RGB(255, 255, 255), corner);
+          DrawRoundedPill(mem_dc, g_overlay.preset_1080_btn, RGB(34, 30, 28),
+                          RGB(140, 118, 102), L"1920x1080", RGB(255, 255, 255),
+                          corner);
+          DrawRoundedPill(mem_dc, g_overlay.preset_720_btn, RGB(34, 30, 28),
+                          RGB(140, 118, 102), L"1280x720", RGB(255, 255, 255),
+                          corner);
+          DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(50, 32, 32),
+                          RGB(185, 70, 70), L"Cancel", RGB(255, 220, 220),
+                          corner);
         }
-        std::wstring dim_str = dim_oss.str();
-        int badge_w = std::max(108, static_cast<int>(dim_str.size()) * 8 + 20);
-        int badge_x = std::clamp(sl, 8, std::max(8, g_overlay.virt_w - badge_w - 8));
-        int badge_y = (st >= 36) ? (st - 28) : (st + 8);
-        RECT dim_badge = {badge_x, badge_y, badge_x + badge_w, badge_y + 22};
-        DrawRoundedPill(mem_dc, dim_badge, RGB(28, 22, 18), RGB(111, 78, 55),
-                        dim_str, RGB(255, 255, 255));
 
-        if (g_overlay.mode == InteractiveOverlayState::Mode::kAdjusting ||
-            g_overlay.mode == InteractiveOverlayState::Mode::kMoving ||
-            g_overlay.mode == InteractiveOverlayState::Mode::kResizing) {
-          // Gene - Nov, 13, 2026: Reset stale button rects on mode switch and center controls cleanly above taskbar when full-monitor selected.
-          bool is_full_mon = g_overlay.is_full_screen_preset ||
-                             ((sr - sl) >= cur_mon_w - 8 &&
-                              (sb - st) >= cur_mon_h - 8);
-          if (g_overlay.initial_mode == "record") {
-            g_overlay.capture_btn = {0, 0, 0, 0};
-            bool has_multi_mic = g_overlay.mic_devices.size() > 1;
-            int btn_h = 34;
-            int w_full = 44;
-            int w_1080 = 52;
-            int w_720 = 46;
-            int w_fps = 58;
-            int w_mic = 68;
-            int w_mic_cyc = has_multi_mic ? 24 : 0;
-            int w_sys = 76;
-            int w_cur = 82;
-            int w_snip = 48;
-            int w_rec = 64;
-            int w_can = 30;
-            int gap = 5;
-            int total_w = w_full + w_1080 + w_720 + w_fps + w_mic +
-                          (has_multi_mic ? (w_mic_cyc + 2) : 0) + w_sys +
-                          w_cur + w_snip + w_rec + w_can + gap * 9;
-            int min_bx = std::max(8, cur_mon_l + 8);
-            int max_bx =
-                std::max(min_bx, std::min(g_overlay.virt_w, cur_mon_r) -
-                                     total_w - 8);
-            int bx = std::clamp((sl + sr - total_w) / 2, min_bx, max_bx);
-            // Old implementation:
-            // int by = sb + 10;
-            // if (by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 10) {
-            //   by = std::max(10, sb - btn_h - 14);
-            // }
-            int by = is_full_mon
-                         ? std::max(12,
-                                    std::min(g_overlay.virt_h, cur_mon_b) -
-                                        btn_h - 68)
-                         : (sb + 10);
-            if (!is_full_mon &&
-                by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 10) {
-              by = std::max(10, sb - btn_h - 14);
-            }
+        if (g_overlay.has_selection && sr > sl && sb > st) {
+          int stroke_w = std::max(2, OverlayScalePx(2, s));
+          HPEN pen = ::CreatePen(PS_SOLID, stroke_w, RGB(215, 65, 55));
+          HGDIOBJ old_pen = ::SelectObject(mem_dc, pen);
+          HGDIOBJ old_brush =
+              ::SelectObject(mem_dc, ::GetStockObject(NULL_BRUSH));
+          ::Rectangle(mem_dc, sl, st, sr, sb);
+          ::SelectObject(mem_dc, old_brush);
+          ::SelectObject(mem_dc, old_pen);
+          ::DeleteObject(pen);
+          UpdateChromeUnion(&chrome_bounds, &has_chrome,
+                            {sl - stroke_w - 6, st - stroke_w - 6,
+                             sr + stroke_w + 6, sb + stroke_w + 6});
 
-            int cx = bx;
-            g_overlay.tb_full_btn = {cx, by, cx + w_full, by + btn_h};
-            cx += w_full + gap;
-            g_overlay.tb_1080_btn = {cx, by, cx + w_1080, by + btn_h};
-            cx += w_1080 + gap;
-            g_overlay.tb_720_btn = {cx, by, cx + w_720, by + btn_h};
-            cx += w_720 + gap;
-            g_overlay.fps_btn = {cx, by, cx + w_fps, by + btn_h};
-            cx += w_fps + gap;
-            g_overlay.mic_btn = {cx, by, cx + w_mic, by + btn_h};
-            cx += w_mic;
-            if (has_multi_mic) {
-              cx += 2;
-              g_overlay.mic_cycle_btn = {cx, by, cx + w_mic_cyc, by + btn_h};
-              cx += w_mic_cyc;
+          if (g_overlay.mode == InteractiveOverlayState::Mode::kAdjusting ||
+              g_overlay.mode == InteractiveOverlayState::Mode::kResizing) {
+            if ((sr - sl) >= 16 && (sb - st) >= 16) {
+              POINT pts[8];
+              ComputeOverlayGripPoints(RECT{sl, st, sr, sb}, pts);
+              int grip_half = std::max(4, OverlayScalePx(4, s));
+              HBRUSH grip_fill = ::CreateSolidBrush(RGB(255, 255, 255));
+              HPEN grip_pen = ::CreatePen(PS_SOLID, 1, RGB(215, 65, 55));
+              HGDIOBJ old_gf = ::SelectObject(mem_dc, grip_fill);
+              HGDIOBJ old_gp = ::SelectObject(mem_dc, grip_pen);
+              for (int i = 0; i < 8; ++i) {
+                ::Rectangle(mem_dc, pts[i].x - grip_half, pts[i].y - grip_half,
+                            pts[i].x + grip_half + 1,
+                            pts[i].y + grip_half + 1);
+              }
+              ::SelectObject(mem_dc, old_gf);
+              ::SelectObject(mem_dc, old_gp);
+              ::DeleteObject(grip_fill);
+              ::DeleteObject(grip_pen);
             }
-            cx += gap;
-            g_overlay.sys_audio_btn = {cx, by, cx + w_sys, by + btn_h};
-            cx += w_sys + gap;
-            g_overlay.cursor_btn = {cx, by, cx + w_cur, by + btn_h};
-            cx += w_cur + gap;
-            g_overlay.mode_snip_btn = {cx, by, cx + w_snip, by + btn_h};
-            cx += w_snip + gap;
-            g_overlay.record_btn = {cx, by, cx + w_rec, by + btn_h};
-            cx += w_rec + gap;
-            g_overlay.cancel_btn = {cx, by, cx + w_can, by + btn_h};
+          }
 
-            DrawRoundedPill(
-                mem_dc, g_overlay.tb_full_btn,
-                g_overlay.is_full_screen_preset ? RGB(111, 78, 55)
-                                                : RGB(38, 32, 28),
-                RGB(120, 100, 86), L"Full", RGB(255, 255, 255));
-            DrawRoundedPill(mem_dc, g_overlay.tb_1080_btn, RGB(38, 32, 28),
-                            RGB(120, 100, 86), L"1080p", RGB(255, 255, 255));
-            DrawRoundedPill(mem_dc, g_overlay.tb_720_btn, RGB(38, 32, 28),
-                            RGB(120, 100, 86), L"720p", RGB(255, 255, 255));
-            DrawRoundedPill(
-                mem_dc, g_overlay.fps_btn, RGB(38, 32, 28), RGB(120, 100, 86),
-                g_overlay.selected_fps == 60 ? L"60fps" : L"30fps",
-                RGB(255, 255, 255));
-            DrawRoundedPill(
-                mem_dc, g_overlay.mic_btn,
-                g_overlay.record_mic ? RGB(46, 105, 62) : RGB(38, 32, 28),
-                RGB(120, 100, 86),
-                g_overlay.record_mic ? L"Mic On" : L"Mic Off",
-                RGB(255, 255, 255));
-            if (has_multi_mic) {
-              DrawRoundedPill(mem_dc, g_overlay.mic_cycle_btn, RGB(48, 40, 35),
-                              RGB(120, 100, 86), L"v", RGB(255, 255, 255));
-            }
-            DrawRoundedPill(
-                mem_dc, g_overlay.sys_audio_btn,
-                g_overlay.record_sys_audio ? RGB(46, 105, 62)
-                                           : RGB(38, 32, 28),
-                RGB(120, 100, 86),
-                g_overlay.record_sys_audio ? L"Sys On" : L"Sys Off",
-                RGB(255, 255, 255));
-            DrawRoundedPill(
-                mem_dc, g_overlay.cursor_btn,
-                g_overlay.record_cursor ? RGB(46, 105, 62) : RGB(38, 32, 28),
-                RGB(120, 100, 86),
-                g_overlay.record_cursor ? L"Cur On" : L"Cur Off",
-                RGB(255, 255, 255));
-            DrawRoundedPill(mem_dc, g_overlay.mode_snip_btn, RGB(58, 46, 38),
-                            RGB(130, 105, 88), L"Snip", RGB(240, 232, 224));
-            DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(205, 42, 42),
-                            RGB(240, 90, 90), L"Rec", RGB(255, 255, 255));
-            DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(35, 25, 18),
-                            RGB(110, 90, 78), L"X", RGB(255, 255, 255));
-          } else {
-            g_overlay.tb_full_btn = {0, 0, 0, 0};
-            g_overlay.tb_1080_btn = {0, 0, 0, 0};
-            g_overlay.tb_720_btn = {0, 0, 0, 0};
-            g_overlay.fps_btn = {0, 0, 0, 0};
-            g_overlay.mic_btn = {0, 0, 0, 0};
-            g_overlay.mic_cycle_btn = {0, 0, 0, 0};
-            g_overlay.sys_audio_btn = {0, 0, 0, 0};
-            g_overlay.cursor_btn = {0, 0, 0, 0};
-            g_overlay.mode_snip_btn = {0, 0, 0, 0};
-            // Gene - Nov, 20, 2026: Add [Scroll] pill beside [Capture] and [Video] in Win32 selection overlay.
-            // Old implementation:
-            // int btn_h = 30;
-            // int cap_w = 88;
-            // int rec_w = 88;
-            // int can_w = 32;
-            // int gap = 6;
-            // int total_w = cap_w + gap + rec_w + gap + can_w;
-            // int min_bx = std::max(8, cur_mon_l + 8);
-            // int max_bx =
-            //     std::max(min_bx, std::min(g_overlay.virt_w, cur_mon_r) -
-            //                          total_w - 8);
-            // int bx;
-            // int by;
-            // if (is_full_mon) {
-            //   bx = std::clamp(cur_mon_l + (cur_mon_w - total_w) / 2, min_bx,
-            //                   max_bx);
-            //   by = std::max(
-            //       12, std::min(g_overlay.virt_h, cur_mon_b) - btn_h - 68);
-            // } else {
-            //   bx = std::clamp(sr - total_w, min_bx, max_bx);
-            //   by = sb + 8;
-            //   if (by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 8) {
-            //     by = std::max(8, st - btn_h - 8);
-            //   }
-            // }
-            // if (is_full_mon) {
-            //   RECT tray = {bx - 10, by - 6, bx + total_w + 10, by + btn_h + 6};
-            //   DrawRoundedPill(mem_dc, tray, RGB(24, 18, 14), RGB(110, 90, 78),
-            //                   L"", RGB(255, 255, 255));
-            // }
-            // g_overlay.capture_btn = {bx, by, bx + cap_w, by + btn_h};
-            // g_overlay.record_btn = {bx + cap_w + gap, by,
-            //                         bx + cap_w + gap + rec_w, by + btn_h};
-            // g_overlay.cancel_btn = {bx + cap_w + gap + rec_w + gap, by,
-            //                         bx + total_w, by + btn_h};
-            // DrawRoundedPill(mem_dc, g_overlay.capture_btn, RGB(111, 78, 55),
-            //                 RGB(160, 122, 92), L"Capture", RGB(255, 255, 255));
-            // DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(185, 45, 45),
-            //                 RGB(230, 85, 85), L"Video", RGB(255, 255, 255));
-            // DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(35, 25, 18),
-            //                 RGB(110, 90, 78), L"X", RGB(255, 255, 255));
-            int btn_h = 30;
-            int cap_w = 88;
-            int rec_w = 78;
-            int scr_w = 78;
-            int can_w = 32;
-            int gap = 6;
-            int total_w = cap_w + gap + rec_w + gap + scr_w + gap + can_w;
-            int min_bx = std::max(8, cur_mon_l + 8);
-            int max_bx =
-                std::max(min_bx, std::min(g_overlay.virt_w, cur_mon_r) -
-                                     total_w - 8);
-            int bx;
-            int by;
-            if (is_full_mon) {
-              bx = std::clamp(cur_mon_l + (cur_mon_w - total_w) / 2, min_bx,
-                              max_bx);
-              by = std::max(
-                  12, std::min(g_overlay.virt_h, cur_mon_b) - btn_h - 68);
+          int sel_w = sr - sl;
+          int sel_h = sb - st;
+          std::wostringstream dim_oss;
+          dim_oss << sel_w << L" x " << sel_h;
+          if (g_overlay.initial_mode == "record" && g_overlay.record_mic) {
+            dim_oss << L"  |  " << GetOverlaySelectedMicLabel();
+          }
+          std::wstring dim_str = dim_oss.str();
+          int pad_edge = OverlayScalePx(8, s);
+          int badge_h = OverlayScalePx(22, s);
+          int badge_w =
+              std::max(OverlayScalePx(108, s),
+                       static_cast<int>(dim_str.size()) *
+                               OverlayScalePx(8, s) +
+                           OverlayScalePx(20, s));
+          int badge_x =
+              std::clamp(sl, pad_edge,
+                         std::max(pad_edge, pane->width - badge_w - pad_edge));
+          int badge_y = (st >= OverlayScalePx(36, s))
+                            ? (st - OverlayScalePx(28, s))
+                            : (st + pad_edge);
+          RECT dim_badge = {badge_x, badge_y, badge_x + badge_w,
+                            badge_y + badge_h};
+          UpdateChromeUnion(&chrome_bounds, &has_chrome, dim_badge);
+          DrawRoundedPill(mem_dc, dim_badge, RGB(28, 22, 18),
+                          RGB(111, 78, 55), dim_str, RGB(255, 255, 255),
+                          OverlayScalePx(8, s));
+
+          if (g_overlay.mode == InteractiveOverlayState::Mode::kAdjusting ||
+              g_overlay.mode == InteractiveOverlayState::Mode::kMoving ||
+              g_overlay.mode == InteractiveOverlayState::Mode::kResizing) {
+            bool is_full_mon =
+                g_overlay.is_full_screen_preset ||
+                ((sr - sl) >= pane->width - 8 && (sb - st) >= pane->height - 8);
+            if (g_overlay.initial_mode == "record") {
+              g_overlay.capture_btn = {0, 0, 0, 0};
+              bool has_multi_mic = g_overlay.mic_devices.size() > 1;
+              int btn_h = OverlayScalePx(34, s);
+              int w_full = OverlayScalePx(44, s);
+              int w_1080 = OverlayScalePx(52, s);
+              int w_720 = OverlayScalePx(46, s);
+              int w_fps = OverlayScalePx(58, s);
+              int w_mic = OverlayScalePx(68, s);
+              int w_mic_cyc = has_multi_mic ? OverlayScalePx(24, s) : 0;
+              int w_sys = OverlayScalePx(76, s);
+              int w_cur = OverlayScalePx(82, s);
+              int w_snip = OverlayScalePx(48, s);
+              int w_rec = OverlayScalePx(64, s);
+              int w_can = OverlayScalePx(30, s);
+              int gap = OverlayScalePx(5, s);
+              int total_w = w_full + w_1080 + w_720 + w_fps + w_mic +
+                            (has_multi_mic ? (w_mic_cyc + 2) : 0) + w_sys +
+                            w_cur + w_snip + w_rec + w_can + gap * 9;
+              int min_bx = pad_edge;
+              int max_bx = std::max(min_bx, pane->width - total_w - pad_edge);
+              int bx = std::clamp((sl + sr - total_w) / 2, min_bx, max_bx);
+              int by =
+                  is_full_mon
+                      ? std::max(OverlayScalePx(12, s),
+                                 pane->height - btn_h - OverlayScalePx(68, s))
+                      : (sb + OverlayScalePx(10, s));
+              if (!is_full_mon &&
+                  by + btn_h > pane->height - OverlayScalePx(10, s)) {
+                by = std::max(OverlayScalePx(10, s),
+                              sb - btn_h - OverlayScalePx(14, s));
+              }
+
+              int cx = bx;
+              g_overlay.tb_full_btn = {cx, by, cx + w_full, by + btn_h};
+              cx += w_full + gap;
+              g_overlay.tb_1080_btn = {cx, by, cx + w_1080, by + btn_h};
+              cx += w_1080 + gap;
+              g_overlay.tb_720_btn = {cx, by, cx + w_720, by + btn_h};
+              cx += w_720 + gap;
+              g_overlay.fps_btn = {cx, by, cx + w_fps, by + btn_h};
+              cx += w_fps + gap;
+              g_overlay.mic_btn = {cx, by, cx + w_mic, by + btn_h};
+              cx += w_mic;
+              if (has_multi_mic) {
+                cx += 2;
+                g_overlay.mic_cycle_btn = {cx, by, cx + w_mic_cyc, by + btn_h};
+                cx += w_mic_cyc;
+              }
+              cx += gap;
+              g_overlay.sys_audio_btn = {cx, by, cx + w_sys, by + btn_h};
+              cx += w_sys + gap;
+              g_overlay.cursor_btn = {cx, by, cx + w_cur, by + btn_h};
+              cx += w_cur + gap;
+              g_overlay.mode_snip_btn = {cx, by, cx + w_snip, by + btn_h};
+              cx += w_snip + gap;
+              g_overlay.record_btn = {cx, by, cx + w_rec, by + btn_h};
+              cx += w_rec + gap;
+              g_overlay.cancel_btn = {cx, by, cx + w_can, by + btn_h};
+
+              UpdateChromeUnion(&chrome_bounds, &has_chrome,
+                                {bx - 6, by - 6, cx + w_can + 6, by + btn_h + 6});
+
+              DrawRoundedPill(
+                  mem_dc, g_overlay.tb_full_btn,
+                  g_overlay.is_full_screen_preset ? RGB(111, 78, 55)
+                                                  : RGB(38, 32, 28),
+                  RGB(120, 100, 86), L"Full", RGB(255, 255, 255), corner);
+              DrawRoundedPill(mem_dc, g_overlay.tb_1080_btn, RGB(38, 32, 28),
+                              RGB(120, 100, 86), L"1080p", RGB(255, 255, 255),
+                              corner);
+              DrawRoundedPill(mem_dc, g_overlay.tb_720_btn, RGB(38, 32, 28),
+                              RGB(120, 100, 86), L"720p", RGB(255, 255, 255),
+                              corner);
+              DrawRoundedPill(
+                  mem_dc, g_overlay.fps_btn, RGB(38, 32, 28), RGB(120, 100, 86),
+                  g_overlay.selected_fps == 60 ? L"60fps" : L"30fps",
+                  RGB(255, 255, 255), corner);
+              DrawRoundedPill(
+                  mem_dc, g_overlay.mic_btn,
+                  g_overlay.record_mic ? RGB(46, 105, 62) : RGB(38, 32, 28),
+                  RGB(120, 100, 86),
+                  g_overlay.record_mic ? L"Mic On" : L"Mic Off",
+                  RGB(255, 255, 255), corner);
+              if (has_multi_mic) {
+                DrawRoundedPill(mem_dc, g_overlay.mic_cycle_btn,
+                                RGB(48, 40, 35), RGB(120, 100, 86), L"v",
+                                RGB(255, 255, 255), corner);
+              }
+              DrawRoundedPill(
+                  mem_dc, g_overlay.sys_audio_btn,
+                  g_overlay.record_sys_audio ? RGB(46, 105, 62)
+                                             : RGB(38, 32, 28),
+                  RGB(120, 100, 86),
+                  g_overlay.record_sys_audio ? L"Sys On" : L"Sys Off",
+                  RGB(255, 255, 255), corner);
+              DrawRoundedPill(
+                  mem_dc, g_overlay.cursor_btn,
+                  g_overlay.record_cursor ? RGB(46, 105, 62) : RGB(38, 32, 28),
+                  RGB(120, 100, 86),
+                  g_overlay.record_cursor ? L"Cur On" : L"Cur Off",
+                  RGB(255, 255, 255), corner);
+              DrawRoundedPill(mem_dc, g_overlay.mode_snip_btn, RGB(58, 46, 38),
+                              RGB(130, 105, 88), L"Snip", RGB(240, 232, 224),
+                              corner);
+              DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(205, 42, 42),
+                              RGB(240, 90, 90), L"Rec", RGB(255, 255, 255),
+                              corner);
+              DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(35, 25, 18),
+                              RGB(110, 90, 78), L"X", RGB(255, 255, 255),
+                              corner);
             } else {
-              bx = std::clamp(sr - total_w, min_bx, max_bx);
-              by = sb + 8;
-              if (by + btn_h > std::min(g_overlay.virt_h, cur_mon_b) - 8) {
-                by = std::max(8, st - btn_h - 8);
+              bool scroll_mode = (g_overlay.initial_mode == "scrolling");
+              int btn_h = OverlayScalePx(30, s);
+              int cap_w = OverlayScalePx(88, s);
+              int rec_w = OverlayScalePx(78, s);
+              int scr_w = OverlayScalePx(scroll_mode ? 104 : 78, s);
+              int can_w = OverlayScalePx(32, s);
+              int gap = OverlayScalePx(6, s);
+              int total_w = cap_w + gap + rec_w + gap + scr_w + gap + can_w;
+              int min_bx = pad_edge;
+              int max_bx = std::max(min_bx, pane->width - total_w - pad_edge);
+              int bx = 0;
+              int by = 0;
+              if (is_full_mon) {
+                bx = std::clamp((pane->width - total_w) / 2, min_bx, max_bx);
+                by = std::max(OverlayScalePx(12, s),
+                              pane->height - btn_h - OverlayScalePx(68, s));
+              } else {
+                bx = std::clamp(sr - total_w, min_bx, max_bx);
+                by = sb + pad_edge;
+                if (by + btn_h > pane->height - pad_edge) {
+                  by = std::max(pad_edge, st - btn_h - pad_edge);
+                }
+              }
+
+              int tray_px = OverlayScalePx(10, s);
+              int tray_py = OverlayScalePx(6, s);
+              RECT tray = {bx - tray_px, by - tray_py, bx + total_w + tray_px,
+                           by + btn_h + tray_py};
+              UpdateChromeUnion(&chrome_bounds, &has_chrome, tray);
+              if (is_full_mon) {
+                DrawRoundedPill(mem_dc, tray, RGB(24, 18, 14),
+                                RGB(110, 90, 78), L"", RGB(255, 255, 255),
+                                corner);
+              }
+
+              if (scroll_mode) {
+                g_overlay.scroll_btn = {bx, by, bx + scr_w, by + btn_h};
+                g_overlay.capture_btn = {bx + scr_w + gap, by,
+                                         bx + scr_w + gap + cap_w, by + btn_h};
+                g_overlay.record_btn = {
+                    bx + scr_w + gap + cap_w + gap, by,
+                    bx + scr_w + gap + cap_w + gap + rec_w, by + btn_h};
+                g_overlay.cancel_btn = {
+                    bx + scr_w + gap + cap_w + gap + rec_w + gap, by,
+                    bx + total_w, by + btn_h};
+
+                DrawRoundedPill(mem_dc, g_overlay.scroll_btn, RGB(111, 78, 55),
+                                RGB(190, 148, 110), L"Start Scroll",
+                                RGB(255, 255, 255), corner);
+                DrawRoundedPill(mem_dc, g_overlay.capture_btn, RGB(58, 48, 41),
+                                RGB(160, 122, 92), L"Capture",
+                                RGB(255, 255, 255), corner);
+                DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(185, 45, 45),
+                                RGB(230, 85, 85), L"Video", RGB(255, 255, 255),
+                                corner);
+                DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(35, 25, 18),
+                                RGB(110, 90, 78), L"X", RGB(255, 255, 255),
+                                corner);
+              } else {
+                g_overlay.capture_btn = {bx, by, bx + cap_w, by + btn_h};
+                g_overlay.record_btn = {bx + cap_w + gap, by,
+                                        bx + cap_w + gap + rec_w, by + btn_h};
+                g_overlay.scroll_btn = {
+                    bx + cap_w + gap + rec_w + gap, by,
+                    bx + cap_w + gap + rec_w + gap + scr_w, by + btn_h};
+                g_overlay.cancel_btn = {
+                    bx + cap_w + gap + rec_w + gap + scr_w + gap, by,
+                    bx + total_w, by + btn_h};
+
+                DrawRoundedPill(mem_dc, g_overlay.capture_btn, RGB(111, 78, 55),
+                                RGB(160, 122, 92), L"Capture",
+                                RGB(255, 255, 255), corner);
+                DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(185, 45, 45),
+                                RGB(230, 85, 85), L"Video", RGB(255, 255, 255),
+                                corner);
+                DrawRoundedPill(mem_dc, g_overlay.scroll_btn, RGB(58, 48, 41),
+                                RGB(160, 122, 92), L"Scroll",
+                                RGB(255, 255, 255), corner);
+                DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(35, 25, 18),
+                                RGB(110, 90, 78), L"X", RGB(255, 255, 255),
+                                corner);
               }
             }
-
-            if (is_full_mon) {
-              RECT tray = {bx - 10, by - 6, bx + total_w + 10, by + btn_h + 6};
-              DrawRoundedPill(mem_dc, tray, RGB(24, 18, 14), RGB(110, 90, 78),
-                              L"", RGB(255, 255, 255));
-            }
-
-            g_overlay.capture_btn = {bx, by, bx + cap_w, by + btn_h};
-            g_overlay.record_btn = {bx + cap_w + gap, by,
-                                    bx + cap_w + gap + rec_w, by + btn_h};
-            g_overlay.scroll_btn = {bx + cap_w + gap + rec_w + gap, by,
-                                    bx + cap_w + gap + rec_w + gap + scr_w,
-                                    by + btn_h};
-            g_overlay.cancel_btn = {
-                bx + cap_w + gap + rec_w + gap + scr_w + gap, by,
-                bx + total_w, by + btn_h};
-
-            DrawRoundedPill(mem_dc, g_overlay.capture_btn, RGB(111, 78, 55),
-                            RGB(160, 122, 92), L"Capture", RGB(255, 255, 255));
-            DrawRoundedPill(mem_dc, g_overlay.record_btn, RGB(185, 45, 45),
-                            RGB(230, 85, 85), L"Video", RGB(255, 255, 255));
-            DrawRoundedPill(mem_dc, g_overlay.scroll_btn, RGB(58, 48, 41),
-                            RGB(160, 122, 92), L"Scroll", RGB(255, 255, 255));
-            DrawRoundedPill(mem_dc, g_overlay.cancel_btn, RGB(35, 25, 18),
-                            RGB(110, 90, 78), L"X", RGB(255, 255, 255));
           }
+        }
+
+        if (old_font) {
+          ::SelectObject(mem_dc, old_font);
         }
       }
 
-      ::BitBlt(hdc, 0, 0, g_overlay.virt_w, g_overlay.virt_h, mem_dc, 0, 0,
-               SRCCOPY);
+      pane->has_last_chrome = has_chrome;
+      pane->last_chrome_bounds = chrome_bounds;
+
+      ::BitBlt(hdc, rc_paint.left, rc_paint.top, dirty_w, dirty_h, mem_dc,
+               rc_paint.left, rc_paint.top, SRCCOPY);
       if (temp_bmp) {
         ::SelectObject(mem_dc, temp_old);
         ::DeleteObject(temp_bmp);
@@ -1804,35 +2508,18 @@ LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wparam,
   return ::DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
-void PopulateOverlayMicDevices() {
-  g_overlay.mic_devices.clear();
-  EncodableList list = EnumerateWindowsAudioInputDevices();
-  for (const auto& entry : list) {
-    const auto* m = std::get_if<EncodableMap>(&entry);
-    if (!m) continue;
-    std::string id;
-    std::string name;
-    auto it_id = m->find(EncodableValue("id"));
-    if (it_id != m->end()) {
-      if (const auto* s = std::get_if<std::string>(&it_id->second)) id = *s;
-    }
-    auto it_name = m->find(EncodableValue("name"));
-    if (it_name != m->end()) {
-      if (const auto* s = std::get_if<std::string>(&it_name->second)) name = *s;
-    }
-    if (!id.empty()) {
-      g_overlay.mic_devices.emplace_back(id, name.empty() ? id : name);
-    }
-  }
-}
-
 void StartWin32InteractiveOverlay(
     const std::wstring& target_path, const std::string& initial_mode,
     int initial_fps, bool initial_record_mic,
     const std::string& initial_mic_id, bool initial_sys_audio,
     bool initial_cursor, bool initial_clicks,
     std::unique_ptr<CaptureMethodResult> result) {
-  CloseInteractiveOverlay();
+  if (g_overlay.pending_result && !g_overlay.settled) {
+    FinishOverlayCancelled();
+  } else {
+    CloseInteractiveOverlay();
+  }
+
   g_overlay = InteractiveOverlayState{};
   g_overlay.target_path = target_path;
   g_overlay.initial_mode = initial_mode;
@@ -1848,83 +2535,21 @@ void StartWin32InteractiveOverlay(
     PopulateOverlayMicDevices();
   }
 
-  g_overlay.virt_x = ::GetSystemMetrics(SM_XVIRTUALSCREEN);
-  g_overlay.virt_y = ::GetSystemMetrics(SM_YVIRTUALSCREEN);
-  g_overlay.virt_w = ::GetSystemMetrics(SM_CXVIRTUALSCREEN);
-  g_overlay.virt_h = ::GetSystemMetrics(SM_CYVIRTUALSCREEN);
-  if (g_overlay.virt_w <= 0 || g_overlay.virt_h <= 0) {
-    FinishOverlayCancelled();
-    return;
-  }
-
-  HDC screen_dc = ::GetDC(nullptr);
-  if (!screen_dc) {
-    FinishOverlayCancelled();
-    return;
-  }
-
-  BITMAPINFO bmi = {};
-  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  bmi.bmiHeader.biWidth = g_overlay.virt_w;
-  bmi.bmiHeader.biHeight = -g_overlay.virt_h;
-  bmi.bmiHeader.biPlanes = 1;
-  bmi.bmiHeader.biBitCount = 32;
-  bmi.bmiHeader.biCompression = BI_RGB;
-
-  void* raw_bits = nullptr;
-  g_overlay.screen_bitmap = ::CreateDIBSection(
-      screen_dc, &bmi, DIB_RGB_COLORS, &raw_bits, nullptr, 0);
-  if (!g_overlay.screen_bitmap || !raw_bits) {
-    ::ReleaseDC(nullptr, screen_dc);
-    FinishOverlayCancelled();
-    return;
-  }
-  g_overlay.screen_bits = static_cast<uint8_t*>(raw_bits);
-
-  HDC cap_dc = ::CreateCompatibleDC(screen_dc);
-  if (!cap_dc) {
-    ::ReleaseDC(nullptr, screen_dc);
-    FinishOverlayCancelled();
-    return;
-  }
-  HGDIOBJ old_cap = ::SelectObject(cap_dc, g_overlay.screen_bitmap);
-  BOOL blt_ok = ::BitBlt(cap_dc, 0, 0, g_overlay.virt_w, g_overlay.virt_h,
-                         screen_dc, g_overlay.virt_x, g_overlay.virt_y,
-                         SRCCOPY);
-  ::SelectObject(cap_dc, old_cap);
-  ::DeleteDC(cap_dc);
-  if (!blt_ok) {
-    ::ReleaseDC(nullptr, screen_dc);
-    FinishOverlayCancelled();
-    return;
-  }
-
-  void* dim_raw = nullptr;
-  g_overlay.dim_bitmap = ::CreateDIBSection(
-      screen_dc, &bmi, DIB_RGB_COLORS, &dim_raw, nullptr, 0);
-  if (g_overlay.dim_bitmap && dim_raw) {
-    const uint32_t* src32 = reinterpret_cast<const uint32_t*>(raw_bits);
-    uint32_t* dst32 = static_cast<uint32_t*>(dim_raw);
-    size_t pixel_count = static_cast<size_t>(g_overlay.virt_w) *
-                         static_cast<size_t>(g_overlay.virt_h);
-    for (size_t i = 0; i < pixel_count; ++i) {
-      uint32_t px = src32[i];
-      uint32_t rb = (((px & 0x00FF00FFu) * 160u) >> 8) & 0x00FF00FFu;
-      uint32_t g = (((px & 0x0000FF00u) * 160u) >> 8) & 0x0000FF00u;
-      dst32[i] = rb | g | 0xFF000000u;
+  std::vector<CapturedMonitorFrame> monitors;
+  if (!ConsumePrecaptureMonitors(&monitors)) {
+    if (!CaptureAllMonitorsFast(&monitors) || monitors.empty()) {
+      FinishOverlayCancelled();
+      return;
     }
   }
 
-  g_overlay.backbuf_dc = ::CreateCompatibleDC(screen_dc);
-  g_overlay.backbuf_bitmap = ::CreateCompatibleBitmap(
-      screen_dc, g_overlay.virt_w, g_overlay.virt_h);
-  if (g_overlay.backbuf_dc && g_overlay.backbuf_bitmap) {
-    g_overlay.backbuf_old_bmp =
-        ::SelectObject(g_overlay.backbuf_dc, g_overlay.backbuf_bitmap);
+  POINT cursor_pt = {};
+  if (!::GetCursorPos(&cursor_pt)) {
+    cursor_pt.x = 0;
+    cursor_pt.y = 0;
   }
-  ::ReleaseDC(nullptr, screen_dc);
 
-  static const wchar_t* kOverlayClass = L"SnipSnapOverlayWindowClass";
+  static const wchar_t* kOverlayClass = L"SnipSnapOverlayMonitorClass";
   static bool registered = false;
   if (!registered) {
     WNDCLASSEXW wc = {};
@@ -1938,13 +2563,122 @@ void StartWin32InteractiveOverlay(
     registered = true;
   }
 
-  g_overlay.hwnd = ::CreateWindowExW(
-      WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kOverlayClass, L"SnipSnap Capture",
-      WS_POPUP | WS_VISIBLE, g_overlay.virt_x, g_overlay.virt_y,
-      g_overlay.virt_w, g_overlay.virt_h, nullptr, nullptr,
-      ::GetModuleHandleW(nullptr), nullptr);
-  ::SetForegroundWindow(g_overlay.hwnd);
-  ::SetFocus(g_overlay.hwnd);
+  HDC screen_dc = ::GetDC(nullptr);
+  if (!screen_dc) {
+    FinishOverlayCancelled();
+    return;
+  }
+
+  int cursor_pane_idx = 0;
+  g_overlay.panes.reserve(monitors.size());
+  for (size_t i = 0; i < monitors.size(); ++i) {
+    const auto& mon = monitors[i];
+    if (mon.width <= 0 || mon.height <= 0 || mon.bgra.empty()) continue;
+
+    OverlayMonitorPane pane;
+    pane.hmon = mon.hmon;
+    pane.screen_rect = mon.monitor_rect;
+    pane.width = mon.width;
+    pane.height = mon.height;
+    pane.dpi_scale =
+        std::clamp(static_cast<double>(mon.dpi) / 96.0, 1.0, 3.0);
+
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = pane.width;
+    bmi.bmiHeader.biHeight = -pane.height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* raw_bits = nullptr;
+    pane.screen_bitmap = ::CreateDIBSection(
+        screen_dc, &bmi, DIB_RGB_COLORS, &raw_bits, nullptr, 0);
+    if (!pane.screen_bitmap || !raw_bits) {
+      pane.CleanupResources();
+      continue;
+    }
+    pane.screen_bits = static_cast<uint8_t*>(raw_bits);
+    size_t copy_bytes = std::min(
+        mon.bgra.size(),
+        static_cast<size_t>(pane.width) * static_cast<size_t>(pane.height) * 4);
+    std::memcpy(pane.screen_bits, mon.bgra.data(), copy_bytes);
+
+    void* dim_raw = nullptr;
+    pane.dim_bitmap = ::CreateDIBSection(
+        screen_dc, &bmi, DIB_RGB_COLORS, &dim_raw, nullptr, 0);
+    if (pane.dim_bitmap && dim_raw) {
+      int stride = pane.width * 4;
+      snipsnap_dim_bgra(pane.screen_bits, static_cast<uint8_t*>(dim_raw),
+                        pane.width, pane.height, stride, stride, 160);
+    }
+
+    pane.scr_dc = ::CreateCompatibleDC(screen_dc);
+    if (pane.scr_dc) {
+      pane.scr_old_bmp = ::SelectObject(pane.scr_dc, pane.screen_bitmap);
+    }
+    pane.dim_dc = ::CreateCompatibleDC(screen_dc);
+    if (pane.dim_dc && pane.dim_bitmap) {
+      pane.dim_old_bmp = ::SelectObject(pane.dim_dc, pane.dim_bitmap);
+    }
+    pane.backbuf_dc = ::CreateCompatibleDC(screen_dc);
+    pane.backbuf_bitmap =
+        ::CreateCompatibleBitmap(screen_dc, pane.width, pane.height);
+    if (pane.backbuf_dc && pane.backbuf_bitmap) {
+      pane.backbuf_old_bmp =
+          ::SelectObject(pane.backbuf_dc, pane.backbuf_bitmap);
+    }
+
+    pane.font_ui = ::CreateFontW(
+        -OverlayScalePx(13, pane.dpi_scale), 0, 0, 0, FW_SEMIBOLD, FALSE,
+        FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+    pane.font_bold = ::CreateFontW(
+        -OverlayScalePx(14, pane.dpi_scale), 0, 0, 0, FW_BOLD, FALSE, FALSE,
+        FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+
+    int pane_index = static_cast<int>(g_overlay.panes.size());
+    if (::PtInRect(&pane.screen_rect, cursor_pt)) {
+      cursor_pane_idx = pane_index;
+    }
+
+    pane.hwnd = ::CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kOverlayClass, L"SnipSnap Capture",
+        WS_POPUP, static_cast<int>(pane.screen_rect.left),
+        static_cast<int>(pane.screen_rect.top), pane.width, pane.height,
+        nullptr, nullptr, ::GetModuleHandleW(nullptr),
+        reinterpret_cast<LPVOID>(static_cast<intptr_t>(pane_index)));
+    if (!pane.hwnd) {
+      pane.CleanupResources();
+      continue;
+    }
+    g_overlay.panes.push_back(std::move(pane));
+  }
+
+  ::ReleaseDC(nullptr, screen_dc);
+
+  if (g_overlay.panes.empty()) {
+    FinishOverlayCancelled();
+    return;
+  }
+
+  g_overlay.active_pane = std::clamp(
+      cursor_pane_idx, 0, static_cast<int>(g_overlay.panes.size()) - 1);
+  g_overlay_active.store(true);
+
+  HWND primary_hwnd =
+      g_overlay.panes[static_cast<size_t>(g_overlay.active_pane)].hwnd;
+  g_overlay_primary_hwnd.store(primary_hwnd);
+  g_overlay_hook_active.store(true);
+  g_overlay.key_hook = ::SetWindowsHookExW(
+      WH_KEYBOARD_LL, OverlayLowLevelKeyboardProc, ::GetModuleHandleW(nullptr),
+      0);
+
+  for (auto& pane : g_overlay.panes) {
+    ::ShowWindow(pane.hwnd, SW_SHOWNOACTIVATE);
+  }
+  ForceForegroundWindow(primary_hwnd);
 }
 
 // ---------------------------------------------------------------------------
@@ -1968,73 +2702,34 @@ void StartWin32InteractiveOverlay(
 //   int fps = 30;
 //   bool record_audio = false;
 // };
-bool CaptureScreenRectBgraWithCursor(int x, int y, int width, int height,
-                                     bool draw_cursor,
-                                     std::vector<uint8_t>* out_bgra) {
-  if (width <= 0 || height <= 0 || !out_bgra) return false;
-  HDC screen_dc = ::GetDC(nullptr);
-  if (!screen_dc) return false;
-  HDC mem_dc = ::CreateCompatibleDC(screen_dc);
-  if (!mem_dc) {
-    ::ReleaseDC(nullptr, screen_dc);
-    return false;
-  }
-
-  BITMAPINFO bmi = {};
-  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  bmi.bmiHeader.biWidth = width;
-  bmi.bmiHeader.biHeight = -height;
-  bmi.bmiHeader.biPlanes = 1;
-  bmi.bmiHeader.biBitCount = 32;
-  bmi.bmiHeader.biCompression = BI_RGB;
-
-  void* bits = nullptr;
-  HBITMAP dib =
-      ::CreateDIBSection(screen_dc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
-  if (!dib || !bits) {
-    if (dib) ::DeleteObject(dib);
-    ::DeleteDC(mem_dc);
-    ::ReleaseDC(nullptr, screen_dc);
-    return false;
-  }
-
-  HGDIOBJ old_obj = ::SelectObject(mem_dc, dib);
-  BOOL blt_ok =
-      ::BitBlt(mem_dc, 0, 0, width, height, screen_dc, x, y, SRCCOPY);
-  if (blt_ok && draw_cursor) {
-    CURSORINFO ci = {};
-    ci.cbSize = sizeof(ci);
-    if (::GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor) {
-      ICONINFO ii = {};
-      int hot_x = 0;
-      int hot_y = 0;
-      if (::GetIconInfo(ci.hCursor, &ii)) {
-        hot_x = static_cast<int>(ii.xHotspot);
-        hot_y = static_cast<int>(ii.yHotspot);
-        if (ii.hbmMask) ::DeleteObject(ii.hbmMask);
-        if (ii.hbmColor) ::DeleteObject(ii.hbmColor);
-      }
-      ::DrawIconEx(mem_dc, ci.ptScreenPos.x - x - hot_x,
-                   ci.ptScreenPos.y - y - hot_y, ci.hCursor, 0, 0, 0, nullptr,
-                   DI_NORMAL);
+// Gene - Nov, 24, 2026: Upgrade recorder capture, Rust click rings & WASAPI resampler, hardware MF transforms, wall-clock timestamps, HiDPI HUD + capture-excluded guide border, countdown Esc hook, and restore_window flag.
+// Old implementation (CaptureScreenRectBgraWithCursor, CompositeClickPulsesOntoBgra, WasapiCaptureStream::Drain48kStereo, RecordingHudWndProc, StopWinRecordingSession, StartWinRecordingSession, ExtractVideoFrameAtMs):
+// bool CaptureScreenRectBgraWithCursor(int x, int y, int width, int height, bool draw_cursor, std::vector<uint8_t>* out_bgra) {
+//   HDC mem_dc = ::CreateCompatibleDC(screen_dc); ::BitBlt(..., SRCCOPY); ...
+// }
+// void CompositeClickPulsesOntoBgra(...) {
+//   for (const auto& pulse : pulses) { ... (*bgra)[idx + 0] = ... rb ... (*bgra)[idx + 2] = ... bb ... } // B/R swapped
+// }
+// void Drain48kStereo(...) { ... /* manual 16i/32f loop only */ ... }
+// bool StartWinRecordingSession(...) { ... rt_start += frame_duration_100ns; ... }
+ComPtr<IMFAttributes> CreateHardwareMfAttributes(bool enable_video_proc) {
+  ComPtr<IMFAttributes> attrs;
+  if (SUCCEEDED(::MFCreateAttributes(&attrs, enable_video_proc ? 2 : 1)) &&
+      attrs) {
+    attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+    if (enable_video_proc) {
+      attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
     }
   }
+  return attrs;
+}
 
-  size_t byte_count = static_cast<size_t>(width) * height * 4;
-  if (blt_ok) {
-    out_bgra->resize(byte_count);
-    std::memcpy(out_bgra->data(), bits, byte_count);
-    uint8_t* p = out_bgra->data();
-    for (size_t i = 3; i < byte_count; i += 4) {
-      p[i] = 0xFF;
-    }
-  }
-
-  ::SelectObject(mem_dc, old_obj);
-  ::DeleteObject(dib);
-  ::DeleteDC(mem_dc);
-  ::ReleaseDC(nullptr, screen_dc);
-  return blt_ok == TRUE;
+bool CaptureScreenRectBgraWithCursor(
+    int x, int y, int width, int height, bool draw_cursor,
+    std::vector<uint8_t>* out_bgra,
+    PersistentGdiRectGrabber* gdi_scratch = nullptr) {
+  return CaptureRectFast(x, y, width, height, draw_cursor, true, gdi_scratch,
+                         out_bgra);
 }
 
 struct ClickPulse {
@@ -2048,46 +2743,22 @@ void CompositeClickPulsesOntoBgra(std::vector<uint8_t>* bgra, int rec_x,
                                  int rec_y, int w, int h,
                                  const std::vector<ClickPulse>& pulses,
                                  std::chrono::steady_clock::time_point now) {
-  if (!bgra || bgra->size() < static_cast<size_t>(w) * h * 4) return;
+  if (!bgra || w <= 0 || h <= 0 ||
+      bgra->size() < static_cast<size_t>(w) * static_cast<size_t>(h) * 4) {
+    return;
+  }
   for (const auto& pulse : pulses) {
     auto age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                       now - pulse.started_at)
                       .count();
     if (age_ms < 0 || age_ms > 360) continue;
     float progress = static_cast<float>(age_ms) / 360.0f;
-    float radius = 8.0f + progress * 22.0f;
-    float half_thick = 2.2f;
-    float alpha_scale = (1.0f - progress) * 0.85f;
-    uint8_t rb = pulse.right_button ? 255 : 40;
-    uint8_t gb = pulse.right_button ? 205 : 195;
-    uint8_t bb = pulse.right_button ? 70 : 255;
-
     int cx = pulse.screen_x - rec_x;
     int cy = pulse.screen_y - rec_y;
-    int max_r = static_cast<int>(std::ceil(radius + half_thick)) + 1;
-    int min_py = std::max(0, cy - max_r);
-    int max_py = std::min(h - 1, cy + max_r);
-    int min_px = std::max(0, cx - max_r);
-    int max_px = std::min(w - 1, cx + max_r);
-    for (int py = min_py; py <= max_py; ++py) {
-      float dy = static_cast<float>(py - cy);
-      for (int px = min_px; px <= max_px; ++px) {
-        float dx = static_cast<float>(px - cx);
-        float dist = std::sqrt(dx * dx + dy * dy);
-        float diff = std::abs(dist - radius);
-        if (diff <= half_thick) {
-          float coverage = (1.0f - diff / half_thick) * alpha_scale;
-          size_t idx = (static_cast<size_t>(py) * w + px) * 4;
-          float inv = 1.0f - coverage;
-          (*bgra)[idx + 0] = static_cast<uint8_t>(
-              std::clamp((*bgra)[idx + 0] * inv + rb * coverage, 0.0f, 255.0f));
-          (*bgra)[idx + 1] = static_cast<uint8_t>(
-              std::clamp((*bgra)[idx + 1] * inv + gb * coverage, 0.0f, 255.0f));
-          (*bgra)[idx + 2] = static_cast<uint8_t>(
-              std::clamp((*bgra)[idx + 2] * inv + bb * coverage, 0.0f, 255.0f));
-        }
-      }
-    }
+    snipsnap_composite_click_ring_bgra(
+        bgra->data(), static_cast<int32_t>(w), static_cast<int32_t>(h),
+        static_cast<int32_t>(w * 4), static_cast<int32_t>(cx),
+        static_cast<int32_t>(cy), progress, pulse.right_button);
   }
 }
 
@@ -2101,6 +2772,7 @@ struct WasapiCaptureStream {
   bool is_float = true;
   bool started = false;
   double resample_phase = 0.0;
+  std::vector<float> tmp_out;
 
   ~WasapiCaptureStream() { Close(); }
 
@@ -2188,7 +2860,6 @@ struct WasapiCaptureStream {
   void Drain48kStereo(std::deque<float>* out_stereo, bool discard) {
     if (!started || !capture) return;
     UINT32 packet_frames = 0;
-    std::vector<float> tmp_stereo;
     while (SUCCEEDED(capture->GetNextPacketSize(&packet_frames)) &&
            packet_frames > 0) {
       BYTE* data = nullptr;
@@ -2198,91 +2869,44 @@ struct WasapiCaptureStream {
           capture->GetBuffer(&data, &num_frames, &flags, nullptr, nullptr);
       if (FAILED(hr)) break;
 
-      if (!discard && out_stereo && num_frames > 0) {
-        tmp_stereo.resize(static_cast<size_t>(num_frames) * 2);
+      if (!discard && out_stereo && num_frames > 0 && sample_rate > 0) {
         bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0 || !data;
         if (silent) {
-          std::fill(tmp_stereo.begin(), tmp_stereo.end(), 0.0f);
-        } else {
-          for (UINT32 f = 0; f < num_frames; ++f) {
-            float l = 0.0f;
-            float r = 0.0f;
-            if (is_float && bits_per_sample == 32) {
-              const float* fp = reinterpret_cast<const float*>(data) +
-                                static_cast<size_t>(f) * channels;
-              l = fp[0];
-              r = (channels >= 2) ? fp[1] : l;
-            } else if (!is_float && bits_per_sample == 16) {
-              const int16_t* ip = reinterpret_cast<const int16_t*>(data) +
-                                  static_cast<size_t>(f) * channels;
-              l = static_cast<float>(ip[0]) / 32768.0f;
-              r = (channels >= 2) ? (static_cast<float>(ip[1]) / 32768.0f) : l;
-            }
-            tmp_stereo[static_cast<size_t>(f) * 2 + 0] = l;
-            tmp_stereo[static_cast<size_t>(f) * 2 + 1] = r;
-          }
-        }
-        if (sample_rate == 48000) {
-          out_stereo->insert(out_stereo->end(), tmp_stereo.begin(),
-                             tmp_stereo.end());
-        } else {
           double step = static_cast<double>(sample_rate) / 48000.0;
-          while (resample_phase < static_cast<double>(num_frames)) {
-            UINT32 idx0 = static_cast<UINT32>(resample_phase);
-            UINT32 idx1 = std::min(idx0 + 1, num_frames - 1);
-            float frac = static_cast<float>(resample_phase - idx0);
-            float l0 = tmp_stereo[static_cast<size_t>(idx0) * 2];
-            float r0 = tmp_stereo[static_cast<size_t>(idx0) * 2 + 1];
-            float l1 = tmp_stereo[static_cast<size_t>(idx1) * 2];
-            float r1 = tmp_stereo[static_cast<size_t>(idx1) * 2 + 1];
-            out_stereo->push_back(l0 + (l1 - l0) * frac);
-            out_stereo->push_back(r0 + (r1 - r0) * frac);
+          double total = static_cast<double>(num_frames);
+          while (resample_phase < total) {
+            out_stereo->push_back(0.0f);
+            out_stereo->push_back(0.0f);
             resample_phase += step;
           }
-          resample_phase -= static_cast<double>(num_frames);
+          resample_phase -= total;
+        } else {
+          uint32_t frame_bytes = channels * (bits_per_sample / 8U);
+          size_t src_len = static_cast<size_t>(num_frames) * frame_bytes;
+          size_t max_out =
+              (static_cast<size_t>(num_frames) * 48000ULL / sample_rate + 8) *
+              2;
+          if (tmp_out.size() < max_out) {
+            tmp_out.resize(max_out);
+          }
+          size_t written = 0;
+          if (snipsnap_pcm_to_f32_stereo_48k(
+                  data, src_len, num_frames, channels, bits_per_sample,
+                  is_float, sample_rate, &resample_phase, tmp_out.data(),
+                  tmp_out.size(), &written) &&
+              written > 0) {
+            out_stereo->insert(out_stereo->end(), tmp_out.data(),
+                               tmp_out.data() + written);
+          }
         }
+      } else if (discard) {
+        resample_phase = 0.0;
       }
       capture->ReleaseBuffer(num_frames);
     }
   }
 };
 
-// Gene - Nov, 13, 2026: Added multi-monitor HUD positioning, countdown click/Esc cancel, wrote_valid_video verification, join_mutex synchronization, and non-blocking StopWinRecordingSession.
-// Old implementation:
-// struct WinScreenRecorder {
-//   std::atomic<bool> active{false};
-//   std::atomic<bool> paused{false};
-//   std::atomic<bool> cancelled{false};
-//   std::atomic<bool> mic_muted{false};
-//   std::atomic<int> countdown_remaining{0};
-//   std::atomic<int64_t> elapsed_ms{0};
-//   std::atomic<bool> actual_has_audio{false};
-//   std::thread worker;
-//   std::thread hud_thread;
-//   std::mutex hud_mutex;
-//   HWND hud_hwnd = nullptr;
-//   std::wstring target_path;
-//   std::wstring thumbnail_path;
-//   std::string mic_device_id;
-//   int rec_x = 0;
-//   int rec_y = 0;
-//   int rec_w = 0;
-//   int rec_h = 0;
-//   int fps = 60;
-//   bool record_audio = false;
-//   bool record_system_audio = true;
-//   bool record_cursor = true;
-//   bool highlight_clicks = true;
-//
-//   RECT pause_btn = {0, 0, 0, 0};
-//   RECT stop_btn = {0, 0, 0, 0};
-//   RECT restart_btn = {0, 0, 0, 0};
-//   RECT mute_btn = {0, 0, 0, 0};
-//   RECT cancel_btn = {0, 0, 0, 0};
-//   bool hud_dragging = false;
-//   POINT hud_drag_offset = {0, 0};
-//   bool hud_in_countdown_mode = false;
-// };
 struct WinScreenRecorder {
   std::atomic<bool> active{false};
   std::atomic<bool> stopping{false};
@@ -2298,6 +2922,12 @@ struct WinScreenRecorder {
   std::thread hud_thread;
   std::mutex hud_mutex;
   HWND hud_hwnd = nullptr;
+  HWND guide_hwnd = nullptr;
+  HHOOK countdown_hook = nullptr;
+  HFONT hud_font = nullptr;
+  HFONT hud_big_font = nullptr;
+  HFONT hud_hint_font = nullptr;
+  double hud_dpi_scale = 1.0;
   std::wstring target_path;
   std::wstring thumbnail_path;
   std::string mic_device_id;
@@ -2326,22 +2956,50 @@ struct WinScreenRecorder {
 };
 
 WinScreenRecorder g_recorder;
+std::atomic<bool> g_recorder_countdown_hook_active{false};
 
 void StopWinRecordingSession(bool cancel,
-                             std::unique_ptr<CaptureMethodResult> result);
+                             std::unique_ptr<CaptureMethodResult> result,
+                             bool restore_window = true);
+
+LRESULT CALLBACK CountdownLowLevelKeyboardProc(int nCode, WPARAM wparam,
+                                                 LPARAM lparam) {
+  if (nCode == HC_ACTION &&
+      g_recorder_countdown_hook_active.load(std::memory_order_acquire) &&
+      g_recorder.countdown_remaining.load(std::memory_order_acquire) > 0 &&
+      (wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN)) {
+    const auto* kbd = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);
+    if (kbd && kbd->vkCode == VK_ESCAPE) {
+      g_recorder_countdown_hook_active.store(false, std::memory_order_release);
+      PostToPlatformThread(
+          []() { StopWinRecordingSession(true, nullptr, true); });
+      return 1;
+    }
+  }
+  return ::CallNextHookEx(nullptr, nCode, wparam, lparam);
+}
 
 void RefreshRecordingHudWindow() {
   std::lock_guard<std::mutex> lock(g_recorder.hud_mutex);
   if (g_recorder.hud_hwnd && ::IsWindow(g_recorder.hud_hwnd)) {
     ::InvalidateRect(g_recorder.hud_hwnd, nullptr, FALSE);
   }
+  if (g_recorder.guide_hwnd && ::IsWindow(g_recorder.guide_hwnd)) {
+    ::InvalidateRect(g_recorder.guide_hwnd, nullptr, FALSE);
+  }
 }
 
 void CloseRecordingHudWindow() {
+  g_recorder_countdown_hook_active.store(false, std::memory_order_release);
   HWND hwnd_to_close = nullptr;
+  HWND guide_to_close = nullptr;
   {
     std::lock_guard<std::mutex> lock(g_recorder.hud_mutex);
     hwnd_to_close = g_recorder.hud_hwnd;
+    guide_to_close = g_recorder.guide_hwnd;
+  }
+  if (guide_to_close && ::IsWindow(guide_to_close)) {
+    ::PostMessageW(guide_to_close, WM_CLOSE, 0, 0);
   }
   if (hwnd_to_close && ::IsWindow(hwnd_to_close)) {
     ::PostMessageW(hwnd_to_close, WM_CLOSE, 0, 0);
@@ -2349,6 +3007,50 @@ void CloseRecordingHudWindow() {
   if (g_recorder.hud_thread.joinable()) {
     g_recorder.hud_thread.join();
   }
+}
+
+LRESULT CALLBACK RecordingGuideWndProc(HWND hwnd, UINT msg, WPARAM wparam,
+                                       LPARAM lparam) {
+  switch (msg) {
+    case WM_PAINT: {
+      PAINTSTRUCT ps;
+      HDC hdc = ::BeginPaint(hwnd, &ps);
+      RECT client = {};
+      ::GetClientRect(hwnd, &client);
+      // Black interior becomes fully click-through transparent via LWA_COLORKEY.
+      HBRUSH black_br = ::CreateSolidBrush(RGB(0, 0, 0));
+      ::FillRect(hdc, &client, black_br);
+      ::DeleteObject(black_br);
+
+      COLORREF stroke = RGB(240, 68, 56);
+      if (g_recorder.countdown_remaining.load() > 0 ||
+          g_recorder.paused.load()) {
+        stroke = RGB(245, 185, 66);
+      }
+      int pen_w = std::max(2, OverlayScalePx(2, g_recorder.hud_dpi_scale));
+      HPEN pen = ::CreatePen(PS_SOLID, pen_w, stroke);
+      HGDIOBJ old_pen = ::SelectObject(hdc, pen);
+      HGDIOBJ old_br = ::SelectObject(hdc, ::GetStockObject(NULL_BRUSH));
+      ::Rectangle(hdc, pen_w / 2, pen_w / 2, client.right - pen_w / 2,
+                  client.bottom - pen_w / 2);
+      ::SelectObject(hdc, old_br);
+      ::SelectObject(hdc, old_pen);
+      ::DeleteObject(pen);
+      ::EndPaint(hwnd, &ps);
+      return 0;
+    }
+
+    case WM_CLOSE:
+      ::DestroyWindow(hwnd);
+      return 0;
+
+    case WM_DESTROY: {
+      std::lock_guard<std::mutex> lock(g_recorder.hud_mutex);
+      g_recorder.guide_hwnd = nullptr;
+      return 0;
+    }
+  }
+  return ::DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
 LRESULT CALLBACK RecordingHudWndProc(HWND hwnd, UINT msg, WPARAM wparam,
@@ -2361,7 +3063,8 @@ LRESULT CALLBACK RecordingHudWndProc(HWND hwnd, UINT msg, WPARAM wparam,
 
     case WM_KEYDOWN: {
       if (wparam == VK_ESCAPE) {
-        PostToPlatformThread([]() { StopWinRecordingSession(true, nullptr); });
+        PostToPlatformThread(
+            []() { StopWinRecordingSession(true, nullptr, true); });
         return 0;
       }
       break;
@@ -2371,23 +3074,40 @@ LRESULT CALLBACK RecordingHudWndProc(HWND hwnd, UINT msg, WPARAM wparam,
       if (wparam == kHudTimerId) {
         int rem = g_recorder.countdown_remaining.load();
         bool want_countdown = rem > 0;
+        if (!want_countdown && g_recorder.countdown_hook) {
+          g_recorder_countdown_hook_active.store(false,
+                                                 std::memory_order_release);
+          ::UnhookWindowsHookEx(g_recorder.countdown_hook);
+          g_recorder.countdown_hook = nullptr;
+        }
         if (want_countdown != g_recorder.hud_in_countdown_mode) {
           g_recorder.hud_in_countdown_mode = want_countdown;
+          double s = g_recorder.hud_dpi_scale;
           int mx = g_recorder.hud_mon_x;
           int my = g_recorder.hud_mon_y;
           int mw = std::max(320, g_recorder.hud_mon_w);
           int mh = std::max(240, g_recorder.hud_mon_h);
           if (want_countdown) {
-            int cw = 148;
-            int ch = 158;
+            int cw = OverlayScalePx(168, s);
+            int ch = OverlayScalePx(172, s);
             ::SetWindowPos(hwnd, HWND_TOPMOST, mx + (mw - cw) / 2,
                            my + (mh - ch) / 2, cw, ch,
                            SWP_NOACTIVATE | SWP_SHOWWINDOW);
           } else {
-            int pw = 372;
-            int ph = 46;
-            ::SetWindowPos(hwnd, HWND_TOPMOST, mx + (mw - pw) / 2, my + 24,
-                           pw, ph, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            int base_pw = g_recorder.record_audio ? 386 : 324;
+            int pw = OverlayScalePx(base_pw, s);
+            int ph = OverlayScalePx(48, s);
+            int py = my + OverlayScalePx(24, s);
+            ::SetWindowPos(hwnd, HWND_TOPMOST, mx + (mw - pw) / 2, py, pw, ph,
+                           SWP_NOACTIVATE | SWP_SHOWWINDOW);
+          }
+          HWND guide = nullptr;
+          {
+            std::lock_guard<std::mutex> lock(g_recorder.hud_mutex);
+            guide = g_recorder.guide_hwnd;
+          }
+          if (guide && ::IsWindow(guide)) {
+            ::InvalidateRect(guide, nullptr, FALSE);
           }
         }
         ::InvalidateRect(hwnd, nullptr, FALSE);
@@ -2397,21 +3117,23 @@ LRESULT CALLBACK RecordingHudWndProc(HWND hwnd, UINT msg, WPARAM wparam,
 
     case WM_LBUTTONDOWN: {
       if (g_recorder.countdown_remaining.load() > 0) {
-        PostToPlatformThread([]() { StopWinRecordingSession(true, nullptr); });
+        PostToPlatformThread(
+            []() { StopWinRecordingSession(true, nullptr, true); });
         return 0;
       }
       POINT pt = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
       if (::PtInRect(&g_recorder.pause_btn, pt)) {
         bool now_paused = !g_recorder.paused.load();
         g_recorder.paused.store(now_paused);
-        ::InvalidateRect(hwnd, nullptr, FALSE);
+        RefreshRecordingHudWindow();
         EncodableMap args;
         args[EncodableValue("isPaused")] = EncodableValue(now_paused);
         InvokeDartMethod("onRecordingStateChanged", EncodableValue(args));
         return 0;
       }
       if (::PtInRect(&g_recorder.stop_btn, pt)) {
-        PostToPlatformThread([]() { StopWinRecordingSession(false, nullptr); });
+        PostToPlatformThread(
+            []() { StopWinRecordingSession(false, nullptr, true); });
         return 0;
       }
       if (::PtInRect(&g_recorder.restart_btn, pt)) {
@@ -2428,7 +3150,8 @@ LRESULT CALLBACK RecordingHudWndProc(HWND hwnd, UINT msg, WPARAM wparam,
         return 0;
       }
       if (::PtInRect(&g_recorder.cancel_btn, pt)) {
-        PostToPlatformThread([]() { StopWinRecordingSession(true, nullptr); });
+        PostToPlatformThread(
+            []() { StopWinRecordingSession(true, nullptr, true); });
         return 0;
       }
       g_recorder.hud_dragging = true;
@@ -2464,6 +3187,7 @@ LRESULT CALLBACK RecordingHudWndProc(HWND hwnd, UINT msg, WPARAM wparam,
       ::GetClientRect(hwnd, &client);
       int cw = client.right - client.left;
       int ch = client.bottom - client.top;
+      double s = g_recorder.hud_dpi_scale;
 
       HDC mem_dc = ::CreateCompatibleDC(hdc);
       HBITMAP bmp = ::CreateCompatibleBitmap(hdc, cw, ch);
@@ -2483,70 +3207,88 @@ LRESULT CALLBACK RecordingHudWndProc(HWND hwnd, UINT msg, WPARAM wparam,
 
       ::SetBkMode(mem_dc, TRANSPARENT);
       int rem = g_recorder.countdown_remaining.load();
+      int corner = OverlayScalePx(10, s);
       if (rem > 0) {
-        RECT num_rect = {0, 8, cw, ch - 30};
+        RECT num_rect = {0, OverlayScalePx(8, s), cw, ch - OverlayScalePx(30, s)};
         ::SetTextColor(mem_dc, RGB(255, 255, 255));
         std::wstring num = std::to_wstring(rem);
-        HFONT big_font = ::CreateFontW(
-            68, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-            OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-            VARIABLE_PITCH, L"Segoe UI");
-        HGDIOBJ old_f = ::SelectObject(mem_dc, big_font);
+        HGDIOBJ old_f = g_recorder.hud_big_font
+                            ? ::SelectObject(mem_dc, g_recorder.hud_big_font)
+                            : nullptr;
         ::DrawTextW(mem_dc, num.c_str(), -1, &num_rect,
                     DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        ::SelectObject(mem_dc, old_f);
-        ::DeleteObject(big_font);
+        if (old_f) ::SelectObject(mem_dc, old_f);
 
-        RECT hint_rect = {8, ch - 28, cw - 8, ch - 6};
+        RECT hint_rect = {OverlayScalePx(8, s), ch - OverlayScalePx(30, s),
+                          cw - OverlayScalePx(8, s), ch - OverlayScalePx(6, s)};
+        HGDIOBJ old_hf = g_recorder.hud_hint_font
+                             ? ::SelectObject(mem_dc, g_recorder.hud_hint_font)
+                             : nullptr;
         ::SetTextColor(mem_dc, RGB(196, 178, 166));
         ::DrawTextW(mem_dc, L"Click or Esc to cancel", -1, &hint_rect,
                     DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (old_hf) ::SelectObject(mem_dc, old_hf);
       } else {
+        HGDIOBJ old_f = g_recorder.hud_font
+                            ? ::SelectObject(mem_dc, g_recorder.hud_font)
+                            : nullptr;
         int64_t secs = g_recorder.elapsed_ms.load() / 1000;
         wchar_t time_buf[32] = {};
         std::swprintf(time_buf, 32, L"%02lld:%02lld",
                       static_cast<long long>(secs / 60),
                       static_cast<long long>(secs % 60));
-        RECT time_rect = {10, 6, 74, ch - 6};
+        int time_w = OverlayScalePx(66, s);
+        int margin_x = OverlayScalePx(10, s);
+        RECT time_rect = {margin_x, OverlayScalePx(6, s), margin_x + time_w,
+                          ch - OverlayScalePx(6, s)};
         ::SetTextColor(mem_dc, g_recorder.paused.load() ? RGB(255, 200, 90)
                                                         : RGB(255, 110, 100));
         ::DrawTextW(mem_dc, time_buf, -1, &time_rect,
                     DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-        int bx = 78;
-        int by = 8;
-        int bh = ch - 16;
-        g_recorder.pause_btn = {bx, by, bx + 58, by + bh};
-        bx += 62;
-        g_recorder.stop_btn = {bx, by, bx + 52, by + bh};
-        bx += 56;
-        g_recorder.restart_btn = {bx, by, bx + 60, by + bh};
-        bx += 64;
+        int bx = margin_x + time_w + OverlayScalePx(4, s);
+        int by = OverlayScalePx(8, s);
+        int bh = ch - OverlayScalePx(16, s);
+        int gap = OverlayScalePx(5, s);
+        int w_pause = OverlayScalePx(60, s);
+        int w_stop = OverlayScalePx(54, s);
+        int w_restart = OverlayScalePx(62, s);
+        int w_mute = OverlayScalePx(58, s);
+        int w_cancel = OverlayScalePx(32, s);
+
+        g_recorder.pause_btn = {bx, by, bx + w_pause, by + bh};
+        bx += w_pause + gap;
+        g_recorder.stop_btn = {bx, by, bx + w_stop, by + bh};
+        bx += w_stop + gap;
+        g_recorder.restart_btn = {bx, by, bx + w_restart, by + bh};
+        bx += w_restart + gap;
         if (g_recorder.record_audio) {
-          g_recorder.mute_btn = {bx, by, bx + 58, by + bh};
-          bx += 62;
+          g_recorder.mute_btn = {bx, by, bx + w_mute, by + bh};
+          bx += w_mute + gap;
         } else {
           g_recorder.mute_btn = {0, 0, 0, 0};
         }
-        g_recorder.cancel_btn = {bx, by, bx + 32, by + bh};
+        g_recorder.cancel_btn = {bx, by, bx + w_cancel, by + bh};
 
         DrawRoundedPill(
             mem_dc, g_recorder.pause_btn, RGB(48, 40, 35), RGB(110, 92, 80),
             g_recorder.paused.load() ? L"Resume" : L"Pause",
-            RGB(255, 255, 255));
+            RGB(255, 255, 255), corner);
         DrawRoundedPill(mem_dc, g_recorder.stop_btn, RGB(205, 42, 42),
-                        RGB(240, 90, 90), L"Stop", RGB(255, 255, 255));
+                        RGB(240, 90, 90), L"Stop", RGB(255, 255, 255), corner);
         DrawRoundedPill(mem_dc, g_recorder.restart_btn, RGB(48, 40, 35),
-                        RGB(110, 92, 80), L"Restart", RGB(255, 255, 255));
+                        RGB(110, 92, 80), L"Restart", RGB(255, 255, 255),
+                        corner);
         if (g_recorder.record_audio) {
           bool muted = g_recorder.mic_muted.load();
           DrawRoundedPill(mem_dc, g_recorder.mute_btn,
                           muted ? RGB(130, 52, 42) : RGB(46, 105, 62),
                           RGB(110, 92, 80), muted ? L"Muted" : L"Mic",
-                          RGB(255, 255, 255));
+                          RGB(255, 255, 255), corner);
         }
         DrawRoundedPill(mem_dc, g_recorder.cancel_btn, RGB(40, 32, 28),
-                        RGB(110, 92, 80), L"X", RGB(220, 200, 190));
+                        RGB(110, 92, 80), L"X", RGB(220, 200, 190), corner);
+        if (old_f) ::SelectObject(mem_dc, old_f);
       }
 
       ::BitBlt(hdc, 0, 0, cw, ch, mem_dc, 0, 0, SRCCOPY);
@@ -2563,9 +3305,34 @@ LRESULT CALLBACK RecordingHudWndProc(HWND hwnd, UINT msg, WPARAM wparam,
       return 0;
 
     case WM_DESTROY: {
+      if (g_recorder.countdown_hook) {
+        g_recorder_countdown_hook_active.store(false,
+                                               std::memory_order_release);
+        ::UnhookWindowsHookEx(g_recorder.countdown_hook);
+        g_recorder.countdown_hook = nullptr;
+      }
+      // Gene - Nov, 24, 2026: Ensure capture guide border window on hud_thread is synchronously destroyed before exiting message loop.
+      HWND guide = nullptr;
       {
         std::lock_guard<std::mutex> lock(g_recorder.hud_mutex);
+        guide = g_recorder.guide_hwnd;
+        g_recorder.guide_hwnd = nullptr;
         g_recorder.hud_hwnd = nullptr;
+      }
+      if (guide && ::IsWindow(guide)) {
+        ::DestroyWindow(guide);
+      }
+      if (g_recorder.hud_font) {
+        ::DeleteObject(g_recorder.hud_font);
+        g_recorder.hud_font = nullptr;
+      }
+      if (g_recorder.hud_big_font) {
+        ::DeleteObject(g_recorder.hud_big_font);
+        g_recorder.hud_big_font = nullptr;
+      }
+      if (g_recorder.hud_hint_font) {
+        ::DeleteObject(g_recorder.hud_hint_font);
+        g_recorder.hud_hint_font = nullptr;
       }
       ::PostQuitMessage(0);
       return 0;
@@ -2579,6 +3346,7 @@ void LaunchRecordingHudWindow(int countdown_seconds) {
   g_recorder.hud_in_countdown_mode = countdown_seconds > 0;
   g_recorder.hud_thread = std::thread([countdown_seconds]() {
     static const wchar_t* kHudClass = L"SnipSnapRecordingHudClass";
+    static const wchar_t* kGuideClass = L"SnipSnapRecordingGuideClass";
     static std::atomic<bool> registered{false};
     if (!registered.exchange(true)) {
       WNDCLASSEXW wc = {};
@@ -2588,16 +3356,61 @@ void LaunchRecordingHudWindow(int countdown_seconds) {
       wc.hCursor = ::LoadCursor(nullptr, IDC_ARROW);
       wc.lpszClassName = kHudClass;
       ::RegisterClassExW(&wc);
+
+      WNDCLASSEXW gc = {};
+      gc.cbSize = sizeof(WNDCLASSEXW);
+      gc.lpfnWndProc = RecordingGuideWndProc;
+      gc.hInstance = ::GetModuleHandleW(nullptr);
+      gc.lpszClassName = kGuideClass;
+      ::RegisterClassExW(&gc);
+    }
+
+    POINT pt = {g_recorder.hud_mon_x + 1, g_recorder.hud_mon_y + 1};
+    HMONITOR hmon = ::MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    double s = std::clamp(static_cast<double>(GetMonitorDpi(hmon)) / 96.0,
+                          1.0, 3.0);
+    g_recorder.hud_dpi_scale = s;
+
+    g_recorder.hud_font = ::CreateFontW(
+        -OverlayScalePx(13, s), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+    g_recorder.hud_big_font = ::CreateFontW(
+        -OverlayScalePx(68, s), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Segoe UI");
+    g_recorder.hud_hint_font = ::CreateFontW(
+        -OverlayScalePx(12, s), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+
+    int pad = std::max(3, OverlayScalePx(3, s));
+    HWND guide_hwnd = ::CreateWindowExW(
+        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW |
+            WS_EX_NOACTIVATE,
+        kGuideClass, L"SnipSnap Recording Guide", WS_POPUP | WS_VISIBLE,
+        g_recorder.rec_x - pad, g_recorder.rec_y - pad,
+        g_recorder.rec_w + pad * 2, g_recorder.rec_h + pad * 2, nullptr,
+        nullptr, ::GetModuleHandleW(nullptr), nullptr);
+    if (guide_hwnd) {
+      ::SetLayeredWindowAttributes(guide_hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
+      ::SetWindowDisplayAffinity(guide_hwnd, WDA_EXCLUDEFROMCAPTURE);
+      std::lock_guard<std::mutex> lock(g_recorder.hud_mutex);
+      g_recorder.guide_hwnd = guide_hwnd;
     }
 
     int mx = g_recorder.hud_mon_x;
     int my = g_recorder.hud_mon_y;
     int mw = std::max(320, g_recorder.hud_mon_w);
     int mh = std::max(240, g_recorder.hud_mon_h);
-    int win_w = countdown_seconds > 0 ? 148 : 372;
-    int win_h = countdown_seconds > 0 ? 158 : 46;
+    int base_pw = g_recorder.record_audio ? 386 : 324;
+    int win_w = countdown_seconds > 0 ? OverlayScalePx(168, s)
+                                      : OverlayScalePx(base_pw, s);
+    int win_h = countdown_seconds > 0 ? OverlayScalePx(172, s)
+                                      : OverlayScalePx(48, s);
     int win_x = mx + (mw - win_w) / 2;
-    int win_y = countdown_seconds > 0 ? (my + (mh - win_h) / 2) : (my + 24);
+    int win_y = countdown_seconds > 0 ? (my + (mh - win_h) / 2)
+                                      : (my + OverlayScalePx(24, s));
 
     HWND hwnd = ::CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kHudClass,
@@ -2609,6 +3422,12 @@ void LaunchRecordingHudWindow(int countdown_seconds) {
         std::lock_guard<std::mutex> lock(g_recorder.hud_mutex);
         g_recorder.hud_hwnd = hwnd;
       }
+      if (countdown_seconds > 0) {
+        g_recorder_countdown_hook_active.store(true, std::memory_order_release);
+        g_recorder.countdown_hook = ::SetWindowsHookExW(
+            WH_KEYBOARD_LL, CountdownLowLevelKeyboardProc,
+            ::GetModuleHandleW(nullptr), 0);
+      }
       MSG msg = {};
       while (::GetMessageW(&msg, nullptr, 0, 0) > 0) {
         ::TranslateMessage(&msg);
@@ -2618,31 +3437,13 @@ void LaunchRecordingHudWindow(int countdown_seconds) {
   });
 }
 
-// Old blocking StopWinRecordingSession retained commented per policy:
-// void StopWinRecordingSession(bool cancel,
-//                              std::unique_ptr<CaptureMethodResult> result) {
-//   if (!g_recorder.active.load()) {
-//     CloseRecordingHudWindow();
-//     SetMainWindowVisible(true);
-//     if (result) result->Success(EncodableValue());
-//     return;
-//   }
-//   if (cancel) g_recorder.cancelled.store(true);
-//   g_recorder.active.store(false);
-//   g_recorder.countdown_remaining.store(0);
-//   if (g_recorder.worker.joinable()) {
-//     g_recorder.worker.join();
-//   }
-//   CloseRecordingHudWindow();
-//   SetMainWindowVisible(true);
-//   ...
-// }
 void StopWinRecordingSession(bool cancel,
-                             std::unique_ptr<CaptureMethodResult> result) {
+                             std::unique_ptr<CaptureMethodResult> result,
+                             bool restore_window) {
   std::shared_ptr<CaptureMethodResult> shared_result(std::move(result));
   if (!g_recorder.active.load() && !g_recorder.stopping.load()) {
     CloseRecordingHudWindow();
-    SetMainWindowVisible(true);
+    if (restore_window) SetMainWindowVisible(true);
     if (shared_result) shared_result->Success(EncodableValue());
     return;
   }
@@ -2656,7 +3457,7 @@ void StopWinRecordingSession(bool cancel,
   g_recorder.active.store(false);
   g_recorder.countdown_remaining.store(0);
 
-  std::thread([cancel, shared_result]() {
+  std::thread([cancel, restore_window, shared_result]() {
     {
       std::lock_guard<std::mutex> lock(g_recorder.join_mutex);
       if (g_recorder.worker.joinable()) {
@@ -2664,9 +3465,9 @@ void StopWinRecordingSession(bool cancel,
       }
       CloseRecordingHudWindow();
     }
-    PostToPlatformThread([cancel, shared_result]() {
+    PostToPlatformThread([cancel, restore_window, shared_result]() {
       g_recorder.stopping.store(false);
-      SetMainWindowVisible(true);
+      if (restore_window) SetMainWindowVisible(true);
 
       bool valid = !cancel && !g_recorder.cancelled.load() &&
                    g_recorder.wrote_valid_video.load();
@@ -2779,8 +3580,13 @@ bool StartWinRecordingSession(
     DWORD video_stream_index = 0;
     DWORD audio_stream_index = 1;
     bool has_audio_stream = false;
+    auto hw_attrs = CreateHardwareMfAttributes(false);
     HRESULT hr = ::MFCreateSinkWriterFromURL(
-        g_recorder.target_path.c_str(), nullptr, nullptr, &writer);
+        g_recorder.target_path.c_str(), nullptr, hw_attrs.Get(), &writer);
+    if (FAILED(hr) || !writer) {
+      hr = ::MFCreateSinkWriterFromURL(g_recorder.target_path.c_str(), nullptr,
+                                       nullptr, &writer);
+    }
 
     if (SUCCEEDED(hr)) {
       ComPtr<IMFMediaType> out_type;
@@ -2860,10 +3666,14 @@ bool StartWinRecordingSession(
 
     bool saved_thumb = false;
     int64_t frame_duration_100ns = 10000000LL / rec_fps;
-    int64_t rt_start = 0;
+    int64_t active_100ns = 0;
+    int64_t last_video_ts = -frame_duration_100ns;
+    int64_t frames_written = 0;
     int64_t audio_frames_written = 0;
     auto frame_interval = std::chrono::microseconds(1000000 / rec_fps);
+    auto last_wall = std::chrono::steady_clock::now();
     std::vector<uint8_t> frame_bgra;
+    PersistentGdiRectGrabber rec_gdi;
     std::vector<ClickPulse> click_pulses;
     bool prev_lbutton = false;
     bool prev_rbutton = false;
@@ -2872,6 +3682,12 @@ bool StartWinRecordingSession(
 
     while (SUCCEEDED(hr) && g_recorder.active.load()) {
       auto loop_start = std::chrono::steady_clock::now();
+      int64_t delta_100ns =
+          std::chrono::duration_cast<std::chrono::nanoseconds>(loop_start -
+                                                               last_wall)
+              .count() /
+          100LL;
+      last_wall = loop_start;
       bool paused_now = g_recorder.paused.load();
 
       if (sys_open) sys_loopback.Drain48kStereo(&sys_queue, paused_now);
@@ -2880,6 +3696,9 @@ bool StartWinRecordingSession(
       while (mic_queue.size() > 96000) mic_queue.pop_front();
 
       if (!paused_now) {
+        if (frames_written > 0 && delta_100ns > 0) {
+          active_100ns += delta_100ns;
+        }
         if (g_recorder.highlight_clicks) {
           bool ldown = (::GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
           bool rdown = (::GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
@@ -2909,7 +3728,7 @@ bool StartWinRecordingSession(
 
         if (CaptureScreenRectBgraWithCursor(g_recorder.rec_x, g_recorder.rec_y,
                                             w, h, g_recorder.record_cursor,
-                                            &frame_bgra)) {
+                                            &frame_bgra, &rec_gdi)) {
           if (g_recorder.highlight_clicks && !click_pulses.empty()) {
             CompositeClickPulsesOntoBgra(&frame_bgra, g_recorder.rec_x,
                                          g_recorder.rec_y, w, h, click_pulses,
@@ -2923,35 +3742,43 @@ bool StartWinRecordingSession(
           }
 
           DWORD cb_width = static_cast<DWORD>(w * 4);
-          DWORD cb_buffer = cb_width * h;
+          DWORD cb_buffer = cb_width * static_cast<DWORD>(h);
           ComPtr<IMFMediaBuffer> buffer;
           if (SUCCEEDED(::MFCreateMemoryBuffer(cb_buffer, &buffer))) {
             BYTE* dst = nullptr;
             if (SUCCEEDED(buffer->Lock(&dst, nullptr, nullptr))) {
-              for (int row = 0; row < h; ++row) {
-                const uint8_t* src_row =
-                    frame_bgra.data() + (h - 1 - row) * cb_width;
-                std::memcpy(dst + row * cb_width, src_row, cb_width);
-              }
+              bool converted = snipsnap_bgra_to_bottom_up_bgrx(
+                  frame_bgra.data(), static_cast<int32_t>(w),
+                  static_cast<int32_t>(h), static_cast<int32_t>(cb_width), dst,
+                  static_cast<int32_t>(cb_width));
               buffer->Unlock();
-              buffer->SetCurrentLength(cb_buffer);
-
-              ComPtr<IMFSample> sample;
-              if (SUCCEEDED(::MFCreateSample(&sample))) {
-                sample->AddBuffer(buffer.Get());
-                sample->SetSampleTime(rt_start);
-                sample->SetSampleDuration(frame_duration_100ns);
-                writer->WriteSample(video_stream_index, sample.Get());
-                rt_start += frame_duration_100ns;
-                g_recorder.elapsed_ms.store(rt_start / 10000);
+              if (converted) {
+                buffer->SetCurrentLength(cb_buffer);
+                ComPtr<IMFSample> sample;
+                if (SUCCEEDED(::MFCreateSample(&sample))) {
+                  int64_t pts = std::max<int64_t>(0, active_100ns);
+                  if (frames_written > 0 && pts <= last_video_ts) {
+                    pts = last_video_ts + 10000LL;
+                  }
+                  last_video_ts = pts;
+                  sample->AddBuffer(buffer.Get());
+                  sample->SetSampleTime(pts);
+                  sample->SetSampleDuration(frame_duration_100ns);
+                  writer->WriteSample(video_stream_index, sample.Get());
+                  ++frames_written;
+                  g_recorder.elapsed_ms.store(
+                      (pts + frame_duration_100ns) / 10000LL);
+                }
               }
             }
           }
 
           if (has_audio_stream) {
-            int64_t target_audio_frames = (rt_start * 48000LL) / 10000000LL;
+            int64_t target_audio_frames =
+                ((active_100ns + frame_duration_100ns) * 48000LL) / 10000000LL;
             int64_t frames_to_write =
-                target_audio_frames - audio_frames_written;
+                std::min<int64_t>(48000LL,
+                                  target_audio_frames - audio_frames_written);
             if (frames_to_write > 0) {
               DWORD audio_bytes = static_cast<DWORD>(frames_to_write * 4);
               ComPtr<IMFMediaBuffer> a_buf;
@@ -3013,7 +3840,7 @@ bool StartWinRecordingSession(
     sys_loopback.Close();
     mic_capture.Close();
 
-    if (writer && !g_recorder.cancelled.load() && rt_start > 0) {
+    if (writer && !g_recorder.cancelled.load() && frames_written > 0) {
       if (SUCCEEDED(writer->Finalize())) {
         g_recorder.wrote_valid_video.store(true);
       }
@@ -3026,27 +3853,16 @@ bool StartWinRecordingSession(
   return true;
 }
 
-// Gene - Nov, 13, 2026: Normalize MF_MT_DEFAULT_STRIDE and force opaque 0xFF alpha in ExtractVideoFrameAtMs; added native single-pass Media Foundation + WIC animated GIF exporter ExportVideoAsGifWic.
-// Old implementation:
-// bool ExtractVideoFrameAtMs(const std::wstring& video_path, int64_t timestamp_ms,
-//                            const std::wstring& target_png_path) {
-//   ::MFStartup(MF_VERSION);
-//   ComPtr<IMFSourceReader> reader;
-//   HRESULT hr = ::MFCreateSourceReaderFromURL(video_path.c_str(), nullptr, &reader);
-//   ...
-//         if (w > 0 && h > 0 && len >= w * h * 4) {
-//           ok = SaveBgraToPngFile(data, static_cast<int>(w), static_cast<int>(h),
-//                                  static_cast<int>(w * 4), target_png_path);
-//         }
-//   ...
-//   return ok;
-// }
 bool ExtractVideoFrameAtMs(const std::wstring& video_path, int64_t timestamp_ms,
                            const std::wstring& target_png_path) {
   ::MFStartup(MF_VERSION);
   ComPtr<IMFSourceReader> reader;
-  HRESULT hr =
-      ::MFCreateSourceReaderFromURL(video_path.c_str(), nullptr, &reader);
+  auto hw_attrs = CreateHardwareMfAttributes(true);
+  HRESULT hr = ::MFCreateSourceReaderFromURL(video_path.c_str(),
+                                             hw_attrs.Get(), &reader);
+  if (FAILED(hr) || !reader) {
+    hr = ::MFCreateSourceReaderFromURL(video_path.c_str(), nullptr, &reader);
+  }
   if (FAILED(hr)) {
     ::MFShutdown();
     return false;
@@ -3416,6 +4232,28 @@ int64_t QueryVideoDurationMs(const std::wstring& video_path) {
   return dur_ms;
 }
 
+// Gene - Nov, 24, 2026: Upgrade TranscodeVideoSegments (hardware transforms, seg_start_100ns A/V alignment, per-stream EOF, stride-checked copy) and WinVideoTexturePlayer (PixelBufferLease thread safety, Rust BGRA->RGBA, async Create/Dispose, pause/seek audio reset, speed-scaled WASAPI audio, frame-exact seek, ReleaseVideoPlayersForPath).
+// Old implementation (TranscodeVideoSegments, WinVideoTexturePlayer):
+// bool TranscodeVideoSegments(...) {
+//   // Used MFCreateSourceReaderFromURL(..., nullptr, ...), broke on single ENDOFSTREAM,
+//   // anchored first_v_ts/first_a_ts separately, and checked slen >= vw * 4 * vh.
+// }
+// class WinVideoTexturePlayer {
+//   // Synchronous Create() and Dispose(), single rgba_front buffer without lease,
+//   // 1.0x fixed WASAPI output even at non-1.0x speed, and no audio flush on pause/seek.
+// };
+bool PathsEqualInsensitive(const std::wstring& a, const std::wstring& b) {
+  auto norm = [](std::wstring s) {
+    for (wchar_t& ch : s) {
+      if (ch == L'/') ch = L'\\';
+    }
+    return s;
+  };
+  std::wstring na = norm(a);
+  std::wstring nb = norm(b);
+  return ::_wcsicmp(na.c_str(), nb.c_str()) == 0;
+}
+
 bool TranscodeVideoSegments(
     const std::wstring& src_path, const std::wstring& dst_path,
     const std::vector<std::pair<int64_t, int64_t>>& ranges_ms,
@@ -3431,27 +4269,48 @@ bool TranscodeVideoSegments(
 
   do {
     ComPtr<IMFSourceReader> reader;
-    if (FAILED(::MFCreateSourceReaderFromURL(src_path.c_str(), nullptr,
+    auto r_attrs = CreateHardwareMfAttributes(true);
+    if (FAILED(::MFCreateSourceReaderFromURL(src_path.c_str(), r_attrs.Get(),
                                              &reader)) ||
         !reader) {
-      break;
+      if (FAILED(::MFCreateSourceReaderFromURL(src_path.c_str(), nullptr,
+                                               &reader)) ||
+          !reader) {
+        break;
+      }
+    }
+
+    DWORD in_v_idx = static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
+    DWORD in_a_idx = static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM);
+    bool found_v = false;
+    bool found_a = false;
+    for (DWORD idx = 0; idx < 16; ++idx) {
+      ComPtr<IMFMediaType> native_mt;
+      if (FAILED(reader->GetNativeMediaType(idx, 0, &native_mt)) || !native_mt) {
+        break;
+      }
+      GUID maj = GUID_NULL;
+      if (SUCCEEDED(native_mt->GetGUID(MF_MT_MAJOR_TYPE, &maj))) {
+        if (!found_v && maj == MFMediaType_Video) {
+          in_v_idx = idx;
+          found_v = true;
+        } else if (!found_a && maj == MFMediaType_Audio) {
+          in_a_idx = idx;
+          found_a = true;
+        }
+      }
     }
 
     ComPtr<IMFMediaType> rgb_type;
     ::MFCreateMediaType(&rgb_type);
     rgb_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
     rgb_type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-    if (FAILED(reader->SetCurrentMediaType(
-            static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), nullptr,
-            rgb_type.Get()))) {
+    if (FAILED(reader->SetCurrentMediaType(in_v_idx, nullptr, rgb_type.Get()))) {
       break;
     }
 
     ComPtr<IMFMediaType> actual_v;
-    if (FAILED(reader->GetCurrentMediaType(
-            static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
-            &actual_v)) ||
-        !actual_v) {
+    if (FAILED(reader->GetCurrentMediaType(in_v_idx, &actual_v)) || !actual_v) {
       break;
     }
 
@@ -3489,17 +4348,21 @@ bool TranscodeVideoSegments(
     pcm_req->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2);
     pcm_req->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 4);
     pcm_req->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 192000);
-    if (SUCCEEDED(reader->SetCurrentMediaType(
-            static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), nullptr,
-            pcm_req.Get()))) {
+    if (found_a &&
+        SUCCEEDED(reader->SetCurrentMediaType(in_a_idx, nullptr, pcm_req.Get()))) {
       has_audio = true;
     }
 
     ComPtr<IMFSinkWriter> writer;
-    if (FAILED(::MFCreateSinkWriterFromURL(dst_path.c_str(), nullptr, nullptr,
-                                           &writer)) ||
+    auto w_attrs = CreateHardwareMfAttributes(false);
+    if (FAILED(::MFCreateSinkWriterFromURL(dst_path.c_str(), nullptr,
+                                           w_attrs.Get(), &writer)) ||
         !writer) {
-      break;
+      if (FAILED(::MFCreateSinkWriterFromURL(dst_path.c_str(), nullptr, nullptr,
+                                             &writer)) ||
+          !writer) {
+        break;
+      }
     }
 
     DWORD out_v_idx = 0;
@@ -3551,6 +4414,14 @@ bool TranscodeVideoSegments(
     if (FAILED(writer->BeginWriting())) break;
 
     bool write_ok = true;
+    int64_t last_out_v_ts = -1;
+    int64_t last_out_a_ts = -1;
+    UINT32 abs_stride =
+        static_cast<UINT32>(src_stride >= 0 ? src_stride : -src_stride);
+    DWORD row_bytes = vw * 4;
+    DWORD out_bytes = row_bytes * vh;
+    DWORD required_src_bytes = abs_stride * vh;
+
     for (const auto& seg : ranges_ms) {
       if (seg.second <= seg.first) continue;
       int64_t seg_start_100ns = seg.first * 10000LL;
@@ -3565,11 +4436,11 @@ bool TranscodeVideoSegments(
 
       bool v_done = false;
       bool a_done = !writer_has_audio;
-      int64_t first_v_ts = -1;
-      int64_t first_a_ts = -1;
+      bool v_eof = false;
+      bool a_eof = !writer_has_audio;
       int64_t seg_max_dur = 0;
 
-      while (!(v_done && a_done)) {
+      while (!(v_done && a_done) && !(v_eof && a_eof)) {
         DWORD stream_idx = 0;
         DWORD flags = 0;
         LONGLONG ts = 0;
@@ -3577,26 +4448,30 @@ bool TranscodeVideoSegments(
         HRESULT rhr = reader->ReadSample(
             static_cast<DWORD>(MF_SOURCE_READER_ANY_STREAM), 0, &stream_idx,
             &flags, &ts, &sample);
-        if (FAILED(rhr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
+        if (FAILED(rhr)) {
           break;
+        }
+        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+          if (stream_idx == in_v_idx) {
+            v_eof = true;
+            v_done = true;
+          } else if (writer_has_audio && stream_idx == in_a_idx) {
+            a_eof = true;
+            a_done = true;
+          } else {
+            break;
+          }
+          if (!sample) continue;
         }
         if (!sample) continue;
 
-        GUID major_type = GUID_NULL;
-        ComPtr<IMFMediaType> s_type;
-        if (SUCCEEDED(reader->GetCurrentMediaType(stream_idx, &s_type)) &&
-            s_type) {
-          s_type->GetGUID(MF_MT_MAJOR_TYPE, &major_type);
-        }
-
-        if (major_type == MFMediaType_Video) {
+        if (stream_idx == in_v_idx && !v_done) {
           if (ts < seg_start_100ns) continue;
           if (ts > seg_end_100ns) {
             v_done = true;
             continue;
           }
-          if (first_v_ts < 0) first_v_ts = ts;
-          int64_t rel_ts = ts - first_v_ts;
+          int64_t rel_ts = std::max<int64_t>(0, ts - seg_start_100ns);
           LONGLONG dur = 0;
           sample->GetSampleDuration(&dur);
           if (dur <= 0) {
@@ -3609,15 +4484,11 @@ bool TranscodeVideoSegments(
             BYTE* sdata = nullptr;
             DWORD slen = 0;
             if (SUCCEEDED(src_buf->Lock(&sdata, nullptr, &slen))) {
-              DWORD row_bytes = vw * 4;
-              DWORD out_bytes = row_bytes * vh;
-              if (slen >= out_bytes) {
+              if (abs_stride >= row_bytes && slen >= required_src_bytes) {
                 ComPtr<IMFMediaBuffer> dst_buf;
                 if (SUCCEEDED(::MFCreateMemoryBuffer(out_bytes, &dst_buf))) {
                   BYTE* ddata = nullptr;
                   if (SUCCEEDED(dst_buf->Lock(&ddata, nullptr, nullptr))) {
-                    UINT32 abs_stride = static_cast<UINT32>(
-                        src_stride >= 0 ? src_stride : -src_stride);
                     for (UINT32 r = 0; r < vh; ++r) {
                       UINT32 src_r = (src_stride >= 0) ? (vh - 1 - r) : r;
                       std::memcpy(ddata + r * row_bytes,
@@ -3627,8 +4498,13 @@ bool TranscodeVideoSegments(
                     dst_buf->SetCurrentLength(out_bytes);
                     ComPtr<IMFSample> out_sample;
                     if (SUCCEEDED(::MFCreateSample(&out_sample))) {
+                      int64_t out_ts = total_out_100ns + rel_ts;
+                      if (out_ts <= last_out_v_ts) {
+                        out_ts = last_out_v_ts + 10000LL;
+                      }
+                      last_out_v_ts = out_ts;
                       out_sample->AddBuffer(dst_buf.Get());
-                      out_sample->SetSampleTime(total_out_100ns + rel_ts);
+                      out_sample->SetSampleTime(out_ts);
                       out_sample->SetSampleDuration(dur);
                       if (FAILED(writer->WriteSample(out_v_idx,
                                                      out_sample.Get()))) {
@@ -3642,17 +4518,21 @@ bool TranscodeVideoSegments(
             }
           }
           seg_max_dur = std::max(seg_max_dur, rel_ts + dur);
-        } else if (writer_has_audio && major_type == MFMediaType_Audio) {
+        } else if (writer_has_audio && stream_idx == in_a_idx && !a_done) {
           if (ts < seg_start_100ns) continue;
           if (ts > seg_end_100ns) {
             a_done = true;
             continue;
           }
-          if (first_a_ts < 0) first_a_ts = ts;
-          int64_t rel_ts = ts - first_a_ts;
+          int64_t rel_ts = std::max<int64_t>(0, ts - seg_start_100ns);
           LONGLONG dur = 0;
           sample->GetSampleDuration(&dur);
-          sample->SetSampleTime(total_out_100ns + rel_ts);
+          int64_t out_ts = total_out_100ns + rel_ts;
+          if (out_ts <= last_out_a_ts) {
+            out_ts = last_out_a_ts + 10000LL;
+          }
+          last_out_a_ts = out_ts;
+          sample->SetSampleTime(out_ts);
           if (FAILED(writer->WriteSample(out_a_idx, sample.Get()))) {
             write_ok = false;
           }
@@ -3660,7 +4540,8 @@ bool TranscodeVideoSegments(
         }
         if (!write_ok) break;
       }
-      total_out_100ns += seg_max_dur;
+      total_out_100ns +=
+          std::max<int64_t>(seg_max_dur, seg_end_100ns - seg_start_100ns);
       if (!write_ok) break;
     }
 
@@ -3680,6 +4561,11 @@ bool TranscodeVideoSegments(
 class WinVideoTexturePlayer
     : public std::enable_shared_from_this<WinVideoTexturePlayer> {
  public:
+  struct PixelBufferLease {
+    std::shared_ptr<const std::vector<uint8_t>> frame;
+    FlutterDesktopPixelBuffer descriptor = {};
+  };
+
   int64_t texture_id = -1;
   int64_t duration_ms = 0;
   int width = 0;
@@ -3688,9 +4574,8 @@ class WinVideoTexturePlayer
 
   std::unique_ptr<flutter::TextureVariant> texture_variant;
   std::mutex frame_mutex;
-  std::vector<uint8_t> rgba_front;
-  std::vector<uint8_t> rgba_back;
-  FlutterDesktopPixelBuffer pixel_buffer = {};
+  std::shared_ptr<const std::vector<uint8_t>> front_frame;
+  std::array<std::shared_ptr<std::vector<uint8_t>>, 3> decode_pool;
 
   std::atomic<bool> playing{false};
   std::atomic<bool> disposed{false};
@@ -3699,124 +4584,179 @@ class WinVideoTexturePlayer
   std::atomic<float> speed{1.0f};
   std::atomic<int64_t> position_ms{0};
   std::atomic<int64_t> seek_request_ms{-1};
-  // Gene - Nov, 13, 2026: Track dynamic playback speed changes so frame-pacing clock re-anchors without drift or stale waits.
   std::atomic<bool> reanchor_clock{false};
 
   std::wstring video_path;
   flutter::TextureRegistrar* registrar = nullptr;
   std::thread worker;
 
-  static std::shared_ptr<WinVideoTexturePlayer> Create(
-      const std::wstring& path, flutter::TextureRegistrar* reg) {
-    if (!reg || path.empty()) return nullptr;
+  static void CreateAsync(
+      const std::wstring& path, flutter::TextureRegistrar* reg,
+      std::function<void(std::shared_ptr<WinVideoTexturePlayer>)> on_ready) {
+    if (!reg || path.empty()) {
+      PostToPlatformThread([on_ready]() {
+        if (on_ready) on_ready(nullptr);
+      });
+      return;
+    }
+
     auto player = std::make_shared<WinVideoTexturePlayer>();
     player->video_path = path;
     player->registrar = reg;
 
-    ::MFStartup(MF_VERSION);
-    ComPtr<IMFSourceReader> probe_reader;
-    if (FAILED(::MFCreateSourceReaderFromURL(path.c_str(), nullptr,
-                                             &probe_reader)) ||
-        !probe_reader) {
+    std::thread([player, path, reg, on_ready]() {
+      HRESULT com_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+      bool did_com = (com_hr == S_OK || com_hr == S_FALSE);
+      ::MFStartup(MF_VERSION);
+
+      bool probed_ok = false;
+      do {
+        ComPtr<IMFSourceReader> probe_reader;
+        auto attrs = CreateHardwareMfAttributes(true);
+        if (FAILED(::MFCreateSourceReaderFromURL(path.c_str(), attrs.Get(),
+                                                 &probe_reader)) ||
+            !probe_reader) {
+          if (FAILED(::MFCreateSourceReaderFromURL(path.c_str(), nullptr,
+                                                   &probe_reader)) ||
+              !probe_reader) {
+            break;
+          }
+        }
+
+        PROPVARIANT var;
+        ::PropVariantInit(&var);
+        if (SUCCEEDED(probe_reader->GetPresentationAttribute(
+                static_cast<DWORD>(MF_SOURCE_READER_MEDIASOURCE),
+                MF_PD_DURATION, &var))) {
+          if (var.vt == VT_UI8) {
+            player->duration_ms =
+                static_cast<int64_t>(var.uhVal.QuadPart / 10000ULL);
+          } else if (var.vt == VT_I8) {
+            player->duration_ms = var.hVal.QuadPart / 10000LL;
+          }
+          ::PropVariantClear(&var);
+        }
+
+        ComPtr<IMFMediaType> rgb_type;
+        ::MFCreateMediaType(&rgb_type);
+        rgb_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        rgb_type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+        if (FAILED(probe_reader->SetCurrentMediaType(
+                static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
+                nullptr, rgb_type.Get()))) {
+          break;
+        }
+
+        ComPtr<IMFMediaType> actual_v;
+        UINT32 vw = 0;
+        UINT32 vh = 0;
+        if (FAILED(probe_reader->GetCurrentMediaType(
+                static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
+                &actual_v)) ||
+            !actual_v ||
+            FAILED(::MFGetAttributeSize(actual_v.Get(), MF_MT_FRAME_SIZE, &vw,
+                                        &vh)) ||
+            vw == 0 || vh == 0) {
+          break;
+        }
+
+        player->width = static_cast<int>(vw);
+        player->height = static_cast<int>(vh);
+
+        ComPtr<IMFMediaType> probe_audio;
+        if (SUCCEEDED(probe_reader->GetCurrentMediaType(
+                static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),
+                &probe_audio))) {
+          player->has_audio = true;
+        }
+
+        UINT32 stride_u = 0;
+        INT32 default_stride = static_cast<INT32>(vw * 4);
+        if (SUCCEEDED(actual_v->GetUINT32(MF_MT_DEFAULT_STRIDE, &stride_u)) &&
+            stride_u != 0) {
+          default_stride = static_cast<INT32>(stride_u);
+        }
+
+        for (int i = 0; i < 8; ++i) {
+          DWORD flags = 0;
+          ComPtr<IMFSample> sample;
+          if (FAILED(probe_reader->ReadSample(
+                  static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), 0,
+                  nullptr, &flags, nullptr, &sample)) ||
+              (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
+            break;
+          }
+          if (!sample) continue;
+          if (player->DecodeSampleIntoFrontBuffer(sample.Get(),
+                                                  default_stride)) {
+            break;
+          }
+        }
+        probed_ok = true;
+      } while (false);
+
       ::MFShutdown();
-      return nullptr;
-    }
+      if (did_com) ::CoUninitialize();
 
-    PROPVARIANT var;
-    ::PropVariantInit(&var);
-    if (SUCCEEDED(probe_reader->GetPresentationAttribute(
-            static_cast<DWORD>(MF_SOURCE_READER_MEDIASOURCE), MF_PD_DURATION,
-            &var))) {
-      if (var.vt == VT_UI8) {
-        player->duration_ms = static_cast<int64_t>(var.uhVal.QuadPart / 10000ULL);
-      } else if (var.vt == VT_I8) {
-        player->duration_ms = var.hVal.QuadPart / 10000LL;
+      PostToPlatformThread([player, reg, probed_ok, on_ready]() {
+        if (!probed_ok || player->disposed.load()) {
+          if (on_ready) on_ready(nullptr);
+          return;
+        }
+
+        std::weak_ptr<WinVideoTexturePlayer> weak_self = player;
+        player->texture_variant = std::make_unique<flutter::TextureVariant>(
+            flutter::PixelBufferTexture(
+                [weak_self](size_t, size_t)
+                    -> const FlutterDesktopPixelBuffer* {
+                  auto self = weak_self.lock();
+                  if (!self || self->disposed.load()) return nullptr;
+                  std::shared_ptr<const std::vector<uint8_t>> frame;
+                  int w = 0;
+                  int h = 0;
+                  {
+                    std::lock_guard<std::mutex> lock(self->frame_mutex);
+                    frame = self->front_frame;
+                    w = self->width;
+                    h = self->height;
+                  }
+                  if (!frame || frame->empty() || w <= 0 || h <= 0) {
+                    return nullptr;
+                  }
+                  auto* lease = new PixelBufferLease();
+                  lease->frame = std::move(frame);
+                  lease->descriptor.buffer = lease->frame->data();
+                  lease->descriptor.width = static_cast<size_t>(w);
+                  lease->descriptor.height = static_cast<size_t>(h);
+                  lease->descriptor.release_context = lease;
+                  lease->descriptor.release_callback = [](void* ctx) {
+                    delete static_cast<PixelBufferLease*>(ctx);
+                  };
+                  return &lease->descriptor;
+                }));
+
+        player->texture_id = reg->RegisterTexture(player->texture_variant.get());
+        reg->MarkTextureFrameAvailable(player->texture_id);
+        player->worker = std::thread([player]() { player->RunLoop(); });
+        if (on_ready) on_ready(player);
+      });
+    }).detach();
+  }
+
+  std::shared_ptr<std::vector<uint8_t>> AcquireDecodeBuffer(size_t total_bytes) {
+    for (auto& slot : decode_pool) {
+      if (!slot) {
+        slot = std::make_shared<std::vector<uint8_t>>(total_bytes);
+        return slot;
       }
-      ::PropVariantClear(&var);
-    }
-
-    ComPtr<IMFMediaType> rgb_type;
-    ::MFCreateMediaType(&rgb_type);
-    rgb_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    rgb_type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-    if (FAILED(probe_reader->SetCurrentMediaType(
-            static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), nullptr,
-            rgb_type.Get()))) {
-      ::MFShutdown();
-      return nullptr;
-    }
-
-    ComPtr<IMFMediaType> actual_v;
-    UINT32 vw = 0;
-    UINT32 vh = 0;
-    if (FAILED(probe_reader->GetCurrentMediaType(
-            static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
-            &actual_v)) ||
-        !actual_v ||
-        FAILED(::MFGetAttributeSize(actual_v.Get(), MF_MT_FRAME_SIZE, &vw,
-                                    &vh)) ||
-        vw == 0 || vh == 0) {
-      ::MFShutdown();
-      return nullptr;
-    }
-
-    player->width = static_cast<int>(vw);
-    player->height = static_cast<int>(vh);
-
-    ComPtr<IMFMediaType> probe_audio;
-    if (SUCCEEDED(probe_reader->GetCurrentMediaType(
-            static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM),
-            &probe_audio))) {
-      player->has_audio = true;
-    }
-
-    UINT32 stride_u = 0;
-    INT32 default_stride = static_cast<INT32>(vw * 4);
-    if (SUCCEEDED(actual_v->GetUINT32(MF_MT_DEFAULT_STRIDE, &stride_u)) &&
-        stride_u != 0) {
-      default_stride = static_cast<INT32>(stride_u);
-    }
-
-    for (int i = 0; i < 8; ++i) {
-      DWORD flags = 0;
-      ComPtr<IMFSample> sample;
-      if (FAILED(probe_reader->ReadSample(
-              static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), 0,
-              nullptr, &flags, nullptr, &sample)) ||
-          (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
-        break;
-      }
-      if (!sample) continue;
-      if (player->DecodeSampleIntoFrontBuffer(sample.Get(), default_stride)) {
-        break;
+      if (slot.use_count() == 1) {
+        if (slot->size() != total_bytes) {
+          slot->resize(total_bytes);
+        }
+        return slot;
       }
     }
-    ::MFShutdown();
-
-    std::weak_ptr<WinVideoTexturePlayer> weak_self = player;
-    player->texture_variant = std::make_unique<flutter::TextureVariant>(
-        flutter::PixelBufferTexture(
-            [weak_self](size_t, size_t) -> const FlutterDesktopPixelBuffer* {
-              auto self = weak_self.lock();
-              if (!self || self->disposed.load()) return nullptr;
-              std::lock_guard<std::mutex> lock(self->frame_mutex);
-              if (self->rgba_front.empty() || self->width <= 0 ||
-                  self->height <= 0) {
-                return nullptr;
-              }
-              self->pixel_buffer.buffer = self->rgba_front.data();
-              self->pixel_buffer.width = static_cast<size_t>(self->width);
-              self->pixel_buffer.height = static_cast<size_t>(self->height);
-              self->pixel_buffer.release_callback = nullptr;
-              self->pixel_buffer.release_context = nullptr;
-              return &self->pixel_buffer;
-            }));
-
-    player->texture_id = reg->RegisterTexture(player->texture_variant.get());
-    reg->MarkTextureFrameAvailable(player->texture_id);
-
-    player->worker = std::thread([player]() { player->RunLoop(); });
-    return player;
+    return std::make_shared<std::vector<uint8_t>>(total_bytes);
   }
 
   bool DecodeSampleIntoFrontBuffer(IMFSample* sample, INT32 src_stride) {
@@ -3831,50 +4771,67 @@ class WinVideoTexturePlayer
     size_t total_bytes = row_bytes * static_cast<size_t>(height);
     UINT32 abs_stride =
         static_cast<UINT32>(src_stride >= 0 ? src_stride : -src_stride);
-    if (len >= static_cast<DWORD>(abs_stride * height)) {
-      rgba_back.resize(total_bytes);
-      for (int y = 0; y < height; ++y) {
-        int sy = (src_stride >= 0) ? y : (height - 1 - y);
-        const uint8_t* src_row = data + static_cast<size_t>(sy) * abs_stride;
-        uint8_t* dst_row = rgba_back.data() + static_cast<size_t>(y) * row_bytes;
-        for (int x = 0; x < width; ++x) {
-          dst_row[x * 4 + 0] = src_row[x * 4 + 2];
-          dst_row[x * 4 + 1] = src_row[x * 4 + 1];
-          dst_row[x * 4 + 2] = src_row[x * 4 + 0];
-          dst_row[x * 4 + 3] = 0xFF;
-        }
-      }
-      {
+    bool decoded = false;
+    if (abs_stride >= row_bytes &&
+        len >= static_cast<DWORD>(abs_stride * static_cast<UINT32>(height))) {
+      auto frame = AcquireDecodeBuffer(total_bytes);
+      if (snipsnap_bgra_to_rgba_top_down(
+              data, static_cast<int32_t>(width), static_cast<int32_t>(height),
+              static_cast<int32_t>(abs_stride), src_stride < 0,
+              frame->data())) {
         std::lock_guard<std::mutex> lock(frame_mutex);
-        rgba_front.swap(rgba_back);
+        front_frame = std::move(frame);
+        decoded = true;
       }
-      buf->Unlock();
-      return true;
     }
     buf->Unlock();
-    return false;
+    return decoded;
   }
 
   void RunLoop() {
-    ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    HRESULT com_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    bool did_com = (com_hr == S_OK || com_hr == S_FALSE);
     ::MFStartup(MF_VERSION);
 
     ComPtr<IMFSourceReader> reader;
-    HRESULT hr = ::MFCreateSourceReaderFromURL(video_path.c_str(), nullptr,
+    auto attrs = CreateHardwareMfAttributes(true);
+    HRESULT hr = ::MFCreateSourceReaderFromURL(video_path.c_str(), attrs.Get(),
                                                &reader);
+    if (FAILED(hr) || !reader) {
+      hr = ::MFCreateSourceReaderFromURL(video_path.c_str(), nullptr, &reader);
+    }
+
+    DWORD v_stream_idx = static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
+    DWORD a_stream_idx = static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM);
     INT32 v_stride = width * 4;
     if (SUCCEEDED(hr) && reader) {
+      bool got_v = false;
+      bool got_a = false;
+      for (DWORD idx = 0; idx < 16; ++idx) {
+        ComPtr<IMFMediaType> native_mt;
+        if (FAILED(reader->GetNativeMediaType(idx, 0, &native_mt)) ||
+            !native_mt) {
+          break;
+        }
+        GUID maj = GUID_NULL;
+        if (SUCCEEDED(native_mt->GetGUID(MF_MT_MAJOR_TYPE, &maj))) {
+          if (!got_v && maj == MFMediaType_Video) {
+            v_stream_idx = idx;
+            got_v = true;
+          } else if (!got_a && maj == MFMediaType_Audio) {
+            a_stream_idx = idx;
+            got_a = true;
+          }
+        }
+      }
+
       ComPtr<IMFMediaType> rgb_type;
       ::MFCreateMediaType(&rgb_type);
       rgb_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
       rgb_type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-      reader->SetCurrentMediaType(
-          static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), nullptr,
-          rgb_type.Get());
+      reader->SetCurrentMediaType(v_stream_idx, nullptr, rgb_type.Get());
       ComPtr<IMFMediaType> actual_v;
-      if (SUCCEEDED(reader->GetCurrentMediaType(
-              static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM),
-              &actual_v)) &&
+      if (SUCCEEDED(reader->GetCurrentMediaType(v_stream_idx, &actual_v)) &&
           actual_v) {
         UINT32 su = 0;
         if (SUCCEEDED(actual_v->GetUINT32(MF_MT_DEFAULT_STRIDE, &su)) &&
@@ -3882,7 +4839,7 @@ class WinVideoTexturePlayer
           v_stride = static_cast<INT32>(su);
         }
       }
-      if (has_audio) {
+      if (has_audio && got_a) {
         ComPtr<IMFMediaType> pcm_type;
         ::MFCreateMediaType(&pcm_type);
         pcm_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
@@ -3892,9 +4849,7 @@ class WinVideoTexturePlayer
         pcm_type->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2);
         pcm_type->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 4);
         pcm_type->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 192000);
-        reader->SetCurrentMediaType(
-            static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM), nullptr,
-            pcm_type.Get());
+        reader->SetCurrentMediaType(a_stream_idx, nullptr, pcm_type.Get());
       }
     }
 
@@ -3907,6 +4862,7 @@ class WinVideoTexturePlayer
     UINT32 render_channels = 2;
     bool render_float = true;
     bool audio_ready = false;
+    bool audio_started = false;
 
     if (has_audio &&
         SUCCEEDED(::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,
@@ -3921,7 +4877,7 @@ class WinVideoTexturePlayer
         render_client) {
       WAVEFORMATEX* rfmt = nullptr;
       if (SUCCEEDED(render_client->GetMixFormat(&rfmt)) && rfmt) {
-        render_rate = rfmt->nSamplesPerSec;
+        render_rate = std::max<UINT32>(1, rfmt->nSamplesPerSec);
         render_channels = std::max<UINT32>(1, rfmt->nChannels);
         render_float = (rfmt->wFormatTag == WAVE_FORMAT_IEEE_FLOAT);
         if (rfmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE && rfmt->cbSize >= 22) {
@@ -3937,13 +4893,110 @@ class WinVideoTexturePlayer
         if (SUCCEEDED(render_client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0,
                                                 2000000, 0, rfmt, nullptr)) &&
             SUCCEEDED(render_client->GetBufferSize(&render_buf_frames)) &&
-            SUCCEEDED(render_client->GetService(IID_PPV_ARGS(&audio_render))) &&
-            SUCCEEDED(render_client->Start())) {
+            SUCCEEDED(render_client->GetService(IID_PPV_ARGS(&audio_render)))) {
           audio_ready = true;
         }
         ::CoTaskMemFree(rfmt);
       }
     }
+
+    std::deque<float> audio_fifo;
+    double audio_src_phase = 0.0;
+
+    auto stop_and_flush_audio = [&]() {
+      audio_fifo.clear();
+      audio_src_phase = 0.0;
+      if (audio_ready && render_client) {
+        if (audio_started) {
+          render_client->Stop();
+          audio_started = false;
+        }
+        render_client->Reset();
+      }
+    };
+
+    auto flush_audio_fifo = [&]() {
+      if (!audio_ready || !render_client || !audio_render ||
+          audio_fifo.size() < 2) {
+        return;
+      }
+      if (!audio_started) {
+        if (SUCCEEDED(render_client->Start())) {
+          audio_started = true;
+        } else {
+          return;
+        }
+      }
+      UINT32 padding = 0;
+      if (FAILED(render_client->GetCurrentPadding(&padding))) return;
+      UINT32 avail =
+          (render_buf_frames > padding) ? (render_buf_frames - padding) : 0;
+      if (avail == 0) return;
+
+      double cur_spd = static_cast<double>(std::clamp(speed.load(), 0.25f, 4.0f));
+      double step = (48000.0 * cur_spd) / static_cast<double>(render_rate);
+      if (step <= 0.0) return;
+
+      size_t avail_in_frames = audio_fifo.size() / 2;
+      double max_phase = static_cast<double>(avail_in_frames) - 1.0001;
+      if (max_phase <= audio_src_phase) return;
+      UINT32 can_produce =
+          static_cast<UINT32>((max_phase - audio_src_phase) / step) + 1;
+      UINT32 out_frames = std::min(avail, can_produce);
+      if (out_frames == 0) return;
+
+      BYTE* rdata = nullptr;
+      if (SUCCEEDED(audio_render->GetBuffer(out_frames, &rdata)) && rdata) {
+        float gain = muted.load() ? 0.0f : volume.load();
+        double phase = audio_src_phase;
+        for (UINT32 f = 0; f < out_frames; ++f) {
+          size_t idx0 = static_cast<size_t>(phase);
+          size_t idx1 = std::min(idx0 + 1, avail_in_frames - 1);
+          float frac = static_cast<float>(phase - static_cast<double>(idx0));
+          float l0 = audio_fifo[idx0 * 2 + 0];
+          float r0 = audio_fifo[idx0 * 2 + 1];
+          float l1 = audio_fifo[idx1 * 2 + 0];
+          float r1 = audio_fifo[idx1 * 2 + 1];
+          float sl = (l0 + (l1 - l0) * frac) * gain;
+          float sr = (r0 + (r1 - r0) * frac) * gain;
+
+          if (render_float) {
+            float* out_f = reinterpret_cast<float*>(rdata) +
+                           static_cast<size_t>(f) * render_channels;
+            out_f[0] = sl;
+            if (render_channels >= 2) out_f[1] = sr;
+            for (UINT32 ch = 2; ch < render_channels; ++ch) {
+              out_f[ch] = 0.0f;
+            }
+          } else {
+            int16_t* out_i = reinterpret_cast<int16_t*>(rdata) +
+                             static_cast<size_t>(f) * render_channels;
+            out_i[0] =
+                static_cast<int16_t>(std::clamp(sl, -1.0f, 1.0f) * 32767.0f);
+            if (render_channels >= 2) {
+              out_i[1] =
+                  static_cast<int16_t>(std::clamp(sr, -1.0f, 1.0f) * 32767.0f);
+            }
+            for (UINT32 ch = 2; ch < render_channels; ++ch) {
+              out_i[ch] = 0;
+            }
+          }
+          phase += step;
+        }
+        audio_render->ReleaseBuffer(out_frames, 0);
+
+        size_t consumed_frames = static_cast<size_t>(phase);
+        if (consumed_frames >= avail_in_frames) {
+          audio_fifo.clear();
+          audio_src_phase = 0.0;
+        } else {
+          audio_fifo.erase(audio_fifo.begin(),
+                           audio_fifo.begin() +
+                               static_cast<ptrdiff_t>(consumed_frames * 2));
+          audio_src_phase = phase - static_cast<double>(consumed_frames);
+        }
+      }
+    };
 
     auto last_progress_emit = std::chrono::steady_clock::now();
     bool need_clock_anchor = true;
@@ -3954,31 +5007,42 @@ class WinVideoTexturePlayer
       int64_t req_seek = seek_request_ms.exchange(-1);
       if (req_seek >= 0) {
         int64_t clamped = std::clamp<int64_t>(req_seek, 0, duration_ms);
+        int64_t target_100ns = clamped * 10000LL;
+        stop_and_flush_audio();
+
         PROPVARIANT var;
         ::PropVariantInit(&var);
         var.vt = VT_I8;
-        var.hVal.QuadPart = clamped * 10000LL;
+        var.hVal.QuadPart = target_100ns;
         reader->SetCurrentPosition(GUID_NULL, var);
         ::PropVariantClear(&var);
         position_ms.store(clamped);
         need_clock_anchor = true;
 
-        for (int i = 0; i < 6 && !disposed.load(); ++i) {
+        ComPtr<IMFSample> best_sample;
+        LONGLONG best_ts = 0;
+        for (int i = 0; i < 120 && !disposed.load(); ++i) {
           DWORD flags = 0;
           LONGLONG ts = 0;
           ComPtr<IMFSample> s;
-          if (FAILED(reader->ReadSample(
-                  static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM), 0,
-                  nullptr, &flags, &ts, &s)) ||
+          if (FAILED(reader->ReadSample(v_stream_idx, 0, nullptr, &flags, &ts,
+                                        &s)) ||
               (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
             break;
           }
           if (!s) continue;
-          if (DecodeSampleIntoFrontBuffer(s.Get(), v_stride)) {
-            if (registrar) registrar->MarkTextureFrameAvailable(texture_id);
-            position_ms.store(std::max<int64_t>(clamped, ts / 10000LL));
+          best_sample = s;
+          best_ts = ts;
+          if (ts >= target_100ns - 200000LL) {
             break;
           }
+        }
+        if (best_sample &&
+            DecodeSampleIntoFrontBuffer(best_sample.Get(), v_stride)) {
+          if (registrar && texture_id >= 0) {
+            registrar->MarkTextureFrameAvailable(texture_id);
+          }
+          position_ms.store(std::max<int64_t>(clamped, best_ts / 10000LL));
         }
 
         EncodableMap prog;
@@ -3989,10 +5053,15 @@ class WinVideoTexturePlayer
       }
 
       if (!playing.load()) {
+        if (audio_started || !audio_fifo.empty()) {
+          stop_and_flush_audio();
+        }
         need_clock_anchor = true;
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
         continue;
       }
+
+      flush_audio_fifo();
 
       DWORD stream_idx = 0;
       DWORD flags = 0;
@@ -4001,7 +5070,11 @@ class WinVideoTexturePlayer
       HRESULT rhr = reader->ReadSample(
           static_cast<DWORD>(MF_SOURCE_READER_ANY_STREAM), 0, &stream_idx,
           &flags, &ts, &sample);
-      if (FAILED(rhr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM)) {
+      if (FAILED(rhr) ||
+          ((flags & MF_SOURCE_READERF_ENDOFSTREAM) &&
+           stream_idx == v_stream_idx) ||
+          ((flags & MF_SOURCE_READERF_ENDOFSTREAM) && !sample && !has_audio)) {
+        stop_and_flush_audio();
         playing.store(false);
         position_ms.store(duration_ms);
         EncodableMap prog;
@@ -4017,14 +5090,8 @@ class WinVideoTexturePlayer
       }
       if (!sample) continue;
 
-      GUID major_type = GUID_NULL;
-      ComPtr<IMFMediaType> s_type;
-      if (SUCCEEDED(reader->GetCurrentMediaType(stream_idx, &s_type)) &&
-          s_type) {
-        s_type->GetGUID(MF_MT_MAJOR_TYPE, &major_type);
-      }
-
-      if (major_type == MFMediaType_Audio && audio_ready && audio_render) {
+      if (stream_idx == a_stream_idx && has_audio && audio_ready &&
+          audio_render) {
         ComPtr<IMFMediaBuffer> abuf;
         if (SUCCEEDED(sample->ConvertToContiguousBuffer(&abuf))) {
           BYTE* adata = nullptr;
@@ -4032,74 +5099,25 @@ class WinVideoTexturePlayer
           if (SUCCEEDED(abuf->Lock(&adata, nullptr, &alen)) && alen >= 4) {
             UINT32 in_frames = alen / 4;
             const int16_t* pcm = reinterpret_cast<const int16_t*>(adata);
-            UINT32 padding = 0;
-            render_client->GetCurrentPadding(&padding);
-            UINT32 avail =
-                (render_buf_frames > padding) ? (render_buf_frames - padding) : 0;
-            UINT32 out_frames = static_cast<UINT32>(
-                (static_cast<uint64_t>(in_frames) * render_rate) / 48000ULL);
-            out_frames = std::min(out_frames, avail);
-            if (out_frames > 0) {
-              BYTE* rdata = nullptr;
-              if (SUCCEEDED(audio_render->GetBuffer(out_frames, &rdata)) &&
-                  rdata) {
-                float gain = muted.load() ? 0.0f : volume.load();
-                for (UINT32 f = 0; f < out_frames; ++f) {
-                  UINT32 src_f = std::min<UINT32>(
-                      in_frames - 1,
-                      static_cast<UINT32>(
-                          (static_cast<uint64_t>(f) * in_frames) / out_frames));
-                  float sl =
-                      (static_cast<float>(pcm[src_f * 2 + 0]) / 32768.0f) * gain;
-                  float sr =
-                      (static_cast<float>(pcm[src_f * 2 + 1]) / 32768.0f) * gain;
-                  if (render_float) {
-                    float* out_f = reinterpret_cast<float*>(rdata) +
-                                   static_cast<size_t>(f) * render_channels;
-                    out_f[0] = sl;
-                    if (render_channels >= 2) out_f[1] = sr;
-                    for (UINT32 ch = 2; ch < render_channels; ++ch) {
-                      out_f[ch] = 0.0f;
-                    }
-                  } else {
-                    int16_t* out_i = reinterpret_cast<int16_t*>(rdata) +
-                                     static_cast<size_t>(f) * render_channels;
-                    out_i[0] = static_cast<int16_t>(
-                        std::clamp(sl, -1.0f, 1.0f) * 32767.0f);
-                    if (render_channels >= 2) {
-                      out_i[1] = static_cast<int16_t>(
-                          std::clamp(sr, -1.0f, 1.0f) * 32767.0f);
-                    }
-                    for (UINT32 ch = 2; ch < render_channels; ++ch) {
-                      out_i[ch] = 0;
-                    }
-                  }
-                }
-                audio_render->ReleaseBuffer(out_frames, 0);
-              }
+            for (UINT32 f = 0; f < in_frames; ++f) {
+              audio_fifo.push_back(static_cast<float>(pcm[f * 2 + 0]) /
+                                   32768.0f);
+              audio_fifo.push_back(static_cast<float>(pcm[f * 2 + 1]) /
+                                   32768.0f);
+            }
+            while (audio_fifo.size() > 192000) {
+              audio_fifo.pop_front();
+              audio_fifo.pop_front();
             }
             abuf->Unlock();
+            flush_audio_fifo();
           }
         }
         continue;
       }
 
-      if (major_type == MFMediaType_Video) {
+      if (stream_idx == v_stream_idx) {
         int64_t frame_ms = ts / 10000LL;
-        // Gene - Nov, 13, 2026: Re-anchor pacing clock when requested (e.g., playback speed change) and exit stale sleeps immediately.
-        // Old implementation:
-        // if (need_clock_anchor) {
-        //   wall_anchor = std::chrono::steady_clock::now();
-        //   media_anchor_ms = frame_ms;
-        //   need_clock_anchor = false;
-        // } else {
-        //   float cur_spd = std::clamp(speed.load(), 0.25f, 4.0f);
-        //   int64_t target_wall_ms = static_cast<int64_t>(
-        //       static_cast<double>(frame_ms - media_anchor_ms) / cur_spd);
-        //   auto due = wall_anchor + std::chrono::milliseconds(target_wall_ms);
-        //   while (!disposed.load() && playing.load() &&
-        //          seek_request_ms.load() < 0 &&
-        //          std::chrono::steady_clock::now() < due) {
         if (need_clock_anchor || reanchor_clock.exchange(false)) {
           wall_anchor = std::chrono::steady_clock::now();
           media_anchor_ms = frame_ms;
@@ -4112,6 +5130,7 @@ class WinVideoTexturePlayer
           while (!disposed.load() && playing.load() &&
                  seek_request_ms.load() < 0 && !reanchor_clock.load() &&
                  std::chrono::steady_clock::now() < due) {
+            flush_audio_fifo();
             auto rem_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                               due - std::chrono::steady_clock::now())
                               .count();
@@ -4122,7 +5141,9 @@ class WinVideoTexturePlayer
         if (disposed.load() || seek_request_ms.load() >= 0) continue;
 
         if (DecodeSampleIntoFrontBuffer(sample.Get(), v_stride)) {
-          if (registrar) registrar->MarkTextureFrameAvailable(texture_id);
+          if (registrar && texture_id >= 0) {
+            registrar->MarkTextureFrameAvailable(texture_id);
+          }
         }
         position_ms.store(frame_ms);
 
@@ -4140,24 +5161,14 @@ class WinVideoTexturePlayer
       }
     }
 
-    if (render_client && audio_ready) {
-      render_client->Stop();
-    }
+    stop_and_flush_audio();
     audio_render.Reset();
     render_client.Reset();
     reader.Reset();
     ::MFShutdown();
-    ::CoUninitialize();
+    if (did_com) ::CoUninitialize();
   }
 
-  // Gene - Nov, 13, 2026: Rewind to start when Play() is pressed at EOF, and re-anchor pacing clock on SetSpeed().
-  // Old implementation:
-  // void Play() { playing.store(true); }
-  // void Pause() { playing.store(false); }
-  // void Seek(int64_t ms) { seek_request_ms.store(ms); }
-  // void SetVolume(float v) { volume.store(std::clamp(v, 0.0f, 1.0f)); }
-  // void SetMuted(bool m) { muted.store(m); }
-  // void SetSpeed(float s) { speed.store(std::clamp(s, 0.25f, 4.0f)); }
   void Play() {
     if (duration_ms > 0 && position_ms.load() >= duration_ms - 40) {
       seek_request_ms.store(0);
@@ -4171,6 +5182,31 @@ class WinVideoTexturePlayer
   void SetSpeed(float s) {
     speed.store(std::clamp(s, 0.25f, 4.0f));
     reanchor_clock.store(true);
+  }
+
+  void DisposeAsync(std::function<void()> on_done) {
+    if (disposed.exchange(true)) {
+      if (on_done) on_done();
+      return;
+    }
+    playing.store(false);
+    if (registrar && texture_id >= 0) {
+      auto keep_alive = shared_from_this();
+      int64_t tid = texture_id;
+      registrar->UnregisterTexture(tid, [keep_alive]() {});
+      texture_id = -1;
+    }
+    if (worker.joinable()) {
+      auto self = shared_from_this();
+      std::thread([self, on_done]() {
+        if (self->worker.joinable()) {
+          self->worker.join();
+        }
+        if (on_done) on_done();
+      }).detach();
+    } else {
+      if (on_done) on_done();
+    }
   }
 
   void Dispose() {
@@ -4191,6 +5227,48 @@ class WinVideoTexturePlayer
 std::mutex g_players_mutex;
 std::map<int64_t, std::shared_ptr<WinVideoTexturePlayer>> g_video_players;
 
+void ReleaseVideoPlayersForPath(const std::wstring& path,
+                                std::function<void()> on_done) {
+  std::vector<std::shared_ptr<WinVideoTexturePlayer>> to_dispose;
+  {
+    std::lock_guard<std::mutex> lock(g_players_mutex);
+    for (auto it = g_video_players.begin(); it != g_video_players.end();) {
+      if (it->second && PathsEqualInsensitive(it->second->video_path, path)) {
+        to_dispose.push_back(it->second);
+        it = g_video_players.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  if (to_dispose.empty()) {
+    if (on_done) on_done();
+    return;
+  }
+  auto remaining = std::make_shared<std::atomic<size_t>>(to_dispose.size());
+  for (auto& player : to_dispose) {
+    player->DisposeAsync([remaining, on_done]() {
+      if (remaining->fetch_sub(1) == 1 && on_done) {
+        PostToPlatformThread(on_done);
+      }
+    });
+  }
+}
+
+void DestroyAllVideoPlayers() {
+  std::vector<std::shared_ptr<WinVideoTexturePlayer>> players;
+  {
+    std::lock_guard<std::mutex> lock(g_players_mutex);
+    for (auto& kv : g_video_players) {
+      if (kv.second) players.push_back(kv.second);
+    }
+    g_video_players.clear();
+  }
+  for (auto& p : players) {
+    p->Dispose();
+  }
+}
+
 }  // namespace
 
 void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
@@ -4207,6 +5285,15 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
       engine->messenger(), kChannelName,
       &flutter::StandardMethodCodec::GetInstance());
   Gate() = gate;
+
+  // Gene - Nov, 24, 2026: Cache main HWND, install tray icon, register single-instance message, and warm WASAPI audio cache off-thread.
+  g_main_hwnd = FindMainAppHwnd();
+  g_show_window_msg =
+      ::RegisterWindowMessageW(L"dev.genexis.snipsnap.ShowWindow");
+  InstallTrayIcon(g_main_hwnd);
+  if (!g_audio_refresh_in_flight.exchange(true)) {
+    EnumerateWindowsAudioDevicesWorker(nullptr, false);
+  }
 
   gate->channel->SetMethodCallHandler(
       [](const flutter::MethodCall<EncodableValue>& call,
@@ -4259,16 +5346,53 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           return fallback;
         };
 
-        // Old implementation:
-        // if (method == "screenCaptureAuthorized" ||
-        //     method == "accessibilityAuthorized") {
-        //   result->Success(EncodableValue(true));
-        //   return;
-        // }
         if (method == "screenCaptureAuthorized" ||
             method == "accessibilityAuthorized" ||
             method == "microphoneAuthorized" ||
             method == "requestMicrophoneAccess") {
+          result->Success(EncodableValue(true));
+          return;
+        }
+
+        // Gene - Nov, 24, 2026: Native Win32 hotkeys, dark titlebar, Known Folder Desktop lookup, tray behavior, and non-blocking audio enumeration.
+        if (method == "registerWindowsHotKeys") {
+          EncodableList failed;
+          if (args) {
+            auto it = args->find(EncodableValue("entries"));
+            if (it != args->end()) {
+              if (const auto* entries = std::get_if<EncodableList>(&it->second)) {
+                failed = RegisterNativeHotKeys(*entries);
+              }
+            }
+          }
+          result->Success(EncodableValue(failed));
+          return;
+        }
+
+        if (method == "unregisterWindowsHotKeys") {
+          UnregisterAllNativeHotKeys();
+          result->Success(EncodableValue(true));
+          return;
+        }
+
+        if (method == "setWindowTheme") {
+          SetMainWindowDarkMode(get_bool("darkMode", true));
+          result->Success(EncodableValue(true));
+          return;
+        }
+
+        if (method == "getKnownDesktopPath") {
+          std::string desktop = GetKnownDesktopPathUtf8();
+          if (!desktop.empty()) {
+            result->Success(EncodableValue(desktop));
+          } else {
+            result->Success(EncodableValue());
+          }
+          return;
+        }
+
+        if (method == "setCloseToTray") {
+          g_close_to_tray.store(get_bool("enabled", true));
           result->Success(EncodableValue(true));
           return;
         }
@@ -4279,8 +5403,23 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           return;
         }
 
+        // Old synchronous listAudioInputDevices retained commented per policy:
+        // if (method == "listAudioInputDevices") {
+        //   result->Success(EncodableValue(EnumerateWindowsAudioInputDevices()));
+        //   return;
+        // }
         if (method == "listAudioInputDevices") {
-          result->Success(EncodableValue(EnumerateWindowsAudioInputDevices()));
+          EncodableList cached = BuildAudioDeviceListFromCache();
+          if (!cached.empty()) {
+            if (!g_audio_refresh_in_flight.exchange(true)) {
+              EnumerateWindowsAudioDevicesWorker(nullptr, false);
+            }
+            result->Success(EncodableValue(cached));
+            return;
+          }
+          std::shared_ptr<CaptureMethodResult> shared_res(std::move(result));
+          g_audio_refresh_in_flight.store(true);
+          EnumerateWindowsAudioDevicesWorker(shared_res, false);
           return;
         }
 
@@ -4298,43 +5437,47 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
             result->Error("bad_args", "targetPath missing");
             return;
           }
-          // Gene - Nov, 13, 2026: Capture active display under cursor rather than spanning entire virtual desktop, matching macOS multi-monitor behavior.
+          // Gene - Nov, 24, 2026: Prefer WM_HOTKEY precapture snapshot when available; otherwise use DXGI fast single-monitor capture with GDI fallback.
           // Old implementation:
-          // int vx = ::GetSystemMetrics(SM_XVIRTUALSCREEN);
-          // int vy = ::GetSystemMetrics(SM_YVIRTUALSCREEN);
-          // int vw = ::GetSystemMetrics(SM_CXVIRTUALSCREEN);
-          // int vh = ::GetSystemMetrics(SM_CYVIRTUALSCREEN);
+          // RECT mon = GetCursorMonitorScreenRect();
+          // int vx = static_cast<int>(mon.left);
+          // int vy = static_cast<int>(mon.top);
+          // int vw = static_cast<int>(mon.right - mon.left);
+          // int vh = static_cast<int>(mon.bottom - mon.top);
           // std::vector<uint8_t> bgra;
-          // if (CaptureScreenRectBgra(vx, vy, vw, vh, &bgra) &&
-          //     SaveBgraToPngFile(bgra.data(), vw, vh, vw * 4,
-          //                       Utf8ToWide(target))) {
-          //   result->Success(EncodableValue(target));
-          // } else {
-          //   result->Success(EncodableValue());
-          // }
-          RECT mon = GetCursorMonitorScreenRect();
-          int vx = static_cast<int>(mon.left);
-          int vy = static_cast<int>(mon.top);
+          // if (vw > 0 && vh > 0 && CaptureScreenRectBgra(vx, vy, vw, vh, &bgra)) {
+          HMONITOR hmon = nullptr;
+          RECT mon = {};
+          std::vector<uint8_t> bgra;
+          bool captured = ConsumePrecaptureSingleMonitor(&hmon, &mon, &bgra);
           int vw = static_cast<int>(mon.right - mon.left);
           int vh = static_cast<int>(mon.bottom - mon.top);
-          // Gene - Nov, 20, 2026: Offload full-screen WIC PNG encoding + file write off the Win32 platform thread after fast GDI BitBlt.
-          // Old implementation:
-          // std::vector<uint8_t> bgra;
-          // if (vw > 0 && vh > 0 && CaptureScreenRectBgra(vx, vy, vw, vh, &bgra) &&
-          //     SaveBgraToPngFile(bgra.data(), vw, vh, vw * 4,
-          //                       Utf8ToWide(target))) {
-          //   result->Success(EncodableValue(target));
-          // } else {
-          //   result->Success(EncodableValue());
-          // }
-          std::vector<uint8_t> bgra;
-          if (vw > 0 && vh > 0 && CaptureScreenRectBgra(vx, vy, vw, vh, &bgra)) {
+          if (!captured) {
+            POINT pt = {};
+            if (!::GetCursorPos(&pt)) {
+              pt.x = 0;
+              pt.y = 0;
+            }
+            hmon = ::MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO mi = {};
+            mi.cbSize = sizeof(mi);
+            if (hmon && ::GetMonitorInfoW(hmon, &mi)) {
+              mon = mi.rcMonitor;
+            } else {
+              mon = GetCursorMonitorScreenRect();
+            }
+            vw = static_cast<int>(mon.right - mon.left);
+            vh = static_cast<int>(mon.bottom - mon.top);
+            captured =
+                (vw > 0 && vh > 0 && CaptureSingleMonitorFast(hmon, mon, &bgra));
+          }
+          if (captured && vw > 0 && vh > 0 && !bgra.empty()) {
             std::shared_ptr<CaptureMethodResult> shared_res(result.release());
             std::wstring target_w = Utf8ToWide(target);
             std::thread([pixels = std::move(bgra), vw, vh, target, target_w,
                          shared_res]() mutable {
               HRESULT co_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-              bool did_init = SUCCEEDED(co_hr);
+              bool did_init = (co_hr == S_OK || co_hr == S_FALSE);
               bool ok = SaveBgraToPngFile(pixels.data(), vw, vh, vw * 4,
                                           target_w);
               if (did_init) {
@@ -4363,10 +5506,6 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
             result->Error("bad_args", "targetPath missing");
             return;
           }
-          // Gene - Nov, 13, 2026: Forward initial Snagit recording options to Win32 overlay.
-          // Old implementation:
-          // StartWin32InteractiveOverlay(Utf8ToWide(target), initial_mode,
-          //                              std::move(result));
           int initial_fps = static_cast<int>(get_double("initialFps", 60.0));
           bool initial_mic = get_bool("initialRecordMic", false);
           std::string initial_mic_id = get_str("initialMicDeviceId");
@@ -4381,16 +5520,52 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           return;
         }
 
+        // Gene - Nov, 24, 2026: Use DXGI fast capture and offload PNG encoding off the Win32 platform thread in captureRect.
+        // Old implementation:
+        // if (method == "captureRect") {
+        //   int rx = static_cast<int>(std::round(get_double("x")));
+        //   int ry = static_cast<int>(std::round(get_double("y")));
+        //   int rw = static_cast<int>(std::round(get_double("width")));
+        //   int rh = static_cast<int>(std::round(get_double("height")));
+        //   std::vector<uint8_t> bgra;
+        //   std::vector<uint8_t> png;
+        //   if (CaptureScreenRectBgra(rx, ry, rw, rh, &bgra) &&
+        //       EncodeBgraToPngBytes(bgra.data(), rw, rh, rw * 4, &png)) {
+        //     result->Success(EncodableValue(png));
+        //   } else {
+        //     result->Success(EncodableValue());
+        //   }
+        //   return;
+        // }
         if (method == "captureRect") {
           int rx = static_cast<int>(std::round(get_double("x")));
           int ry = static_cast<int>(std::round(get_double("y")));
           int rw = static_cast<int>(std::round(get_double("width")));
           int rh = static_cast<int>(std::round(get_double("height")));
           std::vector<uint8_t> bgra;
-          std::vector<uint8_t> png;
-          if (CaptureScreenRectBgra(rx, ry, rw, rh, &bgra) &&
-              EncodeBgraToPngBytes(bgra.data(), rw, rh, rw * 4, &png)) {
-            result->Success(EncodableValue(png));
+          if (rw > 0 && rh > 0 &&
+              CaptureRectFast(rx, ry, rw, rh, false, false, nullptr, &bgra)) {
+            std::shared_ptr<CaptureMethodResult> shared_res(std::move(result));
+            std::thread(
+                [pixels = std::move(bgra), rw, rh, shared_res]() mutable {
+                  HRESULT co_hr =
+                      ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                  bool did_init = (co_hr == S_OK || co_hr == S_FALSE);
+                  std::vector<uint8_t> png;
+                  bool ok = EncodeBgraToPngBytes(pixels.data(), rw, rh, rw * 4,
+                                                 &png);
+                  if (did_init) ::CoUninitialize();
+                  PostToPlatformThread(
+                      [shared_res, ok, png = std::move(png)]() mutable {
+                        if (!shared_res) return;
+                        if (ok && !png.empty()) {
+                          shared_res->Success(EncodableValue(png));
+                        } else {
+                          shared_res->Success(EncodableValue());
+                        }
+                      });
+                })
+                .detach();
           } else {
             result->Success(EncodableValue());
           }
@@ -4718,39 +5893,62 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           return;
         }
 
+        // Gene - Nov, 24, 2026: Offload clipboard encode/decode and file reads off the Win32 UI thread.
+        // Old implementation:
+        // if (method == "copyImageToClipboard") { ... CopyPngBytesToWin32Clipboard(...); ... }
+        // if (method == "pasteImageFromClipboard") { ... PasteWin32ClipboardToPngFile(...); ... }
         if (method == "copyImageToClipboard") {
+          std::vector<uint8_t> png_bytes;
+          bool has_bytes = false;
           if (args) {
             auto bytes_it = args->find(EncodableValue("bytes"));
             if (bytes_it != args->end()) {
               if (const auto* bytes =
                       std::get_if<std::vector<uint8_t>>(&bytes_it->second)) {
-                bool ok = CopyPngBytesToWin32Clipboard(bytes->data(),
-                                                       bytes->size());
-                result->Success(EncodableValue(ok));
-                return;
+                png_bytes = *bytes;
+                has_bytes = true;
               }
             }
           }
-          std::string file_path = get_str("filePath");
-          if (!file_path.empty()) {
-            HANDLE f = ::CreateFileW(Utf8ToWide(file_path).c_str(),
-                                     GENERIC_READ, FILE_SHARE_READ, nullptr,
-                                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
-                                     nullptr);
-            if (f != INVALID_HANDLE_VALUE) {
-              DWORD sz = ::GetFileSize(f, nullptr);
-              std::vector<uint8_t> buf(sz);
-              DWORD rd = 0;
-              BOOL read_ok = ::ReadFile(f, buf.data(), sz, &rd, nullptr);
-              ::CloseHandle(f);
-              if (read_ok && rd > 0) {
-                bool ok = CopyPngBytesToWin32Clipboard(buf.data(), rd);
-                result->Success(EncodableValue(ok));
-                return;
+          std::string file_path = has_bytes ? "" : get_str("filePath");
+          if (!has_bytes && file_path.empty()) {
+            result->Success(EncodableValue(false));
+            return;
+          }
+          std::shared_ptr<CaptureMethodResult> shared_res(std::move(result));
+          std::thread([has_bytes, png_bytes = std::move(png_bytes), file_path,
+                       shared_res]() mutable {
+            HRESULT co_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            bool did_init = (co_hr == S_OK || co_hr == S_FALSE);
+            bool ok = false;
+            if (has_bytes) {
+              ok = CopyPngBytesToWin32Clipboard(png_bytes.data(),
+                                                png_bytes.size());
+            } else {
+              HANDLE f = ::CreateFileW(Utf8ToWide(file_path).c_str(),
+                                       GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                       nullptr);
+              if (f != INVALID_HANDLE_VALUE) {
+                DWORD sz = ::GetFileSize(f, nullptr);
+                if (sz > 0 && sz != INVALID_FILE_SIZE) {
+                  std::vector<uint8_t> buf(sz);
+                  DWORD rd = 0;
+                  BOOL read_ok = ::ReadFile(f, buf.data(), sz, &rd, nullptr);
+                  ::CloseHandle(f);
+                  if (read_ok && rd > 0) {
+                    ok = CopyPngBytesToWin32Clipboard(buf.data(), rd);
+                  }
+                } else {
+                  ::CloseHandle(f);
+                }
               }
             }
-          }
-          result->Success(EncodableValue(false));
+            if (did_init) ::CoUninitialize();
+            PostToPlatformThread([shared_res, ok]() {
+              if (shared_res) shared_res->Success(EncodableValue(ok));
+            });
+          }).detach();
           return;
         }
 
@@ -4760,11 +5958,21 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
             result->Success(EncodableValue());
             return;
           }
-          if (PasteWin32ClipboardToPngFile(Utf8ToWide(target))) {
-            result->Success(EncodableValue(target));
-          } else {
-            result->Success(EncodableValue());
-          }
+          std::shared_ptr<CaptureMethodResult> shared_res(std::move(result));
+          std::thread([target, shared_res]() {
+            HRESULT co_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            bool did_init = (co_hr == S_OK || co_hr == S_FALSE);
+            bool ok = PasteWin32ClipboardToPngFile(Utf8ToWide(target));
+            if (did_init) ::CoUninitialize();
+            PostToPlatformThread([shared_res, ok, target]() {
+              if (!shared_res) return;
+              if (ok) {
+                shared_res->Success(EncodableValue(target));
+              } else {
+                shared_res->Success(EncodableValue());
+              }
+            });
+          }).detach();
           return;
         }
 
@@ -4861,8 +6069,16 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           return;
         }
 
+        // Gene - Nov, 24, 2026: Support restoreWindow flag in cancelScreenRecording and offload extractVideoFrame off the UI thread.
+        // Old implementation:
+        // if (method == "cancelScreenRecording") {
+        //   StopWinRecordingSession(true, std::move(result));
+        //   return;
+        // }
+        // if (method == "extractVideoFrame") { ... ExtractVideoFrameAtMs(...); ... }
         if (method == "cancelScreenRecording") {
-          StopWinRecordingSession(true, std::move(result));
+          bool restore_window = get_bool("restoreWindow", true);
+          StopWinRecordingSession(true, std::move(result), restore_window);
           return;
         }
 
@@ -4870,13 +6086,26 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           std::string video_path = get_str("videoPath");
           std::string target_path = get_str("targetPath");
           int64_t ts_ms = get_int64("timestampMs", 0);
-          bool ok = ExtractVideoFrameAtMs(Utf8ToWide(video_path), ts_ms,
-                                          Utf8ToWide(target_path));
-          if (ok) {
-            result->Success(EncodableValue(target_path));
-          } else {
+          if (video_path.empty() || target_path.empty()) {
             result->Success(EncodableValue());
+            return;
           }
+          std::shared_ptr<CaptureMethodResult> shared_res(std::move(result));
+          std::thread([video_path, target_path, ts_ms, shared_res]() {
+            HRESULT co_hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            bool did_init = (co_hr == S_OK || co_hr == S_FALSE);
+            bool ok = ExtractVideoFrameAtMs(Utf8ToWide(video_path), ts_ms,
+                                            Utf8ToWide(target_path));
+            if (did_init) ::CoUninitialize();
+            PostToPlatformThread([shared_res, ok, target_path]() {
+              if (!shared_res) return;
+              if (ok) {
+                shared_res->Success(EncodableValue(target_path));
+              } else {
+                shared_res->Success(EncodableValue());
+              }
+            });
+          }).detach();
           return;
         }
 
@@ -5042,30 +6271,41 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           return;
         }
 
+        // Gene - Nov, 24, 2026: Asynchronous createVideoPlayer/disposeVideoPlayer and explicit releaseVideoPlayersForPath before deleting video files on Windows.
+        // Old implementation:
+        // if (method == "createVideoPlayer") {
+        //   auto player = WinVideoTexturePlayer::Create(Utf8ToWide(video_path), tex_reg);
+        //   ...
+        // }
         if (method == "createVideoPlayer") {
           std::string video_path = get_str("videoPath");
           auto cur_gate = Gate();
           flutter::TextureRegistrar* tex_reg =
               cur_gate ? cur_gate->texture_registrar : nullptr;
-          auto player =
-              WinVideoTexturePlayer::Create(Utf8ToWide(video_path), tex_reg);
-          if (!player || player->texture_id < 0) {
-            result->Success(EncodableValue());
-            return;
-          }
-          {
-            std::lock_guard<std::mutex> lock(g_players_mutex);
-            g_video_players[player->texture_id] = player;
-          }
-          EncodableMap info;
-          info[EncodableValue("textureId")] =
-              EncodableValue(player->texture_id);
-          info[EncodableValue("durationMs")] =
-              EncodableValue(player->duration_ms);
-          info[EncodableValue("width")] = EncodableValue(player->width);
-          info[EncodableValue("height")] = EncodableValue(player->height);
-          info[EncodableValue("hasAudio")] = EncodableValue(player->has_audio);
-          result->Success(EncodableValue(info));
+          std::shared_ptr<CaptureMethodResult> shared_res(std::move(result));
+          WinVideoTexturePlayer::CreateAsync(
+              Utf8ToWide(video_path), tex_reg,
+              [shared_res](std::shared_ptr<WinVideoTexturePlayer> player) {
+                if (!shared_res) return;
+                if (!player || player->texture_id < 0) {
+                  shared_res->Success(EncodableValue());
+                  return;
+                }
+                {
+                  std::lock_guard<std::mutex> lock(g_players_mutex);
+                  g_video_players[player->texture_id] = player;
+                }
+                EncodableMap info;
+                info[EncodableValue("textureId")] =
+                    EncodableValue(player->texture_id);
+                info[EncodableValue("durationMs")] =
+                    EncodableValue(player->duration_ms);
+                info[EncodableValue("width")] = EncodableValue(player->width);
+                info[EncodableValue("height")] = EncodableValue(player->height);
+                info[EncodableValue("hasAudio")] =
+                    EncodableValue(player->has_audio);
+                shared_res->Success(EncodableValue(info));
+              });
           return;
         }
 
@@ -5151,6 +6391,13 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
           return;
         }
 
+        // Old implementation:
+        // if (method == "disposeVideoPlayer") {
+        //   ...
+        //   if (player) player->Dispose();
+        //   result->Success(EncodableValue());
+        //   return;
+        // }
         if (method == "disposeVideoPlayer") {
           int64_t tid = get_int64("textureId", -1);
           std::shared_ptr<WinVideoTexturePlayer> player;
@@ -5162,8 +6409,29 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
               g_video_players.erase(it);
             }
           }
-          if (player) player->Dispose();
-          result->Success(EncodableValue());
+          if (!player) {
+            result->Success(EncodableValue());
+            return;
+          }
+          std::shared_ptr<CaptureMethodResult> shared_res(std::move(result));
+          player->DisposeAsync([shared_res]() {
+            PostToPlatformThread([shared_res]() {
+              if (shared_res) shared_res->Success(EncodableValue());
+            });
+          });
+          return;
+        }
+
+        if (method == "releaseVideoPlayersForPath") {
+          std::string file_path = get_str("filePath");
+          if (file_path.empty()) {
+            result->Success(EncodableValue(false));
+            return;
+          }
+          std::shared_ptr<CaptureMethodResult> shared_res(std::move(result));
+          ReleaseVideoPlayersForPath(Utf8ToWide(file_path), [shared_res]() {
+            if (shared_res) shared_res->Success(EncodableValue(true));
+          });
           return;
         }
 
@@ -5188,37 +6456,93 @@ void RegisterCaptureHandler(flutter::FlutterEngine* engine) {
 //   gate->engine = nullptr;
 //   gate->channel.reset();
 // }
-void ShutdownCaptureHandler() {
-  {
-    std::vector<std::shared_ptr<WinVideoTexturePlayer>> to_dispose;
-    {
-      std::lock_guard<std::mutex> lock(g_players_mutex);
-      for (auto& kv : g_video_players) {
-        to_dispose.push_back(kv.second);
-      }
-      g_video_players.clear();
-    }
-    for (auto& p : to_dispose) {
-      if (p) p->Dispose();
-    }
+// Gene - Nov, 24, 2026: Handle native Win32 hotkeys, tray menu/restore, close-to-tray SC_CLOSE, shutdown notifications, and single-instance reactivation; clean up hotkeys, tray icon, and DXGI cache in ShutdownCaptureHandler.
+// Old implementation:
+// void ShutdownCaptureHandler() {
+//   ...
+//   auto gate = Gate();
+//   if (!gate) return;
+//   std::lock_guard<std::mutex> lock(gate->mutex);
+//   gate->engine = nullptr;
+//   gate->registrar = nullptr;
+//   gate->texture_registrar = nullptr;
+//   gate->channel.reset();
+// }
+bool HandleCaptureWindowMessage(HWND hwnd, UINT message, WPARAM wparam,
+                                LPARAM lparam, LRESULT* out_result) {
+  if (g_show_window_msg != 0 && message == g_show_window_msg) {
+    SetMainWindowVisible(true);
+    if (out_result) *out_result = 0;
+    return true;
   }
+
+  switch (message) {
+    case WM_HOTKEY: {
+      std::string action;
+      {
+        std::lock_guard<std::mutex> lock(g_hotkey_mutex);
+        auto it = g_native_hotkeys.find(static_cast<int>(wparam));
+        if (it != g_native_hotkeys.end()) {
+          action = it->second.action;
+        }
+      }
+      if (!action.empty()) {
+        if (!g_overlay_active.load() && !g_recorder.active.load()) {
+          CapturePrecaptureForAction(action);
+        }
+        EncodableMap args;
+        args[EncodableValue("action")] = EncodableValue(action);
+        InvokeDartMethod("onGlobalHotKey", EncodableValue(args));
+        if (out_result) *out_result = 0;
+        return true;
+      }
+      break;
+    }
+
+    case WM_SYSCOMMAND: {
+      if ((wparam & 0xFFF0) == SC_CLOSE && g_close_to_tray.load() &&
+          !g_force_quit.load() && g_tray_registered) {
+        ::ShowWindow(hwnd, SW_HIDE);
+        if (out_result) *out_result = 0;
+        return true;
+      }
+      break;
+    }
+
+    case WM_QUERYENDSESSION:
+    case WM_ENDSESSION:
+      g_force_quit.store(true);
+      break;
+
+    case WM_CLOSE:
+      RemoveTrayIcon();
+      break;
+
+    case kMsgTrayIcon: {
+      UINT tray_ev = LOWORD(lparam);
+      if (tray_ev == WM_LBUTTONUP || tray_ev == WM_LBUTTONDBLCLK) {
+        SetMainWindowVisible(true);
+      } else if (tray_ev == WM_RBUTTONUP || tray_ev == WM_CONTEXTMENU) {
+        ShowTrayContextMenu(hwnd);
+      }
+      if (out_result) *out_result = 0;
+      return true;
+    }
+
+    default:
+      break;
+  }
+  return false;
+}
+
+void ShutdownCaptureHandler() {
+  DestroyAllVideoPlayers();
   CloseInteractiveOverlay();
   // Gene - Nov, 20, 2026: Tear down active Windows scrolling capture engine before engine destruction.
   if (g_scrolling_engine) {
     g_scrolling_engine->Cancel();
     g_scrolling_engine.reset();
   }
-  // Gene - Nov, 13, 2026: Ensure both active and in-flight stopping recorder workers are safely joined under join_mutex on shutdown.
-  // Old implementation:
-  // if (g_recorder.active.load()) {
-  //   g_recorder.cancelled.store(true);
-  //   g_recorder.active.store(false);
-  //   g_recorder.countdown_remaining.store(0);
-  //   if (g_recorder.worker.joinable()) {
-  //     g_recorder.worker.join();
-  //   }
-  // }
-  // CloseRecordingHudWindow();
   if (g_recorder.active.load() || g_recorder.stopping.load()) {
     g_recorder.cancelled.store(true);
     g_recorder.active.store(false);
@@ -5231,6 +6555,11 @@ void ShutdownCaptureHandler() {
     }
     CloseRecordingHudWindow();
   }
+  UnregisterAllNativeHotKeys();
+  RemoveTrayIcon();
+  ResetDxgiCapture();
+  g_main_hwnd = nullptr;
+
   auto gate = Gate();
   if (!gate) return;
   std::lock_guard<std::mutex> lock(gate->mutex);

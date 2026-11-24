@@ -679,6 +679,8 @@ class _MainScreenState extends State<MainScreen> {
         _savedColors = parsedColors;
       }
     });
+    // Gene - Nov, 24, 2026: Sync Windows DWM titlebar dark/light theme on startup.
+    unawaited(_captureService.setWindowTheme(darkMode: _darkMode));
     unawaited(_registerGlobalHotKeys());
   }
 
@@ -794,6 +796,8 @@ class _MainScreenState extends State<MainScreen> {
       _darkMode = !_darkMode;
     });
     DatabaseService.setSetting('theme_mode', _darkMode ? 'dark' : 'light');
+    // Gene - Nov, 24, 2026: Sync Windows DWM titlebar when in-app dark/light theme toggles.
+    unawaited(_captureService.setWindowTheme(darkMode: _darkMode));
   }
 
   void _openAboutDialog() {
@@ -1959,9 +1963,17 @@ class _MainScreenState extends State<MainScreen> {
   //     await _addCaptureFromPath(path);
   //   }
   // }
+  // Gene - Nov, 24, 2026: Add _isCapturing re-entrancy guard, skip unnecessary audio device enumeration before still captures, and bring main window to foreground on Windows after capture completes.
+  // Old implementation:
+  // Future<void> _handleInteractiveCapture() async {
+  //   if (!await _ensureCapturePermission()) return;
+  //   unawaited(_recordingController.refreshAudioDevices());
+  //   ...
+  //   await _addCaptureFromPath(path);
+  // }
   Future<void> _handleInteractiveCapture() async {
+    if (_isCapturing) return;
     if (!await _ensureCapturePermission()) return;
-    unawaited(_recordingController.refreshAudioDevices());
     setState(() => _isCapturing = true);
     final path = await _captureService.captureInteractive(
       initialFps: _recordingController.fps,
@@ -1973,12 +1985,6 @@ class _MainScreenState extends State<MainScreen> {
     );
     setState(() => _isCapturing = false);
     if (path != null) {
-      // Gene - Nov, 20, 2026: Route "scrolling:x:y:w:h" selection overlay results directly to native/fallback scrolling capture.
-      // Old implementation:
-      // if (path.startsWith('scrolling:')) {
-      //   // Panoramic capture switched off for beta testing.
-      //   return;
-      // }
       if (path.startsWith('scrolling:')) {
         final parts = path.substring('scrolling:'.length).split(':');
         if (parts.length == 4) {
@@ -2003,6 +2009,9 @@ class _MainScreenState extends State<MainScreen> {
         return;
       }
       await _addCaptureFromPath(path);
+      if (Platform.isWindows) {
+        unawaited(_captureService.setMainWindowVisible(true));
+      }
     }
   }
 
@@ -2137,13 +2146,16 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  // Gene - Nov, 24, 2026: Guard against overlapping captures and avoid blocking recording overlay launch on audio device enumeration.
   Future<void> _handleRecordArea() async {
     if (_recordingController.isRecording) {
       await _recordingController.stopRecording();
       return;
     }
+    if (_isCapturing) return;
     if (!await _ensureCapturePermission()) return;
-    await _recordingController.refreshAudioDevices();
+    // unawaited(_recordingController.refreshAudioDevices()); replaces blocking await _recordingController.refreshAudioDevices();
+    unawaited(_recordingController.refreshAudioDevices());
     await _captureService.setMainWindowVisible(false);
     // Gene - Nov, 13, 2026: Use minimal 30ms DWM settle on Windows where ShowWindow(SW_HIDE) is synchronous, keeping 120ms on macOS for WindowServer hide animation.
     // await Future<void>.delayed(const Duration(milliseconds: 120));
@@ -2173,11 +2185,13 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  // Gene - Nov, 24, 2026: Guard against overlapping captures in _handleRecordFullScreen.
   Future<void> _handleRecordFullScreen() async {
     if (_recordingController.isRecording) {
       await _recordingController.stopRecording();
       return;
     }
+    if (_isCapturing) return;
     if (!await _ensureCapturePermission()) return;
     if (_recordingController.recordMicrophone) {
       final hasMic = await _captureService.hasMicrophonePermission();
@@ -2652,13 +2666,28 @@ class _MainScreenState extends State<MainScreen> {
     _showToast('Renamed to "$trimmed"');
   }
 
+  // Gene - Nov, 24, 2026: Guard against overlapping captures and surface main window on Windows after full-screen capture completes.
+  // Old implementation:
+  // Future<void> _handleFullScreenCapture() async {
+  //   if (!await _ensureCapturePermission()) return;
+  //   setState(() => _isCapturing = true);
+  //   final path = await _captureService.captureFullScreen();
+  //   setState(() => _isCapturing = false);
+  //   if (path != null) {
+  //     await _addCaptureFromPath(path);
+  //   }
+  // }
   Future<void> _handleFullScreenCapture() async {
+    if (_isCapturing) return;
     if (!await _ensureCapturePermission()) return;
     setState(() => _isCapturing = true);
     final path = await _captureService.captureFullScreen();
     setState(() => _isCapturing = false);
     if (path != null) {
       await _addCaptureFromPath(path);
+      if (Platform.isWindows) {
+        unawaited(_captureService.setMainWindowVisible(true));
+      }
     }
   }
 
@@ -2817,6 +2846,8 @@ class _MainScreenState extends State<MainScreen> {
     Rect? initialRect,
     ScrollingCaptureController? customController,
   ]) async {
+    // Gene - Nov, 24, 2026: Guard re-entrant capture and pass initialMode: 'scrolling' so overlay defaults to Start Scroll + surfaces main window on Windows.
+    if (_isCapturing) return;
     if (!await _ensureCapturePermission()) return;
     if (!mounted) return;
 
@@ -2824,6 +2855,7 @@ class _MainScreenState extends State<MainScreen> {
     if (region == null) {
       setState(() => _isCapturing = true);
       final overlayResult = await _captureService.captureInteractive(
+        initialMode: 'scrolling',
         initialFps: _recordingController.fps,
         initialRecordMic: _recordingController.recordMicrophone,
         initialMicDeviceId: _recordingController.selectedMicrophoneId,
@@ -2856,6 +2888,9 @@ class _MainScreenState extends State<MainScreen> {
         return;
       } else {
         await _addCaptureFromPath(overlayResult);
+        if (Platform.isWindows) {
+          unawaited(_captureService.setMainWindowVisible(true));
+        }
         return;
       }
     }
@@ -4462,6 +4497,12 @@ class _MainScreenState extends State<MainScreen> {
                           });
                         }
                         try {
+                          // Gene - Nov, 24, 2026: Release open Windows Media Foundation player file handles before deleting MP4 captures.
+                          if (Platform.isWindows && item.isVideo) {
+                            await _captureService.releaseVideoPlayersForPath(
+                              item.filePath,
+                            );
+                          }
                           final file = File(item.filePath);
                           if (file.existsSync()) {
                             await file.delete();

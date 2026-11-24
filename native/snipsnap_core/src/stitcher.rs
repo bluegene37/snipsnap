@@ -525,15 +525,34 @@ fn bgra_luma(px: &[u8]) -> i32 {
     ((29 * px[0] as i32) + (150 * px[1] as i32) + (77 * px[2] as i32)) >> 8
 }
 
+// Gene - Nov, 24, 2026: Force opaque 0xFF alpha while packing BGRA frames so GDI grabs with 0x00 alpha never produce transparent stitched PNGs.
+// Old implementation:
+// fn pack_bgra(bgra: &[u8], width: usize, height: usize, stride: usize) -> Vec<u8> {
+//     let row_bytes = width * 4;
+//     if stride == row_bytes {
+//         return bgra[..height * row_bytes].to_vec();
+//     }
+//     let mut out = Vec::with_capacity(height * row_bytes);
+//     for y in 0..height {
+//         let s = y * stride;
+//         out.extend_from_slice(&bgra[s..s + row_bytes]);
+//     }
+//     out
+// }
 fn pack_bgra(bgra: &[u8], width: usize, height: usize, stride: usize) -> Vec<u8> {
     let row_bytes = width * 4;
-    if stride == row_bytes {
-        return bgra[..height * row_bytes].to_vec();
-    }
-    let mut out = Vec::with_capacity(height * row_bytes);
-    for y in 0..height {
-        let s = y * stride;
-        out.extend_from_slice(&bgra[s..s + row_bytes]);
+    let mut out = if stride == row_bytes {
+        bgra[..height * row_bytes].to_vec()
+    } else {
+        let mut buf = Vec::with_capacity(height * row_bytes);
+        for y in 0..height {
+            let s = y * stride;
+            buf.extend_from_slice(&bgra[s..s + row_bytes]);
+        }
+        buf
+    };
+    for px in out.chunks_exact_mut(4) {
+        px[3] = 0xFF;
     }
     out
 }

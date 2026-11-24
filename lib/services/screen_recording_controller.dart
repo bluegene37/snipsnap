@@ -368,7 +368,9 @@ class ScreenRecordingController extends ChangeNotifier {
     final region = _activeRegion;
     _uiTimer?.cancel();
     _uiTimer = null;
-    await captureService.cancelScreenRecording();
+    // Gene - Nov, 24, 2026: Pass restoreWindow: false when cancelling to restart so main window does not flash open mid-restart.
+    // await captureService.cancelScreenRecording();
+    await captureService.cancelScreenRecording(restoreWindow: false);
     _resetToIdle();
     // Gene - Nov, 13, 2026: Preserve secondary-monitor displayRegion when restarting a full-screen recording.
     // Old implementation:

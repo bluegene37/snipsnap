@@ -3,6 +3,9 @@
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
+// Gene - Nov, 24, 2026: Added <algorithm> for clamping initial window bounds to monitor work area.
+#include <algorithm>
+
 #include "resource.h"
 
 namespace {
@@ -134,10 +137,37 @@ bool Win32Window::Create(const std::wstring& title,
   UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
   double scale_factor = dpi / 96.0;
 
+  // Gene - Nov, 24, 2026: Clamp DPI-scaled initial window size to monitor work area and center it so 1080p @ 150%+ DPI screens never overflow.
+  // Old implementation:
+  // HWND window = CreateWindow(
+  //     window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
+  //     Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
+  //     Scale(size.width, scale_factor), Scale(size.height, scale_factor),
+  //     nullptr, nullptr, GetModuleHandle(nullptr), this);
+  int target_w = Scale(size.width, scale_factor);
+  int target_h = Scale(size.height, scale_factor);
+  int target_x = Scale(origin.x, scale_factor);
+  int target_y = Scale(origin.y, scale_factor);
+  MONITORINFO mi = {};
+  mi.cbSize = sizeof(mi);
+  if (monitor && ::GetMonitorInfoW(monitor, &mi)) {
+    int work_w = static_cast<int>(mi.rcWork.right - mi.rcWork.left);
+    int work_h = static_cast<int>(mi.rcWork.bottom - mi.rcWork.top);
+    int max_w = std::max(320, work_w - 24);
+    int max_h = std::max(240, work_h - 24);
+    int min_w = std::min(max_w, Scale(800, scale_factor));
+    int min_h = std::min(max_h, Scale(560, scale_factor));
+    target_w = std::clamp(target_w, min_w, max_w);
+    target_h = std::clamp(target_h, min_h, max_h);
+    target_x =
+        static_cast<int>(mi.rcWork.left) + std::max(0, (work_w - target_w) / 2);
+    target_y =
+        static_cast<int>(mi.rcWork.top) + std::max(0, (work_h - target_h) / 2);
+  }
+
   HWND window = CreateWindow(
       window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
-      Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
-      Scale(size.width, scale_factor), Scale(size.height, scale_factor),
+      target_x, target_y, target_w, target_h,
       nullptr, nullptr, GetModuleHandle(nullptr), this);
 
   if (!window) {

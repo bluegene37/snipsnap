@@ -167,11 +167,28 @@ class CaptureService {
   //   }
   //   return snapDir;
   // }
+  // Gene - Nov, 24, 2026: Cached storage path and test override hook for Windows-specific native channel paths.
+  @visibleForTesting
+  static bool? debugIsWindowsOverride;
+
+  static bool get _isWindows => debugIsWindowsOverride ?? Platform.isWindows;
+
   Directory? _cachedStorageDir;
 
+  void invalidateStorageDirCache() {
+    _cachedStorageDir = null;
+  }
+
+  // Gene - Nov, 24, 2026: Return cached storage directory without a synchronous existence disk stat on hotkey capture.
+  // Old implementation:
+  // Future<Directory> getStorageDirectory() async {
+  //   final cached = _cachedStorageDir;
+  //   if (cached != null && await cached.exists()) {
+  //     return cached;
+  //   }
   Future<Directory> getStorageDirectory() async {
     final cached = _cachedStorageDir;
-    if (cached != null && await cached.exists()) {
+    if (cached != null) {
       return cached;
     }
     final docsDir = await getApplicationDocumentsDirectory();
@@ -686,7 +703,16 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
   // Gene - Nov, 13, 2026: Added native restart recording callback, audio mute state sync, and 60fps FlutterTexture video player listener registry.
   VoidCallback? _onRecordingRestartRequested;
   ValueChanged<bool>? _onRecordingMicMutedChanged;
+  // Gene - Nov, 24, 2026: Native Win32 WM_HOTKEY and tray menu trigger callback.
+  void Function(String action)? _onGlobalHotKey;
   final Map<int, VideoPlayerListener> _videoPlayerListeners = {};
+
+  void setGlobalHotKeyCallback(void Function(String action)? callback) {
+    _onGlobalHotKey = callback;
+    if (callback != null) {
+      _channel.setMethodCallHandler(_handleNativeMethodCall);
+    }
+  }
 
   // Old implementation:
   // void setScrollingCallbacks({VoidCallback? onDone, VoidCallback? onCancel}) {
@@ -797,6 +823,14 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
         if (call.arguments is Map) {
           final isPaused = (call.arguments as Map)['isPaused'] == true;
           _onRecordingStateChanged?.call(isPaused);
+        }
+      // Gene - Nov, 24, 2026: Dispatch native Windows WM_HOTKEY / tray actions directly to ShortcutService listener.
+      case 'onGlobalHotKey':
+        if (call.arguments is Map) {
+          final action = (call.arguments as Map)['action'] as String?;
+          if (action != null && action.isNotEmpty) {
+            _onGlobalHotKey?.call(action);
+          }
         }
       case 'onVideoPlayerProgress':
         if (call.arguments is Map) {
@@ -990,12 +1024,90 @@ Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool 
     return null;
   }
 
-  Future<void> cancelScreenRecording() async {
+  // Gene - Nov, 24, 2026: Forward restoreWindow flag so restartRecording does not pop the main window open mid-restart; add Windows hotkey, theme, Desktop folder, tray, and video-handle release helpers.
+  // Old implementation:
+  // Future<void> cancelScreenRecording() async {
+  //   try {
+  //     await _channel.invokeMethod<void>('cancelScreenRecording');
+  //   } catch (e) {
+  //     debugPrint('SnipSnap cancelScreenRecording error: $e');
+  //   }
+  // }
+  Future<void> cancelScreenRecording({bool restoreWindow = true}) async {
     try {
-      await _channel.invokeMethod<void>('cancelScreenRecording');
+      await _channel.invokeMethod<void>('cancelScreenRecording', {
+        'restoreWindow': restoreWindow,
+      });
     } catch (e) {
       debugPrint('SnipSnap cancelScreenRecording error: $e');
     }
+  }
+
+  Future<void> releaseVideoPlayersForPath(String filePath) async {
+    if (!_isWindows || filePath.isEmpty) return;
+    try {
+      await _channel.invokeMethod<void>('releaseVideoPlayersForPath', {
+        'filePath': filePath,
+      });
+    } on MissingPluginException {
+      // Ignore in headless tests without platform plugin.
+    } catch (e) {
+      debugPrint('SnipSnap releaseVideoPlayersForPath error: $e');
+    }
+  }
+
+  Future<void> setWindowTheme({required bool darkMode}) async {
+    if (!_isWindows) return;
+    try {
+      await _channel.invokeMethod<void>('setWindowTheme', {
+        'darkMode': darkMode,
+      });
+    } on MissingPluginException {
+      // Ignore in headless tests without platform plugin.
+    } catch (e) {
+      debugPrint('SnipSnap setWindowTheme error: $e');
+    }
+  }
+
+  Future<String?> getKnownDesktopPath() async {
+    if (!_isWindows) return null;
+    try {
+      final path = await _channel.invokeMethod<String?>('getKnownDesktopPath');
+      if (path != null && path.isNotEmpty) {
+        return path;
+      }
+    } on MissingPluginException {
+      return null;
+    } catch (e) {
+      debugPrint('SnipSnap getKnownDesktopPath error: $e');
+    }
+    return null;
+  }
+
+  Future<void> setCloseToTray(bool enabled) async {
+    if (!_isWindows) return;
+    try {
+      await _channel.invokeMethod<void>('setCloseToTray', {'enabled': enabled});
+    } on MissingPluginException {
+      // Ignore in headless tests without platform plugin.
+    } catch (e) {
+      debugPrint('SnipSnap setCloseToTray error: $e');
+    }
+  }
+
+  Future<List<String>> registerWindowsHotKeys(
+    List<Map<String, Object>> entries,
+  ) async {
+    final res = await _channel.invokeMethod<List<dynamic>>(
+      'registerWindowsHotKeys',
+      {'entries': entries},
+    );
+    if (res == null) return const [];
+    return res.whereType<String>().toList();
+  }
+
+  Future<void> unregisterWindowsHotKeys() async {
+    await _channel.invokeMethod<void>('unregisterWindowsHotKeys');
   }
 
   Future<String?> extractVideoFrame({

@@ -1,4 +1,6 @@
 // Gene - Nov, 20, 2026: SnipSnap Rust native core crate entrypoint & comprehensive unit + benchmark test suite.
+// Gene - Nov, 24, 2026: Exported capture_ops module for cross-platform capture pixel ops, DIB decoding, click ring compositing, and PCM resampling.
+pub mod capture_ops;
 pub mod ffi;
 pub mod image_ops;
 pub mod stitcher;
@@ -8,11 +10,13 @@ mod tests {
     use std::time::Instant;
 
     use crate::ffi::{
-        snipsnap_box_blur_region_rgba, snipsnap_buffer_free, snipsnap_composite_rgba,
-        snipsnap_crop_rgba, snipsnap_erase_rect_rgba, snipsnap_flood_fill_rgba,
-        snipsnap_pixelate_region_rgba, snipsnap_resize_rgba, snipsnap_stitcher_assemble_bgra,
-        snipsnap_stitcher_create, snipsnap_stitcher_free, snipsnap_stitcher_get_preview_bgra,
-        snipsnap_stitcher_push_bgra, SnipSnapImageBuffer,
+        snipsnap_bgra_to_bottom_up_bgrx, snipsnap_bgra_to_rgba_top_down,
+        snipsnap_box_blur_region_rgba, snipsnap_buffer_free, snipsnap_composite_click_ring_bgra,
+        snipsnap_composite_rgba, snipsnap_crop_rgba, snipsnap_decode_dib_to_bgra,
+        snipsnap_dim_bgra, snipsnap_erase_rect_rgba, snipsnap_flood_fill_rgba,
+        snipsnap_pcm_to_f32_stereo_48k, snipsnap_pixelate_region_rgba, snipsnap_resize_rgba,
+        snipsnap_stitcher_assemble_bgra, snipsnap_stitcher_create, snipsnap_stitcher_free,
+        snipsnap_stitcher_get_preview_bgra, snipsnap_stitcher_push_bgra, SnipSnapImageBuffer,
     };
     use crate::image_ops::{flood_fill_rgba, RgbaColor};
     use crate::stitcher::{ScrollAxis, ScrollStitcher, StitchStatus};
@@ -557,5 +561,184 @@ mod tests {
         assert!(snipsnap_box_blur_region_rgba(img_4k.as_mut_ptr(), 3840, 2160, 0, 0, 800, 600, 12));
         let blur_ms = t0.elapsed().as_secs_f64() * 1000.0;
         println!("800x600 3-pass Rust box blur in 4K image: {blur_ms:.3} ms");
+    }
+
+    // Gene - Nov, 24, 2026: Added tests for pack_bgra alpha normalization, dim_bgra, BGRX/RGBA conversion, CF_DIB parser, click rings, and WASAPI PCM resampling.
+    #[test]
+    fn gdi_zero_alpha_frames_stitch_to_opaque_alpha() {
+        let w = 240;
+        let h = 160;
+        let mut doc = make_synthetic_doc(w, 320);
+        for px in doc.chunks_exact_mut(4) {
+            px[3] = 0x00;
+        }
+        let mut stitcher = ScrollStitcher::new(w, h, 16000, ScrollAxis::Vertical);
+        let f1 = crop_window(&doc, w, 0, 0, w, h);
+        let f2 = crop_window(&doc, w, 0, 64, w, h);
+        assert_eq!(stitcher.push_bgra(&f1, w, h, w * 4).status, StitchStatus::Ok as i32);
+        assert_eq!(stitcher.push_bgra(&f2, w, h, w * 4).status, StitchStatus::Ok as i32);
+
+        let (assembled, aw, ah) = stitcher.assemble_bgra().expect("assemble");
+        assert_eq!(aw, w);
+        assert_eq!(ah, h + 64);
+        assert!(assembled.chunks_exact(4).all(|px| px[3] == 0xFF));
+    }
+
+    #[test]
+    fn dim_and_pixel_layout_conversions_work_and_are_fast() {
+        let src = vec![200u8, 100, 50, 0, 128, 64, 32, 0];
+        let mut dimmed = vec![0u8; 8];
+        assert!(snipsnap_dim_bgra(src.as_ptr(), dimmed.as_mut_ptr(), 2, 1, 8, 8, 128));
+        assert_eq!(&dimmed[0..4], &[100, 50, 25, 255]);
+        assert_eq!(&dimmed[4..8], &[64, 32, 16, 255]);
+
+        // 2x2 top-down BGRA -> bottom-up BGRX
+        let src2 = vec![
+            10, 20, 30, 0, 40, 50, 60, 0, // row 0
+            70, 80, 90, 0, 100, 110, 120, 0, // row 1
+        ];
+        let mut bu_bgrx = vec![0u8; 16];
+        assert!(snipsnap_bgra_to_bottom_up_bgrx(src2.as_ptr(), 2, 2, 8, bu_bgrx.as_mut_ptr(), 8));
+        assert_eq!(&bu_bgrx[0..4], &[70, 80, 90, 255]);
+        assert_eq!(&bu_bgrx[8..12], &[10, 20, 30, 255]);
+
+        // Flip vertical bottom-up BGRA -> top-down RGBA
+        let mut td_rgba = vec![0u8; 16];
+        assert!(snipsnap_bgra_to_rgba_top_down(bu_bgrx.as_ptr(), 2, 2, 8, true, td_rgba.as_mut_ptr()));
+        assert_eq!(&td_rgba[0..4], &[30, 20, 10, 255]);
+        assert_eq!(&td_rgba[8..12], &[90, 80, 70, 255]);
+
+        // 4K dim benchmark
+        let src_4k = vec![180u8; 3840 * 2160 * 4];
+        let mut dst_4k = vec![0u8; 3840 * 2160 * 4];
+        let t0 = Instant::now();
+        assert!(snipsnap_dim_bgra(
+            src_4k.as_ptr(),
+            dst_4k.as_mut_ptr(),
+            3840,
+            2160,
+            3840 * 4,
+            3840 * 4,
+            160
+        ));
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        println!("4K BGRA dim in Rust: {ms:.3} ms");
+    }
+
+    #[test]
+    fn decode_dib_handles_24bpp_32bpp_bgrx_v5_bitfields_and_bounds() {
+        // 1. 24-bpp bottom-up 2x2 DIB (stride = (2*24+31)/32*4 = 8 bytes, 2 bytes padding per row)
+        let mut dib24 = vec![0u8; 40 + 16];
+        dib24[0..4].copy_from_slice(&40u32.to_le_bytes());
+        dib24[4..8].copy_from_slice(&2i32.to_le_bytes());
+        dib24[8..12].copy_from_slice(&2i32.to_le_bytes()); // bottom-up
+        dib24[12..14].copy_from_slice(&1u16.to_le_bytes());
+        dib24[14..16].copy_from_slice(&24u16.to_le_bytes());
+        // bottom row (row 1 in top-down)
+        dib24[40..46].copy_from_slice(&[1, 2, 3, 4, 5, 6]);
+        // top row (row 0 in top-down)
+        dib24[48..54].copy_from_slice(&[10, 20, 30, 40, 50, 60]);
+
+        let mut out = SnipSnapImageBuffer {
+            data: std::ptr::null_mut(),
+            width: 0,
+            height: 0,
+            stride: 0,
+            len: 0,
+        };
+        assert!(snipsnap_decode_dib_to_bgra(dib24.as_ptr(), dib24.len(), &mut out));
+        assert_eq!(out.width, 2);
+        assert_eq!(out.height, 2);
+        let decoded24 = unsafe { std::slice::from_raw_parts(out.data, out.len) };
+        assert_eq!(&decoded24[0..4], &[10, 20, 30, 255]);
+        assert_eq!(&decoded24[8..12], &[1, 2, 3, 255]);
+        snipsnap_buffer_free(&mut out);
+
+        // 2. 32-bpp BGRX top-down BITMAPV5HEADER (124 bytes) with BI_BITFIELDS and all-zero alpha
+        let mut dibv5 = vec![0u8; 124 + 8];
+        dibv5[0..4].copy_from_slice(&124u32.to_le_bytes());
+        dibv5[4..8].copy_from_slice(&2i32.to_le_bytes());
+        dibv5[8..12].copy_from_slice(&(-1i32).to_le_bytes()); // top-down
+        dibv5[12..14].copy_from_slice(&1u16.to_le_bytes());
+        dibv5[14..16].copy_from_slice(&32u16.to_le_bytes());
+        dibv5[16..20].copy_from_slice(&3u32.to_le_bytes()); // BI_BITFIELDS
+        dibv5[40..44].copy_from_slice(&0x00FF_0000u32.to_le_bytes());
+        dibv5[44..48].copy_from_slice(&0x0000_FF00u32.to_le_bytes());
+        dibv5[48..52].copy_from_slice(&0x0000_00FFu32.to_le_bytes());
+        dibv5[52..56].copy_from_slice(&0xFF00_0000u32.to_le_bytes());
+        dibv5[124..132].copy_from_slice(&[11, 22, 33, 0, 44, 55, 66, 0]);
+        assert!(snipsnap_decode_dib_to_bgra(dibv5.as_ptr(), dibv5.len(), &mut out));
+        let decoded32 = unsafe { std::slice::from_raw_parts(out.data, out.len) };
+        // All-zero alpha must be promoted to 0xFF so pasted Paint/Chrome images aren't invisible!
+        assert_eq!(&decoded32[0..8], &[11, 22, 33, 255, 44, 55, 66, 255]);
+        snipsnap_buffer_free(&mut out);
+
+        // 3. Truncated payload safely rejected
+        assert!(!snipsnap_decode_dib_to_bgra(dibv5.as_ptr(), dibv5.len() - 1, &mut out));
+    }
+
+    #[test]
+    fn click_ring_uses_exact_bgra_channel_order() {
+        let w = 64i32;
+        let h = 64i32;
+        let mut bgra = vec![0u8; (w * h * 4) as usize];
+        // At progress = 0.0, radius = 8.0; pixel at (32 + 8, 32) = (40, 32) hits peak coverage
+        assert!(snipsnap_composite_click_ring_bgra(
+            bgra.as_mut_ptr(),
+            w,
+            h,
+            w * 4,
+            32,
+            32,
+            0.0,
+            false
+        ));
+        let idx = ((32 * w + 40) * 4) as usize;
+        // Left click is cyan/sky-blue (B > G > R)
+        assert!(bgra[idx] > bgra[idx + 1] && bgra[idx + 1] > bgra[idx + 2]);
+        assert_eq!(bgra[idx + 3], 255);
+
+        let mut bgra_r = vec![0u8; (w * h * 4) as usize];
+        assert!(snipsnap_composite_click_ring_bgra(
+            bgra_r.as_mut_ptr(),
+            w,
+            h,
+            w * 4,
+            32,
+            32,
+            0.0,
+            true
+        ));
+        // Right click is warm gold (R > G > B)
+        assert!(bgra_r[idx + 2] > bgra_r[idx + 1] && bgra_r[idx + 1] > bgra_r[idx]);
+    }
+
+    #[test]
+    fn pcm_resampler_supports_24bit_mono_and_44100_to_48000() {
+        // 24-bit signed mono at 44.1kHz: two samples (+0.5 ~= 4194304 = 0x400000)
+        let mut src = Vec::new();
+        for _ in 0..441 {
+            src.extend_from_slice(&[0x00, 0x00, 0x40]);
+        }
+        let mut phase = 0.0f64;
+        let mut out = vec![0.0f32; 2048];
+        let mut written = 0usize;
+        assert!(snipsnap_pcm_to_f32_stereo_48k(
+            src.as_ptr(),
+            src.len(),
+            441,
+            1,
+            24,
+            false,
+            44100,
+            &mut phase,
+            out.as_mut_ptr(),
+            out.len(),
+            &mut written
+        ));
+        // 441 frames @ 44.1kHz -> ~480 stereo frames (960 floats)
+        assert!((956..=964).contains(&written), "unexpected written floats: {written}");
+        assert!((out[0] - 0.5).abs() < 0.01);
+        assert!((out[1] - 0.5).abs() < 0.01);
     }
 }

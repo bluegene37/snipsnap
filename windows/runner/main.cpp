@@ -24,6 +24,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // blocking WinRT work on its own multi-threaded worker instead.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+  // Gene - Nov, 24, 2026: Enforce single-instance process guard and bring an already-running SnipSnap window to foreground on relaunch.
+  HANDLE single_instance_mutex = ::CreateMutexW(
+      nullptr, TRUE, L"Local\\dev.genexis.snipsnap.SingleInstance");
+  if (single_instance_mutex != nullptr &&
+      ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    HWND existing = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"SnipSnap");
+    if (existing != nullptr) {
+      DWORD existing_pid = 0;
+      ::GetWindowThreadProcessId(existing, &existing_pid);
+      if (existing_pid != 0) {
+        ::AllowSetForegroundWindow(existing_pid);
+      }
+      UINT show_msg =
+          ::RegisterWindowMessageW(L"dev.genexis.snipsnap.ShowWindow");
+      if (show_msg != 0) {
+        ::PostMessageW(existing, show_msg, 0, 0);
+      }
+    }
+    ::CloseHandle(single_instance_mutex);
+    ::CoUninitialize();
+    return EXIT_SUCCESS;
+  }
+
   // The Windows counterpart to the macOS bundle identifier. Shell features that
   // need a stable app identity - taskbar grouping and pinning, jump lists, toast
   // notifications - key off this rather than the executable path, and the
@@ -53,6 +76,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
+  // Gene - Nov, 24, 2026: Release single-instance mutex handle on clean exit.
+  if (single_instance_mutex != nullptr) {
+    ::CloseHandle(single_instance_mutex);
+  }
   ::CoUninitialize();
   return EXIT_SUCCESS;
 }

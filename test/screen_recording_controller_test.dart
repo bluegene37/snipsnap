@@ -116,9 +116,17 @@ class _FakeRecordingCaptureService extends CaptureService {
   @override
   Future<Map<String, dynamic>?> stopScreenRecording() async => stopResult;
 
+  bool? lastRestoreWindow;
+
+  // Gene - Nov, 24, 2026: Match CaptureService.cancelScreenRecording({bool restoreWindow = true}) signature and record restoreWindow flag.
+  // @override
+  // Future<void> cancelScreenRecording() async {
+  //   cancelCalls++;
+  // }
   @override
-  Future<void> cancelScreenRecording() async {
+  Future<void> cancelScreenRecording({bool restoreWindow = true}) async {
     cancelCalls++;
+    lastRestoreWindow = restoreWindow;
   }
 }
 

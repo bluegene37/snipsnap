@@ -24,6 +24,14 @@ Uint8List _transcodeToJpg(({Uint8List bytes, int quality}) req) {
 }
 
 class StorageService {
+  // Gene - Nov, 24, 2026: Optional test override hook for FilePicker.saveFile.
+  @visibleForTesting
+  static Future<Uri?> Function({
+    required String fileName,
+    required Uint8List bytes,
+    String? dialogTitle,
+  })?
+  debugSaveFileOverride;
   // Gene - Oct, 22, 2026: Added isPdf flag to handle saving .pdf format captures.
   /*
   /// Save image bytes with specific format (.png or .jpg) to user selected location
@@ -122,10 +130,21 @@ class StorageService {
         if (customFolderPath == 'downloads') {
           targetDir = await getDownloadsDirectory();
         } else if (customFolderPath == 'desktop') {
-          final home =
-              Platform.environment['HOME'] ??
-              Platform.environment['USERPROFILE'];
-          if (home != null) targetDir = Directory(p.join(home, 'Desktop'));
+          // Gene - Nov, 24, 2026: Resolve Windows redirected Desktop (e.g. OneDrive) via FOLDERID_Desktop before USERPROFILE\Desktop fallback.
+          // Old implementation:
+          // final home =
+          //     Platform.environment['HOME'] ??
+          //     Platform.environment['USERPROFILE'];
+          // if (home != null) targetDir = Directory(p.join(home, 'Desktop'));
+          final knownDesktop = await CaptureService().getKnownDesktopPath();
+          if (knownDesktop != null && knownDesktop.isNotEmpty) {
+            targetDir = Directory(knownDesktop);
+          } else {
+            final home =
+                Platform.environment['HOME'] ??
+                Platform.environment['USERPROFILE'];
+            if (home != null) targetDir = Directory(p.join(home, 'Desktop'));
+          }
         } else if (customFolderPath == 'documents') {
           targetDir = await getApplicationDocumentsDirectory();
         } else {
@@ -143,56 +162,81 @@ class StorageService {
       }
     }
 
-    // 1. Try native save file dialog with target filename
+    // Gene - Nov, 24, 2026: Only fall back to folder picker / Downloads when FilePicker.saveFile throws an exception, so user Cancel returns null cleanly without silently writing a file.
+    // Old implementation:
+    // // 1. Try native save file dialog with target filename
+    // try {
+    //   final savedUri = await FilePicker.saveFile(
+    //     dialogTitle: 'Save Screenshot As',
+    //     fileName: targetFileName,
+    //     bytes: Uint8List.fromList(bytesToSave),
+    //   );
+    //   if (savedUri != null) {
+    //     final finalPath = savedUri.toFilePath();
+    //     return finalPath;
+    //   }
+    // } catch (e) {
+    //   debugPrint('SnipSnap FilePicker.saveFile primary error: $e');
+    // }
+    // // 2. Secondary fallback: ...
+    // // 3. Ultimate Fallback: ...
     try {
       // Gene - Oct, 27, 2026: Removed deprecated 'type' argument from FilePicker.saveFile as it has no effect in file_picker 13+.
-      // Old implementation:
+      // Gene - Nov, 24, 2026: Allow unit tests to intercept saveFile cleanly without importing transitive platform_interface.
       // final savedUri = await FilePicker.saveFile(
       //   dialogTitle: 'Save Screenshot As',
       //   fileName: targetFileName,
-      //   type: FileType.any,
       //   bytes: Uint8List.fromList(bytesToSave),
       // );
-      final savedUri = await FilePicker.saveFile(
-        dialogTitle: 'Save Screenshot As',
-        fileName: targetFileName,
-        bytes: Uint8List.fromList(bytesToSave),
-      );
+      final rawBytes = Uint8List.fromList(bytesToSave);
+      final savedUri = debugSaveFileOverride != null
+          ? await debugSaveFileOverride!(
+              dialogTitle: 'Save Screenshot As',
+              fileName: targetFileName,
+              bytes: rawBytes,
+            )
+          : await FilePicker.saveFile(
+              dialogTitle: 'Save Screenshot As',
+              fileName: targetFileName,
+              bytes: rawBytes,
+            );
 
       if (savedUri != null) {
         final finalPath = savedUri.toFilePath();
         return finalPath;
       }
+      return null;
     } catch (e) {
       debugPrint('SnipSnap FilePicker.saveFile primary error: $e');
-    }
 
-    // 2. Secondary fallback: Prompt user to choose target folder if saveFile fails or returns null
-    try {
-      final dirPath = await FilePicker.getDirectoryPath(
-        dialogTitle: 'Select Folder to Save Screenshot',
-      );
-      if (dirPath != null && dirPath.trim().isNotEmpty) {
-        final targetPath = p.join(dirPath, targetFileName);
-        final file = File(targetPath);
-        await file.writeAsBytes(bytesToSave);
-        return targetPath;
+      // 2. Secondary fallback: Prompt user to choose target folder when saveFile fails with an error
+      try {
+        final dirPath = await FilePicker.getDirectoryPath(
+          dialogTitle: 'Select Folder to Save Screenshot',
+        );
+        if (dirPath != null && dirPath.trim().isNotEmpty) {
+          final targetPath = p.join(dirPath, targetFileName);
+          final file = File(targetPath);
+          await file.writeAsBytes(bytesToSave);
+          return targetPath;
+        }
+        return null;
+      } catch (e2) {
+        debugPrint('SnipSnap getDirectoryPath fallback error: $e2');
       }
-    } catch (e) {
-      debugPrint('SnipSnap getDirectoryPath fallback error: $e');
-    }
 
-    // 3. Ultimate Fallback: Save directly to user's Downloads directory if native file pickers fail
-    try {
-      final downloadsDir = await getDownloadsDirectory();
-      if (downloadsDir != null && downloadsDir.existsSync()) {
-        final targetPath = p.join(downloadsDir.path, targetFileName);
-        final file = File(targetPath);
-        await file.writeAsBytes(bytesToSave);
-        return targetPath;
+      // 3. Ultimate Fallback: Save directly to user's Downloads directory only if native file pickers throw
+      try {
+        final downloadsDir = await getDownloadsDirectory();
+        if (downloadsDir != null && downloadsDir.existsSync()) {
+          final targetPath = p.join(downloadsDir.path, targetFileName);
+          final file = File(targetPath);
+          await file.writeAsBytes(bytesToSave);
+          return targetPath;
+        }
+      } catch (e3) {
+        debugPrint('SnipSnap downloads directory fallback error: $e3');
       }
-    } catch (e) {
-      debugPrint('SnipSnap downloads directory fallback error: $e');
     }
 
     return null;

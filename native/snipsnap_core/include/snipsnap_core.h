@@ -133,6 +133,54 @@ bool snipsnap_box_blur_region_rgba(uint8_t* rgba,
                                    int32_t rect_h,
                                    int32_t radius);
 
+// Gene - Nov, 24, 2026: Fast cross-platform capture pixel transforms, Win32 CF_DIB decoder, click-ring compositor, and WASAPI PCM resampler.
+bool snipsnap_dim_bgra(const uint8_t* src,
+                       uint8_t* dst,
+                       int32_t width,
+                       int32_t height,
+                       int32_t src_stride,
+                       int32_t dst_stride,
+                       uint8_t dim_factor);
+
+bool snipsnap_bgra_to_bottom_up_bgrx(const uint8_t* src,
+                                     int32_t width,
+                                     int32_t height,
+                                     int32_t src_stride,
+                                     uint8_t* dst,
+                                     int32_t dst_stride);
+
+bool snipsnap_bgra_to_rgba_top_down(const uint8_t* src,
+                                    int32_t width,
+                                    int32_t height,
+                                    int32_t src_stride,
+                                    bool flip_vertical,
+                                    uint8_t* dst);
+
+bool snipsnap_decode_dib_to_bgra(const uint8_t* dib_bytes,
+                                 size_t dib_len,
+                                 SnipSnapImageBuffer* out_buf);
+
+bool snipsnap_composite_click_ring_bgra(uint8_t* bgra,
+                                        int32_t width,
+                                        int32_t height,
+                                        int32_t stride,
+                                        int32_t cx,
+                                        int32_t cy,
+                                        float progress,
+                                        bool is_right_click);
+
+bool snipsnap_pcm_to_f32_stereo_48k(const uint8_t* src,
+                                    size_t src_len,
+                                    uint32_t num_frames,
+                                    uint32_t channels,
+                                    uint32_t bits_per_sample,
+                                    bool is_float,
+                                    uint32_t sample_rate,
+                                    double* io_phase,
+                                    float* out_stereo,
+                                    size_t out_cap_floats,
+                                    size_t* out_written_floats);
+
 #ifdef __cplusplus
 }
 #endif

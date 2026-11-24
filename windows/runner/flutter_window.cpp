@@ -78,6 +78,12 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // Gene - Nov, 24, 2026: Route native hotkeys, tray events, close-to-tray, and single-instance show messages through capture_handler.
+  LRESULT capture_res = 0;
+  if (HandleCaptureWindowMessage(hwnd, message, wparam, lparam, &capture_res)) {
+    return capture_res;
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

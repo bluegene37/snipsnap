@@ -1,6 +1,16 @@
 // Gene - Nov, 20, 2026: Panic-safe C ABI entry points for SnipSnap Rust native core.
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+// Gene - Nov, 24, 2026: Added capture_ops imports for dim, BGRX/RGBA format conversion, DIB decoding, click ring compositing, and PCM resampling.
+// Old implementation:
+// use crate::image_ops::{
+//     box_blur_region_rgba, composite_rgba, crop_rgba, erase_rect_rgba, flood_fill_rgba,
+//     pixelate_region_rgba, resize_rgba, RgbaColor,
+// };
+use crate::capture_ops::{
+    bgra_to_bottom_up_bgrx, bgra_to_rgba_top_down, composite_click_ring_bgra, decode_dib_to_bgra,
+    dim_bgra, pcm_to_f32_stereo_48k,
+};
 use crate::image_ops::{
     box_blur_region_rgba, composite_rgba, crop_rgba, erase_rect_rgba, flood_fill_rgba,
     pixelate_region_rgba, resize_rgba, RgbaColor,
@@ -427,6 +437,261 @@ pub extern "C" fn snipsnap_box_blur_region_rgba(
     catch_unwind(AssertUnwindSafe(|| {
         let slice = unsafe { std::slice::from_raw_parts_mut(rgba, len) };
         box_blur_region_rgba(slice, w, h, rect_x, rect_y, rect_w, rect_h, radius)
+    }))
+    .unwrap_or(false)
+}
+
+// Gene - Nov, 24, 2026: Exported capture_ops C ABI entrypoints (dim, BGRX/RGBA conversion, CF_DIB decoder, click-ring compositor, WASAPI PCM resampler).
+#[no_mangle]
+pub extern "C" fn snipsnap_dim_bgra(
+    src: *const u8,
+    dst: *mut u8,
+    width: i32,
+    height: i32,
+    src_stride: i32,
+    dst_stride: i32,
+    dim_factor: u8,
+) -> bool {
+    if src.is_null() || dst.is_null() || width <= 0 || height <= 0 {
+        return false;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let ss = src_stride.max(0) as usize;
+    let ds = dst_stride.max(0) as usize;
+    let Some(row_bytes) = w.checked_mul(4) else {
+        return false;
+    };
+    if ss < row_bytes || ds < row_bytes {
+        return false;
+    }
+    let Some(src_len) = h
+        .checked_sub(1)
+        .and_then(|h1| h1.checked_mul(ss))
+        .and_then(|o| o.checked_add(row_bytes))
+    else {
+        return false;
+    };
+    let Some(dst_len) = h
+        .checked_sub(1)
+        .and_then(|h1| h1.checked_mul(ds))
+        .and_then(|o| o.checked_add(row_bytes))
+    else {
+        return false;
+    };
+    catch_unwind(AssertUnwindSafe(|| {
+        let src_slice = unsafe { std::slice::from_raw_parts(src, src_len) };
+        let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst, dst_len) };
+        dim_bgra(src_slice, dst_slice, w, h, ss, ds, dim_factor)
+    }))
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn snipsnap_bgra_to_bottom_up_bgrx(
+    src: *const u8,
+    width: i32,
+    height: i32,
+    src_stride: i32,
+    dst: *mut u8,
+    dst_stride: i32,
+) -> bool {
+    if src.is_null() || dst.is_null() || width <= 0 || height <= 0 {
+        return false;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let ss = src_stride.max(0) as usize;
+    let ds = dst_stride.max(0) as usize;
+    let Some(row_bytes) = w.checked_mul(4) else {
+        return false;
+    };
+    if ss < row_bytes || ds < row_bytes {
+        return false;
+    }
+    let Some(src_len) = h
+        .checked_sub(1)
+        .and_then(|h1| h1.checked_mul(ss))
+        .and_then(|o| o.checked_add(row_bytes))
+    else {
+        return false;
+    };
+    let Some(dst_len) = h
+        .checked_sub(1)
+        .and_then(|h1| h1.checked_mul(ds))
+        .and_then(|o| o.checked_add(row_bytes))
+    else {
+        return false;
+    };
+    catch_unwind(AssertUnwindSafe(|| {
+        let src_slice = unsafe { std::slice::from_raw_parts(src, src_len) };
+        let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst, dst_len) };
+        bgra_to_bottom_up_bgrx(src_slice, w, h, ss, dst_slice, ds)
+    }))
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn snipsnap_bgra_to_rgba_top_down(
+    src: *const u8,
+    width: i32,
+    height: i32,
+    src_stride: i32,
+    flip_vertical: bool,
+    dst: *mut u8,
+) -> bool {
+    if src.is_null() || dst.is_null() || width <= 0 || height <= 0 {
+        return false;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let ss = src_stride.max(0) as usize;
+    let Some(row_bytes) = w.checked_mul(4) else {
+        return false;
+    };
+    if ss < row_bytes {
+        return false;
+    }
+    let Some(src_len) = h
+        .checked_sub(1)
+        .and_then(|h1| h1.checked_mul(ss))
+        .and_then(|o| o.checked_add(row_bytes))
+    else {
+        return false;
+    };
+    let Some(dst_len) = h.checked_mul(row_bytes) else {
+        return false;
+    };
+    catch_unwind(AssertUnwindSafe(|| {
+        let src_slice = unsafe { std::slice::from_raw_parts(src, src_len) };
+        let dst_slice = unsafe { std::slice::from_raw_parts_mut(dst, dst_len) };
+        bgra_to_rgba_top_down(src_slice, w, h, ss, flip_vertical, dst_slice)
+    }))
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn snipsnap_decode_dib_to_bgra(
+    dib_bytes: *const u8,
+    dib_len: usize,
+    out_buf: *mut SnipSnapImageBuffer,
+) -> bool {
+    if out_buf.is_null() {
+        return false;
+    }
+    unsafe {
+        *out_buf = empty_image_buffer();
+    }
+    if dib_bytes.is_null() || dib_len < 40 {
+        return false;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let dib_slice = unsafe { std::slice::from_raw_parts(dib_bytes, dib_len) };
+        if let Some((bgra, w, h)) = decode_dib_to_bgra(dib_slice) {
+            unsafe {
+                *out_buf = into_image_buffer(bgra, w, h);
+            }
+            true
+        } else {
+            false
+        }
+    }))
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn snipsnap_composite_click_ring_bgra(
+    bgra: *mut u8,
+    width: i32,
+    height: i32,
+    stride: i32,
+    cx: i32,
+    cy: i32,
+    progress: f32,
+    is_right_click: bool,
+) -> bool {
+    if bgra.is_null() || width <= 0 || height <= 0 {
+        return false;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let s = stride.max(0) as usize;
+    let Some(row_bytes) = w.checked_mul(4) else {
+        return false;
+    };
+    if s < row_bytes {
+        return false;
+    }
+    let Some(len) = h
+        .checked_sub(1)
+        .and_then(|h1| h1.checked_mul(s))
+        .and_then(|o| o.checked_add(row_bytes))
+    else {
+        return false;
+    };
+    catch_unwind(AssertUnwindSafe(|| {
+        let slice = unsafe { std::slice::from_raw_parts_mut(bgra, len) };
+        composite_click_ring_bgra(slice, w, h, s, cx, cy, progress, is_right_click)
+    }))
+    .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn snipsnap_pcm_to_f32_stereo_48k(
+    src: *const u8,
+    src_len: usize,
+    num_frames: u32,
+    channels: u32,
+    bits_per_sample: u32,
+    is_float: bool,
+    sample_rate: u32,
+    io_phase: *mut f64,
+    out_stereo: *mut f32,
+    out_cap_floats: usize,
+    out_written_floats: *mut usize,
+) -> bool {
+    if !out_written_floats.is_null() {
+        unsafe {
+            *out_written_floats = 0;
+        }
+    }
+    if src.is_null()
+        || io_phase.is_null()
+        || out_stereo.is_null()
+        || out_written_floats.is_null()
+        || src_len == 0
+        || num_frames == 0
+        || channels == 0
+        || sample_rate == 0
+    {
+        return false;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let src_slice = unsafe { std::slice::from_raw_parts(src, src_len) };
+        let mut phase = unsafe { *io_phase };
+        let mut tmp = Vec::new();
+        if !pcm_to_f32_stereo_48k(
+            src_slice,
+            num_frames as usize,
+            channels as usize,
+            bits_per_sample as usize,
+            is_float,
+            sample_rate,
+            &mut phase,
+            &mut tmp,
+        ) {
+            return false;
+        }
+        if tmp.len() > out_cap_floats {
+            return false;
+        }
+        let dst = unsafe { std::slice::from_raw_parts_mut(out_stereo, out_cap_floats) };
+        dst[..tmp.len()].copy_from_slice(&tmp);
+        unsafe {
+            *io_phase = phase;
+            *out_written_floats = tmp.len();
+        }
+        true
     }))
     .unwrap_or(false)
 }
