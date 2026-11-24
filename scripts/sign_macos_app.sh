@@ -29,6 +29,8 @@ set -euo pipefail
 
 APP="${1:-build/macos/Build/Products/Release/SnipSnap.app}"
 IDENTITY="${MACOS_SIGN_IDENTITY:-}"
+# Gene - Nov, 24, 2026: Support explicit MACOS_SIGN_KEYCHAIN to avoid duplicate-cert ambiguity across keychains and target CI temporary keychains.
+KEYCHAIN="${MACOS_SIGN_KEYCHAIN:-}"
 ENTITLEMENTS="macos/Runner/Release.entitlements"
 
 if [ -z "$IDENTITY" ]; then
@@ -46,29 +48,82 @@ if [ ! -f "$ENTITLEMENTS" ]; then
   exit 1
 fi
 
-TIMESTAMP_FLAG="--timestamp=none"
-if [ "${MACOS_SIGN_TIMESTAMP:-0}" = "1" ]; then
+# Gene - Nov, 24, 2026: Enable secure timestamp automatically for Developer ID identities while honoring explicit MACOS_SIGN_TIMESTAMP=0/1 overrides, strip xattrs, sign all nested code directories inside-out, and enforce absence of get-task-allow before notarization.
+# Old implementation:
+# TIMESTAMP_FLAG="--timestamp=none"
+# if [ "${MACOS_SIGN_TIMESTAMP:-0}" = "1" ]; then
+#   TIMESTAMP_FLAG="--timestamp"
+# fi
+#
+# echo "==> Signing nested code in $APP with \"$IDENTITY\"..."
+# # Nested code first, outer bundle last. `--deep` is deprecated and would
+# # apply the app's entitlements to every framework.
+# if [ -d "$APP/Contents/Frameworks" ]; then
+#   find "$APP/Contents/Frameworks" -depth \
+#     \( -name '*.framework' -o -name '*.dylib' -o -name '*.bundle' \) \
+#     -print0 |
+#     while IFS= read -r -d '' nested; do
+#       codesign --force --options runtime "$TIMESTAMP_FLAG" \
+#         --sign "$IDENTITY" "$nested"
+#     done
+# fi
+#
+# echo "==> Signing $APP..."
+# codesign --force --options runtime "$TIMESTAMP_FLAG" \
+#   --entitlements "$ENTITLEMENTS" \
+#   --sign "$IDENTITY" "$APP"
+#
+# echo "==> Verifying..."
+# codesign --verify --deep --strict "$APP"
+# codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => /    requirement: /p'
+
+if [ "${MACOS_SIGN_TIMESTAMP:-}" = "1" ]; then
   TIMESTAMP_FLAG="--timestamp"
+elif [ "${MACOS_SIGN_TIMESTAMP:-}" = "0" ]; then
+  TIMESTAMP_FLAG="--timestamp=none"
+elif [[ "$IDENTITY" == *"Developer ID"* ]]; then
+  TIMESTAMP_FLAG="--timestamp"
+else
+  TIMESTAMP_FLAG="--timestamp=none"
 fi
+
+CODESIGN_ARGS=(--force --options runtime "$TIMESTAMP_FLAG")
+if [ -n "$KEYCHAIN" ]; then
+  CODESIGN_ARGS+=(--keychain "$KEYCHAIN")
+fi
+CODESIGN_ARGS+=(--sign "$IDENTITY")
+
+echo "==> Stripping extended attributes from $APP..."
+xattr -cr "$APP"
 
 echo "==> Signing nested code in $APP with \"$IDENTITY\"..."
 # Nested code first, outer bundle last. `--deep` is deprecated and would
 # apply the app's entitlements to every framework.
-if [ -d "$APP/Contents/Frameworks" ]; then
-  find "$APP/Contents/Frameworks" -depth \
-    \( -name '*.framework' -o -name '*.dylib' -o -name '*.bundle' \) \
+NESTED_DIRS=()
+for subdir in Frameworks PlugIns XPCServices Helpers; do
+  if [ -d "$APP/Contents/$subdir" ]; then
+    NESTED_DIRS+=("$APP/Contents/$subdir")
+  fi
+done
+if [ "${#NESTED_DIRS[@]}" -gt 0 ]; then
+  find "${NESTED_DIRS[@]}" -depth \
+    \( -name '*.framework' -o -name '*.dylib' -o -name '*.so' -o -name '*.bundle' -o -name '*.xpc' -o -name '*.app' \) \
     -print0 |
     while IFS= read -r -d '' nested; do
-      codesign --force --options runtime "$TIMESTAMP_FLAG" \
-        --sign "$IDENTITY" "$nested"
+      codesign "${CODESIGN_ARGS[@]}" "$nested"
     done
 fi
 
 echo "==> Signing $APP..."
-codesign --force --options runtime "$TIMESTAMP_FLAG" \
-  --entitlements "$ENTITLEMENTS" \
-  --sign "$IDENTITY" "$APP"
+codesign "${CODESIGN_ARGS[@]}" --entitlements "$ENTITLEMENTS" "$APP"
 
 echo "==> Verifying..."
-codesign --verify --deep --strict "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
 codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => /    requirement: /p'
+
+if [ "$TIMESTAMP_FLAG" = "--timestamp" ]; then
+  if codesign -d --entitlements - --xml "$APP" 2>/dev/null | grep -q "com.apple.security.get-task-allow"; then
+    echo "Error: signed app still contains com.apple.security.get-task-allow (Apple notarization will reject it)." >&2
+    exit 1
+  fi
+fi
