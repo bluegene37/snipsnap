@@ -176,6 +176,39 @@ class CapturePlugin: NSObject {
       // relaunch, which is why the Dart side words its message that way.
       result(CGRequestScreenCaptureAccess())
 
+    // Gene - Nov, 25, 2026: Reset stale macOS ScreenCapture TCC entry (e.g. after upgrading from an ad-hoc build to a Developer ID signed release) and relaunch the app cleanly.
+    case "resetScreenCapturePermissionAndRelaunch":
+      let bundlePath = Bundle.main.bundlePath
+      let bundleId = Bundle.main.bundleIdentifier ?? ""
+      let pid = ProcessInfo.processInfo.processIdentifier
+      guard !bundleId.isEmpty, bundlePath.hasSuffix(".app") else {
+        result(false)
+        return
+      }
+      let helperScript = """
+      PID="$1"; BUNDLE_ID="$2"; APP="$3"
+      TRIES=0
+      while /bin/kill -0 "$PID" 2>/dev/null; do
+        /bin/sleep 0.1
+        TRIES=$((TRIES + 1))
+        if [ "$TRIES" -ge 50 ]; then break; fi
+      done
+      /usr/bin/tccutil reset ScreenCapture "$BUNDLE_ID" >/dev/null 2>&1 || true
+      /usr/bin/open "$APP"
+      """
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/bin/sh")
+      process.arguments = ["-c", helperScript, "snipsnap-tcc-reset", "\(pid)", bundleId, bundlePath]
+      do {
+        try process.run()
+        result(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+          NSApp.terminate(nil)
+        }
+      } catch {
+        result(false)
+      }
+
     // Gene - Nov, 03, 2026: Added accessibility checks and settings deep link for macOS global capture hotkeys.
     case "accessibilityAuthorized":
       result(AXIsProcessTrusted())

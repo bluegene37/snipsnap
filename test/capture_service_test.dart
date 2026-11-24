@@ -160,6 +160,9 @@ void main() {
                 return authorized;
               case 'openAccessibilitySettings':
                 return true;
+              // Gene - Nov, 25, 2026: Mock handler for resetScreenCapturePermissionAndRelaunch.
+              case 'resetScreenCapturePermissionAndRelaunch':
+                return authorized;
             }
             return null;
           });
@@ -243,6 +246,30 @@ void main() {
         expect(
           methodCalls.where((c) => c.method == 'openAccessibilitySettings'),
           hasLength(1),
+        );
+      },
+      skip: skipOffMacOS,
+    );
+
+    // Gene - Nov, 25, 2026: Verify resetScreenCapturePermissionAndRelaunch invokes native channel method and propagates boolean result.
+    test(
+      'resetScreenCapturePermissionAndRelaunch: invokes native channel and returns result',
+      () async {
+        authorized = true;
+        expect(
+          await captureService.resetScreenCapturePermissionAndRelaunch(),
+          isTrue,
+        );
+        authorized = false;
+        expect(
+          await captureService.resetScreenCapturePermissionAndRelaunch(),
+          isFalse,
+        );
+        expect(
+          methodCalls.where(
+            (c) => c.method == 'resetScreenCapturePermissionAndRelaunch',
+          ),
+          hasLength(2),
         );
       },
       skip: skipOffMacOS,

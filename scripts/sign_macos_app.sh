@@ -33,7 +33,19 @@ IDENTITY="${MACOS_SIGN_IDENTITY:-}"
 KEYCHAIN="${MACOS_SIGN_KEYCHAIN:-}"
 ENTITLEMENTS="macos/Runner/Release.entitlements"
 
+# Gene - Nov, 25, 2026: Fail when MACOS_REQUIRE_SIGNED=1 and MACOS_SIGN_IDENTITY is unset so release DMGs never ship with ad-hoc cdhash signatures.
+# Old implementation:
+# if [ -z "$IDENTITY" ]; then
+#   echo "==> MACOS_SIGN_IDENTITY not set; leaving the ad-hoc signature." >&2
+#   echo "    Screen Recording grants will not survive rebuilds of this app." >&2
+#   exit 0
+# fi
 if [ -z "$IDENTITY" ]; then
+  if [ "${MACOS_REQUIRE_SIGNED:-0}" = "1" ]; then
+    echo "Error: MACOS_REQUIRE_SIGNED=1 but MACOS_SIGN_IDENTITY is not set." >&2
+    echo "       An ad-hoc signature breaks macOS Screen Recording persistence on every release." >&2
+    exit 1
+  fi
   echo "==> MACOS_SIGN_IDENTITY not set; leaving the ad-hoc signature." >&2
   echo "    Screen Recording grants will not survive rebuilds of this app." >&2
   exit 0
@@ -119,7 +131,19 @@ codesign "${CODESIGN_ARGS[@]}" --entitlements "$ENTITLEMENTS" "$APP"
 
 echo "==> Verifying..."
 codesign --verify --deep --strict --verbose=2 "$APP"
-codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => /    requirement: /p'
+# Gene - Nov, 25, 2026: Verify the signed bundle has a stable non-cdhash designated requirement (and subject.OU for Developer ID) so TCC permissions persist across releases.
+# Old implementation:
+# codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => /    requirement: /p'
+DESIGNATED_REQ="$(codesign -d -r- "$APP" 2>&1)"
+printf '%s\n' "$DESIGNATED_REQ" | sed -n 's/^designated => /    requirement: /p'
+if printf '%s\n' "$DESIGNATED_REQ" | grep -q "cdhash"; then
+  echo "Error: $APP designated requirement is bound to cdhash; Screen Recording grants will break on the next update." >&2
+  exit 1
+fi
+if [[ "$IDENTITY" == *"Developer ID"* ]] && ! printf '%s\n' "$DESIGNATED_REQ" | grep -q "subject.OU"; then
+  echo "Error: Developer ID signed $APP is missing subject.OU in its designated requirement." >&2
+  exit 1
+fi
 
 if [ "$TIMESTAMP_FLAG" = "--timestamp" ]; then
   if codesign -d --entitlements - --xml "$APP" 2>/dev/null | grep -q "com.apple.security.get-task-allow"; then

@@ -309,6 +309,22 @@ class CaptureService {
     }
   }
 
+  // Gene - Nov, 25, 2026: Reset stale macOS TCC ScreenCapture entry (e.g. after upgrading from an ad-hoc build to a Developer ID signed release) and relaunch SnipSnap cleanly.
+  Future<bool> resetScreenCapturePermissionAndRelaunch() async {
+    if (!Platform.isMacOS) return false;
+    try {
+      return await _channel.invokeMethod<bool>(
+            'resetScreenCapturePermissionAndRelaunch',
+          ) ??
+          false;
+    } on MissingPluginException catch (_) {
+      return false;
+    } catch (e) {
+      debugPrint('SnipSnap could not reset Screen Recording permission: $e');
+      return false;
+    }
+  }
+
   /// Returns [path] when it names a file with actual pixels in it, deleting it
   /// and returning null otherwise.
   ///

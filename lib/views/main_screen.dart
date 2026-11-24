@@ -1876,19 +1876,92 @@ class _MainScreenState extends State<MainScreen> {
   //   );
   //   return false;
   // }
+  // Gene - Nov, 25, 2026: Replaced snackbar with an actionable recovery dialog offering one-click Reset & Reopen for stale TCC entries (common once when upgrading from an ad-hoc build to a Developer ID signed release).
+  // Old implementation:
+  // Future<bool> _ensureCapturePermission() async {
+  //   if (await _captureService.hasScreenCapturePermission()) return true;
+  //   if (!mounted) return false;
+  //   _showToast(
+  //     'SnipSnap needs Screen Recording access. In System Settings > Privacy & '
+  //     'Security > Screen Recording, turn SnipSnap on. If already on, remove SnipSnap '
+  //     'using the [-] button first, then quit & reopen SnipSnap.',
+  //     duration: const Duration(seconds: 10),
+  //     action: SnackBarAction(
+  //       label: 'Open Settings',
+  //       textColor: _theme.emphasis,
+  //       onPressed: () =>
+  //           unawaited(_captureService.openScreenRecordingSettings()),
+  //     ),
+  //   );
+  //   return false;
+  // }
   Future<bool> _ensureCapturePermission() async {
     if (await _captureService.hasScreenCapturePermission()) return true;
     if (!mounted) return false;
-    _showToast(
-      'SnipSnap needs Screen Recording access. In System Settings > Privacy & '
-      'Security > Screen Recording, turn SnipSnap on. If already on, remove SnipSnap '
-      'using the [-] button first, then quit & reopen SnipSnap.',
-      duration: const Duration(seconds: 10),
-      action: SnackBarAction(
-        label: 'Open Settings',
-        textColor: _theme.emphasis,
-        onPressed: () =>
-            unawaited(_captureService.openScreenRecordingSettings()),
+    final dialogCtx = _dialogContext;
+    if (dialogCtx == null || !dialogCtx.mounted) {
+      _showToast(
+        'SnipSnap needs Screen Recording access. In System Settings > Privacy & '
+        'Security > Screen Recording, turn SnipSnap on. If already on, remove SnipSnap '
+        'using the [-] button first, then quit & reopen SnipSnap.',
+        duration: const Duration(seconds: 10),
+        action: SnackBarAction(
+          label: 'Open Settings',
+          textColor: _theme.emphasis,
+          onPressed: () =>
+              unawaited(_captureService.openScreenRecordingSettings()),
+        ),
+      );
+      return false;
+    }
+    final t = _theme;
+    await showDialog<void>(
+      context: dialogCtx,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: t.surfaceRaised,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(
+          'Screen Recording Permission Needed',
+          style: TextStyle(
+            color: t.ink,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: SizedBox(
+          width: 440,
+          child: Text(
+            'SnipSnap needs macOS Screen Recording access to capture your screen.\n\n'
+            'If SnipSnap is already toggled ON in System Settings (which happens once '
+            'after upgrading from an older unsigned build), click Reset & Reopen to '
+            'clear the stale macOS entry automatically, then allow permission once — '
+            'future signed updates will keep it automatically.',
+            style: TextStyle(color: t.inkMuted, fontSize: 13, height: 1.45),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('Later', style: TextStyle(color: t.inkMuted)),
+          ),
+          OutlinedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              unawaited(
+                _captureService.resetScreenCapturePermissionAndRelaunch(),
+              );
+            },
+            child: Text('Reset & Reopen', style: TextStyle(color: t.ink)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: t.emphasis),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              unawaited(_captureService.openScreenRecordingSettings());
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
       ),
     );
     return false;

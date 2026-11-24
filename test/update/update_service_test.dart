@@ -341,6 +341,20 @@ void main() {
       final result = await Process.run('/bin/sh', ['-n', f.path]);
       expect(result.exitCode, 0, reason: 'sh -n rejected: ${result.stderr}');
     }, testOn: 'mac-os');
+
+    // Gene - Nov, 25, 2026: Verify updater auto-resets stale ScreenCapture TCC grant only when transitioning from ad-hoc cdhash to Developer ID subject.OU.
+    test(
+      'auto-resets ScreenCapture TCC only on ad-hoc to Developer ID transition',
+      () {
+        final tccIdx = script.indexOf('tccutil reset ScreenCapture');
+        final swapIdx = script.indexOf(r'mv "$STAGED" "$APP"');
+        final reapIdx = script.indexOf(r'rm -rf "$OLD"');
+        expect(tccIdx, greaterThan(swapIdx));
+        expect(tccIdx, lessThan(reapIdx));
+        expect(script, contains('cdhash'));
+        expect(script, contains('subject.OU'));
+      },
+    );
   });
 
   group('ensureSwappableBundle', () {

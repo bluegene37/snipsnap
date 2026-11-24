@@ -5,12 +5,18 @@ on:
     tags: ['v*']
   # workflow_dispatch:
   # Gene - Nov, 13, 2026: Added optional tag input for manual workflow_dispatch runs (auto-resolves from pubspec.yaml when omitted).
+  # Gene - Nov, 25, 2026: Added allow_unsigned_macos opt-in flag (defaults false) so release builds never silently ship ad-hoc macOS DMGs.
   workflow_dispatch:
     inputs:
       tag:
         description: 'Release tag (e.g. v1.0.7). Defaults to v<version> from pubspec.yaml.'
         required: false
         type: string
+      allow_unsigned_macos:
+        description: 'Allow unsigned ad-hoc macOS DMG (testing only; breaks macOS Screen Recording persistence).'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -149,6 +155,47 @@ jobs:
       - name: Run test suite
         run: bash scripts/ci_retry.sh flutter test
 
+      # Gene - Nov, 25, 2026: Fail fast if macOS signing/notarization secrets are missing unless explicitly opted out via workflow_dispatch allow_unsigned_macos.
+      - name: Verify macOS release signing secrets
+        shell: bash
+        env:
+          ALLOW_UNSIGNED_MACOS: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_unsigned_macos == true }}
+          MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ "${ALLOW_UNSIGNED_MACOS:-false}" = "true" ]; then
+            echo "::warning::allow_unsigned_macos=true; allowing unsigned/unnotarized macOS DMG if signing secrets are absent."
+            exit 0
+          fi
+
+          if [ -z "${MACOS_CERT_BASE64:-}" ] || [ -z "${MACOS_CERT_PASSWORD:-}" ]; then
+            echo "::error::Missing MACOS_CERT_BASE64 or MACOS_CERT_PASSWORD secret. Refusing to publish an ad-hoc macOS DMG that breaks Screen Recording permission persistence across releases."
+            exit 1
+          fi
+
+          HAS_API_KEY=0
+          if [ -n "${APPLE_API_KEY_BASE64:-}" ] && [ -n "${APPLE_API_KEY_ID:-}" ] && [ -n "${APPLE_API_ISSUER_ID:-}" ]; then
+            HAS_API_KEY=1
+          fi
+
+          HAS_APPLE_ID=0
+          if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+            HAS_APPLE_ID=1
+          fi
+
+          if [ "$HAS_API_KEY" -eq 0 ] && [ "$HAS_APPLE_ID" -eq 0 ]; then
+            echo "::error::Missing Apple notarization secrets. Configure either (APPLE_API_KEY_BASE64, APPLE_API_KEY_ID, APPLE_API_ISSUER_ID) or (APPLE_ID, APPLE_APP_PASSWORD, APPLE_TEAM_ID)."
+            exit 1
+          fi
+
+          echo "MACOS_REQUIRE_SIGNED=1" >> "$GITHUB_ENV"
+
       # Gene - Nov, 24, 2026: Configure temporary macOS Developer ID keychain, sign .app + .dmg, notarize + staple via Apple notarytool, and clean up keychain/keys.
       # Old implementation:
       # - name: Build and package macOS DMG
@@ -156,14 +203,30 @@ jobs:
       - name: Configure macOS Developer ID signing & notarization
         shell: bash
         env:
+          ALLOW_UNSIGNED_MACOS: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_unsigned_macos == true }}
           MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Gene - Nov, 25, 2026: Refuse ad-hoc fallback unless allow_unsigned_macos=true and enforce MACOS_REQUIRE_SIGNED=1 for release builds.
+          # Old implementation:
+          # if [ -z "${MACOS_CERT_BASE64:-}" ]; then
+          #   echo "::warning::MACOS_CERT_BASE64 secret is not configured. Skipping macOS Developer ID signing & notarization (ad-hoc build only)."
+          #   exit 0
+          # fi
           if [ -z "${MACOS_CERT_BASE64:-}" ]; then
-            echo "::warning::MACOS_CERT_BASE64 secret is not configured. Skipping macOS Developer ID signing & notarization (ad-hoc build only)."
-            exit 0
+            if [ "${ALLOW_UNSIGNED_MACOS:-false}" = "true" ]; then
+              echo "::warning::MACOS_CERT_BASE64 secret is not configured (allow_unsigned_macos=true). Skipping macOS Developer ID signing & notarization (ad-hoc build only)."
+              exit 0
+            fi
+            echo "::error::MACOS_CERT_BASE64 secret is not configured. Configure MACOS_CERT_BASE64, MACOS_CERT_PASSWORD, and Apple notarization secrets (APPLE_API_KEY_BASE64 + APPLE_API_KEY_ID + APPLE_API_ISSUER_ID, or APPLE_ID + APPLE_APP_PASSWORD + APPLE_TEAM_ID)."
+            exit 1
           fi
 
           if [ -z "${MACOS_CERT_PASSWORD:-}" ]; then

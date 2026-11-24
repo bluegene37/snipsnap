@@ -88,6 +88,18 @@ elif [ -n "${APPLE_ID:-}${APPLE_APP_PASSWORD:-}${APPLE_TEAM_ID:-}" ]; then
   NOTARY_AUTH=(--apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID")
 fi
 
+# Gene - Nov, 25, 2026: Enforce Developer ID signing and Apple notarization credentials before packaging when MACOS_REQUIRE_SIGNED=1.
+if [ "${MACOS_REQUIRE_SIGNED:-0}" = "1" ]; then
+  if [ -z "${MACOS_SIGN_IDENTITY:-}" ]; then
+    echo "Error: MACOS_REQUIRE_SIGNED=1 requires MACOS_SIGN_IDENTITY (Developer ID Application certificate) so macOS Screen Recording grants persist across releases." >&2
+    exit 1
+  fi
+  if [ "${#NOTARY_AUTH[@]}" -eq 0 ]; then
+    echo "Error: MACOS_REQUIRE_SIGNED=1 requires Apple notarization credentials (MACOS_NOTARY_PROFILE, APPLE_API_KEY_PATH/APPLE_API_KEY_ID/APPLE_API_ISSUER_ID, or APPLE_ID/APPLE_APP_PASSWORD/APPLE_TEAM_ID)." >&2
+    exit 1
+  fi
+fi
+
 notarize_artifact() {
   local artifact="$1"
   local label="$2"

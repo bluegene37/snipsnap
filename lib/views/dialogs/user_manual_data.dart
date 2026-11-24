@@ -420,15 +420,25 @@ class UserManualData {
           // ],
           // tip:
           //     'macOS ties the grant to the exact app build. After updating SnipSnap the old grant may no longer match, which is why re-toggling fixes it.',
+          // Gene - Nov, 25, 2026: Document one-click Reset & Reopen recovery and note that Developer ID signed releases preserve Screen Recording grants across updates.
+          // Old implementation:
+          // steps: [
+          //   'Open macOS System Settings.',
+          //   'Navigate to Privacy & Security > Screen Recording.',
+          //   'If SnipSnap is already listed and toggled on, select SnipSnap and click the "-" (minus) button to remove the stale entry (or run: tccutil reset ScreenCapture dev.genexis.snipsnap in Terminal).',
+          //   'Enable the toggle next to SnipSnap when prompted.',
+          //   'Quit and reopen SnipSnap (Cmd + Q). macOS only applies the grant to a fresh app process.',
+          // ],
+          // tip:
+          //     'macOS ties Screen Recording to the binary code signature. After rebuilding or updating, remove the old entry with the minus button so macOS binds the permission to the current build.',
           steps: [
-            'Open macOS System Settings.',
-            'Navigate to Privacy & Security > Screen Recording.',
-            'If SnipSnap is already listed and toggled on, select SnipSnap and click the "-" (minus) button to remove the stale entry (or run: tccutil reset ScreenCapture dev.genexis.snipsnap in Terminal).',
+            'If SnipSnap is already listed and toggled on in System Settings > Privacy & Security > Screen Recording, click "Reset & Reopen" in the SnipSnap permission dialog (or run: tccutil reset ScreenCapture dev.genexis.snipsnap in Terminal after quitting SnipSnap).',
+            'Otherwise, open macOS System Settings > Privacy & Security > Screen Recording.',
             'Enable the toggle next to SnipSnap when prompted.',
             'Quit and reopen SnipSnap (Cmd + Q). macOS only applies the grant to a fresh app process.',
           ],
           tip:
-              'macOS ties Screen Recording to the binary code signature. After rebuilding or updating, remove the old entry with the minus button so macOS binds the permission to the current build.',
+              'Official Developer ID signed releases keep your Screen Recording grant across future updates. You only need to reset once if upgrading from an older unsigned build or switching from a local debug build.',
         ),
         ManualSection(
           title: 'macOS Accessibility Permissions',
