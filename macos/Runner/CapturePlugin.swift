@@ -929,9 +929,17 @@ class CapturePlugin: NSObject {
         screenImage: image,
         initialMode: initialMode,
         initialRecordOptions: initialRecordOptions,
-        onActivateScreen: { [weak self, weak screenItem] in
+        // Gene - Nov, 24, 2026: Compare exact NSWindow identity rather than weak NSScreen pointers so clicking the overlay never clears its own active selection/toolbar.
+        // Old implementation:
+        // onActivateScreen: { [weak self, weak screenItem] in
+        //   guard let self = self else { return }
+        //   for win in self.activeWindows where win.screen !== screenItem {
+        //     win.clearOverlaySelection()
+        //   }
+        // },
+        onActivateScreen: { [weak self] activeWindow in
           guard let self = self else { return }
-          for win in self.activeWindows where win.screen !== screenItem {
+          for win in self.activeWindows where win !== activeWindow {
             win.clearOverlaySelection()
           }
         },
@@ -2307,8 +2315,13 @@ class CapturePlugin: NSObject {
   }
 
   // Gene - Nov, 20, 2026: Added saveImageFast using ImageIO CGImageDestinationCreateWithURL (3-5x faster than NSBitmapImageRep PNG representation and safe on background threads).
+  // Gene - Nov, 24, 2026: Ensure parent capture directory exists before creating destination URL (paired with cached CaptureService directory).
   private func saveImageFast(_ image: CGImage, toPath path: String) -> Bool {
     let url = URL(fileURLWithPath: path)
+    try? FileManager.default.createDirectory(
+      at: url.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
     guard let dest = CGImageDestinationCreateWithURL(
       url as CFURL,
       UTType.png.identifier as CFString,
@@ -2473,7 +2486,9 @@ private class CaptureOverlayWindow: NSPanel {
     screenImage: CGImage?,
     initialMode: String = "capture",
     initialRecordOptions: OverlayRecordOptions = OverlayRecordOptions(),
-    onActivateScreen: (() -> Void)? = nil,
+    // Gene - Nov, 24, 2026: Pass active NSWindow reference to onActivateScreen instead of void closure.
+    // onActivateScreen: (() -> Void)? = nil,
+    onActivateScreen: ((NSWindow) -> Void)? = nil,
     onCapture: @escaping (CGImage?) -> Void,
     onPanoramicCapture: ((NSRect) -> Void)? = nil,
     onRecordCapture: ((NSRect, OverlayRecordOptions) -> Void)? = nil,
@@ -2695,7 +2710,9 @@ private class CaptureOverlayView: NSView {
   // Old implementation:
   // private let initialMode: String
   private var initialMode: String
-  private let onActivateScreen: (() -> Void)?
+  // Gene - Nov, 24, 2026: Pass active NSWindow reference to onActivateScreen for pointer-safe multi-monitor clearing.
+  // private let onActivateScreen: (() -> Void)?
+  private let onActivateScreen: ((NSWindow) -> Void)?
   private let onCapture: (CGImage?) -> Void
   // Gene - Oct, 27, 2026: Added onPanoramicCapture callback.
   private let onPanoramicCapture: ((NSRect) -> Void)?
@@ -2831,7 +2848,9 @@ private class CaptureOverlayView: NSView {
     scaleFactor: CGFloat,
     initialMode: String = "capture",
     initialRecordOptions: OverlayRecordOptions = OverlayRecordOptions(),
-    onActivateScreen: (() -> Void)? = nil,
+    // Gene - Nov, 24, 2026: Pass active NSWindow reference to onActivateScreen instead of void closure.
+    // onActivateScreen: (() -> Void)? = nil,
+    onActivateScreen: ((NSWindow) -> Void)? = nil,
     onCapture: @escaping (CGImage?) -> Void,
     onPanoramicCapture: ((NSRect) -> Void)? = nil,
     onRecordCapture: ((NSRect, OverlayRecordOptions) -> Void)? = nil,
@@ -3256,8 +3275,14 @@ private class CaptureOverlayView: NSView {
   */
   override func mouseDown(with event: NSEvent) {
     // Gene - Nov, 13, 2026: Promote clicked monitor's overlay window to key and clear sibling monitor selections.
-    self.window?.makeKey()
-    onActivateScreen?()
+    // Gene - Nov, 24, 2026: Pass exact clicked NSWindow so sibling clearing never clears the clicked panel itself.
+    // Old implementation:
+    // self.window?.makeKey()
+    // onActivateScreen?()
+    if let activeWin = self.window {
+      activeWin.makeKey()
+      onActivateScreen?(activeWin)
+    }
     let pt = convert(event.locationInWindow, from: nil)
     dragOrigin = pt
 
