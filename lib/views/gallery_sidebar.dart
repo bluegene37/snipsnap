@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import '../models/capture_item.dart';
 import '../services/storage_service.dart';
+// Gene - Nov, 25, 2026: Imported date grouping utility for tray date rails and 7-day archive end card.
+import '../utils/capture_date_group.dart';
 import '../utils/image_eviction.dart';
 import '../utils/snip_theme.dart';
 
@@ -45,22 +47,18 @@ class GallerySidebar extends StatefulWidget {
   final int batchIncrement;
   final VoidCallback? onLoadMore;
 
+  // Gene - Nov, 25, 2026: Added olderCount, onBrowseArchive, and nowOverride for 7-day tray scoping and date-grouped archive access.
+  final int olderCount;
+  final VoidCallback? onBrowseArchive;
+
+  @visibleForTesting
+  final DateTime? nowOverride;
+
   // Gene - Oct, 27, 2026: Updated constructor to accept isOpen and onToggleCollapse.
-  // Old implementation:
-  // const GallerySidebar({
-  //   super.key,
-  //   required this.items,
-  //   required this.activeItem,
-  //   required this.onSelectItem,
-  //   required this.onDeleteItem,
-  //   required this.onClose,
-  //   this.onOpenLibraryLocation,
-  //   this.onRevealItemInFolder,
-  //   this.zoomScale = 1.0,
-  //   this.onZoomScaleChanged,
-  //   this.imageRevision = 0,
-  // });
+  // ...
   // Gene - Nov, 17, 2026: Added initialBatchSize, batchIncrement, and onLoadMore parameters to GallerySidebar constructor.
+  // ...
+  // Gene - Nov, 25, 2026: Added olderCount, onBrowseArchive, and nowOverride parameters to GallerySidebar constructor.
   // Old implementation:
   // const GallerySidebar({
   //   super.key,
@@ -74,9 +72,14 @@ class GallerySidebar extends StatefulWidget {
   //   this.onRenameItem,
   //   this.zoomScale = 1.0,
   //   this.onZoomScaleChanged,
+  //   // Gene - Nov, 20, 2026: Dynamic upper zoom bound for long panoramic captures.
+  //   this.maxZoom = 4.0,
   //   this.imageRevision = 0,
   //   this.isOpen = true,
   //   this.onToggleCollapse,
+  //   this.initialBatchSize = kGalleryInitialBatchSize,
+  //   this.batchIncrement = kGalleryBatchIncrement,
+  //   this.onLoadMore,
   // });
   const GallerySidebar({
     super.key,
@@ -98,10 +101,46 @@ class GallerySidebar extends StatefulWidget {
     this.initialBatchSize = kGalleryInitialBatchSize,
     this.batchIncrement = kGalleryBatchIncrement,
     this.onLoadMore,
+    this.olderCount = 0,
+    this.onBrowseArchive,
+    this.nowOverride,
   });
 
   @override
   State<GallerySidebar> createState() => _GallerySidebarState();
+}
+
+// Gene - Nov, 25, 2026: Sealed entry model interleaving date group headers, capture cards, and the end-of-list archive/folder card.
+sealed class _GalleryListEntry {
+  const _GalleryListEntry();
+}
+
+class _GalleryDateHeaderEntry extends _GalleryListEntry {
+  final DateTime day;
+  final String key;
+  final String shortLabel;
+  final String subLabel;
+  final int totalCount;
+
+  const _GalleryDateHeaderEntry({
+    required this.day,
+    required this.key,
+    required this.shortLabel,
+    required this.subLabel,
+    required this.totalCount,
+  });
+}
+
+class _GalleryCaptureEntry extends _GalleryListEntry {
+  final CaptureItem item;
+
+  const _GalleryCaptureEntry(this.item);
+}
+
+class _GalleryArchiveEndEntry extends _GalleryListEntry {
+  final int olderCount;
+
+  const _GalleryArchiveEndEntry({required this.olderCount});
 }
 
 class _GallerySidebarState extends State<GallerySidebar> {
@@ -278,6 +317,292 @@ class _GallerySidebarState extends State<GallerySidebar> {
     final minute = date.minute.toString().padLeft(2, '0');
     final second = date.second.toString().padLeft(2, '0');
     return '$hour:$minute:$second';
+  }
+
+  // Gene - Nov, 25, 2026: Build date-grouped list entries and optional end-of-list archive/folder action card.
+  List<_GalleryListEntry> _buildEntries(List<CaptureItem> filtered) {
+    final visibleCount = _effectiveItemCount(filtered);
+    if (visibleCount <= 0) return const <_GalleryListEntry>[];
+
+    final totalCountsByDay = <DateTime, int>{};
+    for (final item in filtered) {
+      final day = calendarDay(item.createdAt);
+      totalCountsByDay[day] = (totalCountsByDay[day] ?? 0) + 1;
+    }
+
+    final groups = groupCapturesByDate(
+      filtered.take(visibleCount).toList(),
+      now: widget.nowOverride,
+    );
+    final entries = <_GalleryListEntry>[];
+    for (final group in groups) {
+      entries.add(
+        _GalleryDateHeaderEntry(
+          day: group.day,
+          key: group.key,
+          shortLabel: group.shortLabel,
+          subLabel: group.subLabel,
+          totalCount: totalCountsByDay[group.day] ?? group.items.length,
+        ),
+      );
+      for (final item in group.items) {
+        entries.add(_GalleryCaptureEntry(item));
+      }
+    }
+
+    final reachedEnd =
+        visibleCount >= filtered.length && widget.onLoadMore == null;
+    if (reachedEnd &&
+        (widget.olderCount > 0 || widget.onBrowseArchive != null)) {
+      entries.add(_GalleryArchiveEndEntry(olderCount: widget.olderCount));
+    }
+    return entries;
+  }
+
+  void _openFolder() {
+    if (widget.onOpenLibraryLocation != null) {
+      widget.onOpenLibraryLocation!();
+    } else {
+      StorageService.openLibraryFolder();
+    }
+  }
+
+  Widget _buildDateGroupHeader(
+    SnipTheme t,
+    _GalleryDateHeaderEntry entry, {
+    required bool isFirst,
+  }) {
+    return Container(
+      key: ValueKey('gallery-date-group-${entry.key}'),
+      width: 68,
+      margin: EdgeInsets.only(left: isFirst ? 0 : 6, right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      decoration: BoxDecoration(
+        color: t.surface,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: t.border, width: t.hairline),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.calendar_today_rounded, size: 12, color: t.inkMuted),
+          const SizedBox(height: 4),
+          Text(
+            entry.shortLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: t.ink,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          Text(
+            entry.subLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: t.inkMuted, fontSize: 9),
+          ),
+          const SizedBox(height: 4),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: t.selectedFill,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              child: Text(
+                '${entry.totalCount}',
+                style: TextStyle(
+                  color: t.ink,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildArchiveEndCard(SnipTheme t, _GalleryArchiveEndEntry entry) {
+    final title = entry.olderCount > 0 ? 'Older Captures' : 'All History';
+    final subtitle = entry.olderCount > 0
+        ? '${entry.olderCount} more by date'
+        : 'Browse by date';
+
+    return Container(
+      key: const ValueKey('gallery-older-history-card'),
+      width: 154,
+      margin: const EdgeInsets.only(left: 6, right: 4),
+      decoration: BoxDecoration(
+        color: t.surfaceRaised,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: t.borderStrong, width: t.hairline),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          hoverColor: t.hoverFill,
+          onTap: widget.onBrowseArchive ?? _openFolder,
+          child: Padding(
+            padding: const EdgeInsets.all(7),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.history_rounded, size: 15, color: t.ink),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: t.ink,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 13,
+                      color: t.inkMuted,
+                    ),
+                  ],
+                ),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: t.inkMuted, fontSize: 9.5),
+                ),
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    key: const ValueKey('gallery-older-open-folder'),
+                    borderRadius: BorderRadius.circular(4),
+                    hoverColor: t.hoverFill,
+                    onTap: _openFolder,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: t.surface,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: t.border, width: t.hairline),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 3,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.folder_open_rounded,
+                              size: 11,
+                              color: t.ink,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Open Folder',
+                              style: TextStyle(
+                                color: t.ink,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(SnipTheme t) {
+    if (widget.items.isEmpty && widget.olderCount == 0) {
+      return Center(
+        child: Text(
+          'No captures yet. Click "Snip" to start!',
+          textAlign: TextAlign.center,
+          // Was a fixed Colors.white38 regardless of mode — same
+          // pre-existing light-mode legibility bug as the close
+          // button above (white38 on near-white is unreadable).
+          style: TextStyle(color: t.inkMuted, fontSize: 13),
+        ),
+      );
+    }
+
+    final message = widget.items.isEmpty
+        ? 'No captures in the last 7 days.'
+        : 'No matching items in this filter.';
+    return Center(
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 10,
+        runSpacing: 6,
+        children: [
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: t.inkMuted, fontSize: 12.5),
+          ),
+          if (widget.olderCount > 0 && widget.onBrowseArchive != null)
+            OutlinedButton.icon(
+              key: const ValueKey('gallery-empty-browse-older'),
+              onPressed: widget.onBrowseArchive,
+              icon: Icon(Icons.history_rounded, size: 14, color: t.ink),
+              label: Text(
+                widget.items.isEmpty
+                    ? 'Browse ${widget.olderCount} older by date'
+                    : 'Browse older by date',
+                style: TextStyle(color: t.ink, fontSize: 11.5),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: t.borderStrong),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                minimumSize: const Size(0, 28),
+              ),
+            ),
+          if (widget.items.isEmpty && widget.olderCount > 0)
+            OutlinedButton.icon(
+              key: const ValueKey('gallery-empty-open-folder'),
+              onPressed: _openFolder,
+              icon: Icon(Icons.folder_open_rounded, size: 14, color: t.ink),
+              label: Text(
+                'Open Folder',
+                style: TextStyle(color: t.ink, fontSize: 11.5),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: t.border),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                minimumSize: const Size(0, 28),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -743,35 +1068,59 @@ class _GallerySidebarState extends State<GallerySidebar> {
                         maxWidth: trayConstraints.maxWidth,
                         minHeight: trayHeight,
                         maxHeight: trayHeight,
+                        // Gene - Nov, 25, 2026: Render date group headers, capture cards, and end-of-list archive/folder card (with dedicated 7-day empty state).
+                        // Old implementation:
+                        // child: filtered.isEmpty
+                        //     ? Center(
+                        //         child: Text(
+                        //           widget.items.isEmpty
+                        //               ? 'No captures yet. Click "Snip" to start!'
+                        //               : 'No matching items in this filter.',
+                        //           textAlign: TextAlign.center,
+                        //           style: TextStyle(
+                        //             color: t.inkMuted,
+                        //             fontSize: 13,
+                        //           ),
+                        //         ),
+                        //       )
+                        //     : ListView.builder(
+                        //         controller: _scrollController,
+                        //         scrollDirection: Axis.horizontal,
+                        //         padding: const EdgeInsets.symmetric(
+                        //           horizontal: 10,
+                        //           vertical: 8,
+                        //         ),
+                        //         itemCount: _effectiveItemCount(filtered),
+                        //         itemBuilder: (context, index) {
+                        //           final item = filtered[index];
                         child: filtered.isEmpty
-                            ? Center(
-                                child: Text(
-                                  widget.items.isEmpty
-                                      ? 'No captures yet. Click "Snip" to start!'
-                                      : 'No matching items in this filter.',
-                                  textAlign: TextAlign.center,
-                                  // Was a fixed Colors.white38 regardless of mode — same
-                                  // pre-existing light-mode legibility bug as the close
-                                  // button above (white38 on near-white is unreadable).
-                                  style: TextStyle(
-                                    color: t.inkMuted,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              )
-                            : ListView.builder(
-                                // Gene - Nov, 17, 2026: Attached _scrollController and capped itemCount to _effectiveItemCount(filtered) for lazy pagination.
-                                controller: _scrollController,
-                                scrollDirection: Axis.horizontal,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                // Old implementation:
-                                // itemCount: filtered.length,
-                                itemCount: _effectiveItemCount(filtered),
-                                itemBuilder: (context, index) {
-                                  final item = filtered[index];
+                            ? _buildEmptyState(t)
+                            : Builder(
+                                builder: (context) {
+                                  final entries = _buildEntries(filtered);
+                                  return ListView.builder(
+                                    // Gene - Nov, 17, 2026: Attached _scrollController and capped itemCount to _effectiveItemCount(filtered) for lazy pagination.
+                                    controller: _scrollController,
+                                    scrollDirection: Axis.horizontal,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 8,
+                                    ),
+                                    itemCount: entries.length,
+                                    itemBuilder: (context, index) {
+                                      final entry = entries[index];
+                                      if (entry is _GalleryDateHeaderEntry) {
+                                        return _buildDateGroupHeader(
+                                          t,
+                                          entry,
+                                          isFirst: index == 0,
+                                        );
+                                      }
+                                      if (entry is _GalleryArchiveEndEntry) {
+                                        return _buildArchiveEndCard(t, entry);
+                                      }
+                                      final item =
+                                          (entry as _GalleryCaptureEntry).item;
                                   final isSelected =
                                       widget.activeItem?.id == item.id;
                                   final displayPath =
@@ -1340,6 +1689,8 @@ class _GallerySidebarState extends State<GallerySidebar> {
                                         ),
                                       ),
                                     ),
+                                  );
+                                },
                                   );
                                 },
                               ),

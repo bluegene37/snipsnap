@@ -35,6 +35,8 @@ import '../services/update/update_controller.dart';
 // Gene - Nov, 08, 2026: Added ScreenRecordingController, ImageHeaderParser, and VideoCapturePlayerView imports.
 import '../services/screen_recording_controller.dart';
 import '../utils/canvas_projection.dart';
+// Gene - Nov, 25, 2026: Imported date grouping utility and CaptureHistoryDialog for 7-day tray loading and date-grouped archive browser.
+import '../utils/capture_date_group.dart';
 import '../utils/constants.dart';
 import '../utils/image_eviction.dart';
 import '../utils/image_header_parser.dart';
@@ -47,6 +49,7 @@ import 'components/style_picker.dart';
 import 'components/tool_sidebar.dart';
 import 'components/update_gate.dart';
 import 'dialogs/about_dialog.dart';
+import 'dialogs/capture_history_dialog.dart';
 import 'dialogs/save_as_dialog.dart';
 import 'dialogs/shortcut_settings_dialog.dart';
 import 'dialogs/user_manual_dialog.dart';
@@ -574,10 +577,13 @@ class _MainScreenState extends State<MainScreen> {
   final Map<String, List<({String filePath, int durationMs})>>
   _videoEditUndoStacks = {};
   // Gene - Nov, 20, 2026: Paginated gallery DB tracking state for two-phase startup and lazy scroll loading.
+  // Gene - Nov, 25, 2026: Added 7-day history cutoff and older captures count for date-grouped tray and archive browsing.
   static const int _historyPageSize = 30;
   int _historyDbOffset = 0;
   bool _hasMoreHistory = true;
   bool _isLoadingMoreHistory = false;
+  DateTime _recentHistoryCutoff = recentHistoryCutoff();
+  int _olderCapturesCount = 0;
 
   @override
   void initState() {
@@ -912,54 +918,146 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // Gene - Nov, 20, 2026: Two-phase startup history load: page 1 + saved active item render immediately; orphan directory scan defers until after the first frame.
+  // Gene - Nov, 25, 2026: Scoped bottom tray history loading to the last 7 calendar days while tracking older capture count for the end-of-list archive browser.
+  // Old implementation:
+  // Future<void> _loadHistory() async {
+  //   final results = await Future.wait<Object?>([
+  //     StorageService.loadHistoryPage(limit: _historyPageSize, offset: 0),
+  //     DatabaseService.getSetting('active_capture_id'),
+  //   ]);
+  //   final page =
+  //       results[0] as ({List<CaptureItem> items, int dbCount, bool hasMore});
+  //   final savedSelectedId = results[1] as String?;
+  //
+  //   final items = List<CaptureItem>.of(page.items);
+  //   if (savedSelectedId != null && !items.any((c) => c.id == savedSelectedId)) {
+  //     final savedItem = await DatabaseService.loadCaptureByIdFromDb(
+  //       savedSelectedId,
+  //     );
+  //     if (savedItem != null && await File(savedItem.filePath).exists()) {
+  //       items.add(savedItem);
+  //       items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  //     }
+  //   }
+  //
+  //   var adoptedCount = 0;
+  //   final shouldAdoptInBackground = items.isNotEmpty;
+  //   if (items.isEmpty) {
+  //     final adopted = await StorageService.adoptOrphanedFilesInDirectory(
+  //       knownPaths: <String>{},
+  //       knownThumbnails: <String>{},
+  //     );
+  //     if (adopted.isNotEmpty) {
+  //       items.addAll(adopted);
+  //       items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  //       adoptedCount = adopted.length;
+  //     }
+  //   }
+  //
+  //   if (mounted) {
+  //     setState(() {
+  //       _historyDbOffset = page.dbCount + adoptedCount;
+  //       _hasMoreHistory = page.hasMore;
+  //       _captures.clear();
+  //       _captures.addAll(items);
+  //       if (_captures.isNotEmpty) {
+  //         CaptureItem targetItem = _captures.first;
+  //         if (savedSelectedId != null) {
+  //           final found = _captures.where((c) => c.id == savedSelectedId);
+  //           if (found.isNotEmpty) {
+  //             targetItem = found.first;
+  //           }
+  //         }
+  //         _activeCapture = targetItem;
+  //         _annotations = List.from(_activeCapture!.annotations);
+  //         _stepCounter = _findMaxStepNumber(_annotations) + 1;
+  //       }
+  //     });
+  //
+  //     if (_activeCapture != null && _activeCapture!.annotationsNeedConversion) {
+  //       WidgetsBinding.instance.addPostFrameCallback((_) {
+  //         if (!mounted) return;
+  //         _convertActiveCaptureAnnotations();
+  //       });
+  //     }
+  //
+  //     if (shouldAdoptInBackground) {
+  //       unawaited(_adoptOrphanedFilesInBackground());
+  //     }
+  //   }
+  // }
   Future<void> _loadHistory() async {
-    // Old implementation:
-    // final items = await StorageService.loadHistory();
-    // final savedSelectedId = await DatabaseService.getSetting(
-    //   'active_capture_id',
-    // );
-    // ...
+    final cutoff = recentHistoryCutoff();
+    _recentHistoryCutoff = cutoff;
+
     final results = await Future.wait<Object?>([
-      StorageService.loadHistoryPage(limit: _historyPageSize, offset: 0),
+      StorageService.loadRecentHistoryPage(
+        since: cutoff,
+        limit: _historyPageSize,
+        offset: 0,
+        includeOlderCount: true,
+      ),
       DatabaseService.getSetting('active_capture_id'),
     ]);
     final page =
-        results[0] as ({List<CaptureItem> items, int dbCount, bool hasMore});
+        results[0]
+            as ({
+              List<CaptureItem> items,
+              int dbCount,
+              bool hasMore,
+              int olderCount,
+            });
     final savedSelectedId = results[1] as String?;
 
     final items = List<CaptureItem>.of(page.items);
+    CaptureItem? restoredOlderActiveItem;
     if (savedSelectedId != null && !items.any((c) => c.id == savedSelectedId)) {
       final savedItem = await DatabaseService.loadCaptureByIdFromDb(
         savedSelectedId,
       );
       if (savedItem != null && await File(savedItem.filePath).exists()) {
-        items.add(savedItem);
-        items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        if (!savedItem.createdAt.isBefore(cutoff)) {
+          items.add(savedItem);
+          items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        } else {
+          restoredOlderActiveItem = savedItem;
+        }
       }
     }
 
-    // Gene - Nov, 20, 2026: Adopt on-disk files eagerly when DB page 1 is empty (e.g., fresh migration or tests), and defer background adoption otherwise.
-    var adoptedCount = 0;
-    final shouldAdoptInBackground = items.isNotEmpty;
-    if (items.isEmpty) {
+    var recentAdoptedCount = 0;
+    var olderAdoptedCount = 0;
+    final shouldAdoptInBackground = items.isNotEmpty || page.olderCount > 0;
+    if (items.isEmpty && page.olderCount == 0) {
       final adopted = await StorageService.adoptOrphanedFilesInDirectory(
         knownPaths: <String>{},
         knownThumbnails: <String>{},
       );
       if (adopted.isNotEmpty) {
-        items.addAll(adopted);
-        items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        adoptedCount = adopted.length;
+        final recentAdopted = adopted
+            .where((c) => !c.createdAt.isBefore(cutoff))
+            .toList();
+        recentAdoptedCount = recentAdopted.length;
+        olderAdoptedCount = adopted.length - recentAdoptedCount;
+        if (recentAdopted.isNotEmpty) {
+          items.addAll(recentAdopted);
+          items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        }
       }
     }
 
     if (mounted) {
       setState(() {
-        _historyDbOffset = page.dbCount + adoptedCount;
+        _historyDbOffset = page.dbCount + recentAdoptedCount;
         _hasMoreHistory = page.hasMore;
+        _olderCapturesCount = page.olderCount + olderAdoptedCount;
         _captures.clear();
         _captures.addAll(items);
-        if (_captures.isNotEmpty) {
+        if (restoredOlderActiveItem != null) {
+          _activeCapture = restoredOlderActiveItem;
+          _annotations = List.from(restoredOlderActiveItem.annotations);
+          _stepCounter = _findMaxStepNumber(_annotations) + 1;
+        } else if (_captures.isNotEmpty) {
           CaptureItem targetItem = _captures.first;
           if (savedSelectedId != null) {
             final found = _captures.where((c) => c.id == savedSelectedId);
@@ -987,13 +1085,43 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // Gene - Nov, 20, 2026: Load next page of capture history lazily when GallerySidebar scrolls near the end.
+  // Gene - Nov, 25, 2026: Page within the 7-day recent window for GallerySidebar.
+  // Old implementation:
+  // Future<void> _loadMoreHistory() async {
+  //   if (_isLoadingMoreHistory || !_hasMoreHistory) return;
+  //   _isLoadingMoreHistory = true;
+  //   try {
+  //     final page = await StorageService.loadHistoryPage(
+  //       limit: _historyPageSize,
+  //       offset: _historyDbOffset,
+  //     );
+  //     if (!mounted) return;
+  //     _historyDbOffset += page.dbCount;
+  //     _hasMoreHistory = page.hasMore;
+  //     if (page.items.isNotEmpty) {
+  //       final existingIds = _captures.map((c) => c.id).toSet();
+  //       final fresh = page.items
+  //           .where((c) => !existingIds.contains(c.id))
+  //           .toList();
+  //       if (fresh.isNotEmpty) {
+  //         setState(() {
+  //           _captures.addAll(fresh);
+  //         });
+  //       }
+  //     }
+  //   } finally {
+  //     _isLoadingMoreHistory = false;
+  //   }
+  // }
   Future<void> _loadMoreHistory() async {
     if (_isLoadingMoreHistory || !_hasMoreHistory) return;
     _isLoadingMoreHistory = true;
     try {
-      final page = await StorageService.loadHistoryPage(
+      final page = await StorageService.loadRecentHistoryPage(
+        since: _recentHistoryCutoff,
         limit: _historyPageSize,
         offset: _historyDbOffset,
+        includeOlderCount: false,
       );
       if (!mounted) return;
       _historyDbOffset += page.dbCount;
@@ -1015,17 +1143,39 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   // Gene - Nov, 20, 2026: Deferred background directory scan after first frame so orphan image/video files are adopted without blocking startup; queries only paths/thumbnails with zero annotation BLOB reads.
+  // Gene - Nov, 25, 2026: Partition background-adopted orphan files between recent 7-day tray items and older capture count.
+  // Old implementation:
+  // Future<void> _adoptOrphanedFilesInBackground() async {
+  //   final dbKnown = await DatabaseService.loadKnownCapturePaths();
+  //   final knownPaths = <String>{
+  //     ..._captures.map((c) => c.filePath),
+  //     ...dbKnown.filePaths,
+  //   };
+  //   final knownThumbnails = <String>{
+  //     ..._captures.map((c) => c.thumbnailPath).whereType<String>(),
+  //     ...dbKnown.thumbnailPaths,
+  //   };
+  //   final adopted = await StorageService.adoptOrphanedFilesInDirectory(
+  //     knownPaths: knownPaths,
+  //     knownThumbnails: knownThumbnails,
+  //   );
+  //   if (!mounted || adopted.isEmpty) return;
+  //
+  //   final existingIds = _captures.map((c) => c.id).toSet();
+  //   final fresh = adopted.where((c) => !existingIds.contains(c.id)).toList();
+  //   if (fresh.isEmpty) return;
+  //   setState(() {
+  //     _captures.addAll(fresh);
+  //     _captures.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  //     _historyDbOffset += fresh.length;
+  //     if (_activeCapture == null && _captures.isNotEmpty) {
+  //       _activeCapture = _captures.first;
+  //       _annotations = List.from(_activeCapture!.annotations);
+  //       _stepCounter = _findMaxStepNumber(_annotations) + 1;
+  //     }
+  //   });
+  // }
   Future<void> _adoptOrphanedFilesInBackground() async {
-    // Old implementation:
-    // final dbItems = await DatabaseService.loadCapturesFromDb();
-    // final knownPaths = <String>{
-    //   ..._captures.map((c) => c.filePath),
-    //   ...dbItems.map((c) => c.filePath),
-    // };
-    // final knownThumbnails = <String>{
-    //   ..._captures.map((c) => c.thumbnailPath).whereType<String>(),
-    //   ...dbItems.map((c) => c.thumbnailPath).whereType<String>(),
-    // };
     final dbKnown = await DatabaseService.loadKnownCapturePaths();
     final knownPaths = <String>{
       ..._captures.map((c) => c.filePath),
@@ -1044,14 +1194,25 @@ class _MainScreenState extends State<MainScreen> {
     final existingIds = _captures.map((c) => c.id).toSet();
     final fresh = adopted.where((c) => !existingIds.contains(c.id)).toList();
     if (fresh.isEmpty) return;
+
+    final recentFresh = fresh
+        .where((c) => !c.createdAt.isBefore(_recentHistoryCutoff))
+        .toList();
+    final olderFreshCount = fresh.length - recentFresh.length;
+
     setState(() {
-      _captures.addAll(fresh);
-      _captures.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      _historyDbOffset += fresh.length;
-      if (_activeCapture == null && _captures.isNotEmpty) {
-        _activeCapture = _captures.first;
-        _annotations = List.from(_activeCapture!.annotations);
-        _stepCounter = _findMaxStepNumber(_annotations) + 1;
+      if (olderFreshCount > 0) {
+        _olderCapturesCount += olderFreshCount;
+      }
+      if (recentFresh.isNotEmpty) {
+        _captures.addAll(recentFresh);
+        _captures.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        _historyDbOffset += recentFresh.length;
+        if (_activeCapture == null && _captures.isNotEmpty) {
+          _activeCapture = _captures.first;
+          _annotations = List.from(_activeCapture!.annotations);
+          _stepCounter = _findMaxStepNumber(_annotations) + 1;
+        }
       }
     });
   }
@@ -3918,6 +4079,129 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
+  // Gene - Nov, 25, 2026: Extracted capture selection, deletion, folder open/reveal, and date-grouped archive dialog helpers for both GallerySidebar and CaptureHistoryDialog.
+  void _selectCaptureItem(CaptureItem item) {
+    _syncCurrentCaptureAnnotations();
+    setState(() {
+      // A different bitmap: nothing cached for the old one can
+      // describe it, and the open panel is about the old one.
+      final switched = _activeCapture?.id != item.id;
+      _resetOcr();
+      _activeCapture = item;
+      _annotations = List.from(item.annotations);
+      _undoStack.clear();
+      _redoStack.clear();
+      _stepCounter = _findMaxStepNumber(item.annotations) + 1;
+      // Gene - Nov, 20, 2026: Reset zoom state when selecting a different capture.
+      if (switched) {
+        _zoomScale = 1.0;
+        _maxZoomScale = 4.0;
+      }
+    });
+    DatabaseService.setSetting('active_capture_id', item.id);
+    if (item.annotationsNeedConversion) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _convertActiveCaptureAnnotations();
+      });
+    }
+  }
+
+  Future<void> _removeCaptureFromStateAndDisk(CaptureItem item) async {
+    // Read before the setState below reassigns _activeCapture.
+    final wasActive = _activeCapture?.id == item.id;
+    if (wasActive) {
+      _syncCurrentCaptureAnnotations();
+    }
+    final wasInRecent = _captures.any((c) => c.id == item.id);
+    setState(() {
+      if (wasInRecent) {
+        _captures.removeWhere((c) => c.id == item.id);
+        // Gene - Nov, 20, 2026: Keep DB pagination offset aligned after item deletion.
+        if (_historyDbOffset > 0) _historyDbOffset--;
+      } else if (item.createdAt.isBefore(_recentHistoryCutoff) &&
+          _olderCapturesCount > 0) {
+        _olderCapturesCount--;
+      }
+      if (_activeCapture?.id == item.id) {
+        _resetOcr();
+        _activeCapture = _captures.isNotEmpty ? _captures.first : null;
+        _annotations = _activeCapture != null
+            ? List.from(_activeCapture!.annotations)
+            : [];
+        _undoStack.clear();
+        _redoStack.clear();
+        _stepCounter = _activeCapture != null
+            ? _findMaxStepNumber(_annotations) + 1
+            : 1;
+        // Gene - Nov, 20, 2026: Reset zoom state when active capture is deleted.
+        _zoomScale = 1.0;
+        _maxZoomScale = 4.0;
+      }
+    });
+    if (_activeCapture != null) {
+      unawaited(
+        DatabaseService.setSetting('active_capture_id', _activeCapture!.id),
+      );
+    }
+    if (wasActive && (_activeCapture?.annotationsNeedConversion ?? false)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _convertActiveCaptureAnnotations();
+      });
+    }
+    try {
+      // Gene - Nov, 24, 2026: Release open Windows Media Foundation player file handles before deleting MP4 captures.
+      if (Platform.isWindows && item.isVideo) {
+        await _captureService.releaseVideoPlayersForPath(item.filePath);
+      }
+      final file = File(item.filePath);
+      if (file.existsSync()) {
+        await file.delete();
+      }
+      if (item.thumbnailPath != null) {
+        final thumb = File(item.thumbnailPath!);
+        if (thumb.existsSync()) {
+          await thumb.delete();
+        }
+      }
+      if (item.isVideo) {
+        final backupPath = await _captureService.getOriginalBackupPath(item.id);
+        final backupFile = File(backupPath);
+        if (backupFile.existsSync()) {
+          await backupFile.delete();
+        }
+        final undoEntries = _videoEditUndoStacks.remove(item.id) ?? const [];
+        for (final entry in undoEntries) {
+          final f = File(entry.filePath);
+          if (f.existsSync()) {
+            await f.delete();
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _deleteCaptureItem(CaptureItem item) async {
+    await _removeCaptureFromStateAndDisk(item);
+    await _flushPersist();
+    await StorageService.deleteCaptureItem(item.id);
+  }
+
+  Future<void> _openLibraryLocation() async {
+    final opened = await StorageService.openLibraryFolder();
+    if (!opened) {
+      _showToast('Could not open screenshots folder');
+    }
+  }
+
+  Future<void> _revealCaptureInFolder(CaptureItem item) async {
+    final revealed = await StorageService.revealFileInFolder(item.filePath);
+    if (!revealed) {
+      _showToast('Could not reveal file in folder');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // This State's own `context` sits above the SnipThemeScope built below,
@@ -4481,176 +4765,21 @@ class _MainScreenState extends State<MainScreen> {
                       isOpen: _isSidebarOpen,
                       // Gene - Nov, 20, 2026: Wire paginated DB loading when GallerySidebar scrolls near the end.
                       onLoadMore: _hasMoreHistory ? _loadMoreHistory : null,
+                      // Gene - Nov, 25, 2026: Wire 7-day older count and date-grouped archive dialog alongside shared selection/delete/folder handlers.
+                      olderCount: _olderCapturesCount,
+                      onBrowseArchive: _openHistoryArchiveDialog,
                       onToggleCollapse: () =>
                           setState(() => _isSidebarOpen = !_isSidebarOpen),
-                      onSelectItem: (item) {
-                        _syncCurrentCaptureAnnotations();
-                        setState(() {
-                          // A different bitmap: nothing cached for the old one can
-                          // describe it, and the open panel is about the old one.
-                          final switched = _activeCapture?.id != item.id;
-                          _resetOcr();
-                          _activeCapture = item;
-                          _annotations = List.from(item.annotations);
-                          _undoStack.clear();
-                          _redoStack.clear();
-                          _stepCounter =
-                              _findMaxStepNumber(item.annotations) + 1;
-                          // Gene - Nov, 20, 2026: Reset zoom state when selecting a different capture.
-                          if (switched) {
-                            _zoomScale = 1.0;
-                            _maxZoomScale = 4.0;
-                          }
-                        });
-                        DatabaseService.setSetting(
-                          'active_capture_id',
-                          item.id,
-                        );
-                        if (item.annotationsNeedConversion) {
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (!mounted) return;
-                            _convertActiveCaptureAnnotations();
-                          });
-                        }
-                      },
+                      // Old implementation: inline onSelectItem, onDeleteItem, onOpenLibraryLocation, onRevealItemInFolder callbacks.
+                      onSelectItem: _selectCaptureItem,
                       onDeleteItem: (item) async {
-                        // Read before the setState below reassigns _activeCapture.
-                        final wasActive = _activeCapture?.id == item.id;
-                        if (wasActive) {
-                          _syncCurrentCaptureAnnotations();
-                        }
-                        setState(() {
-                          _captures.removeWhere((c) => c.id == item.id);
-                          // Gene - Nov, 20, 2026: Keep DB pagination offset aligned after item deletion.
-                          if (_historyDbOffset > 0) _historyDbOffset--;
-                          if (_activeCapture?.id == item.id) {
-                            _resetOcr();
-                            _activeCapture = _captures.isNotEmpty
-                                ? _captures.first
-                                : null;
-                            _annotations = _activeCapture != null
-                                ? List.from(_activeCapture!.annotations)
-                                : [];
-                            _undoStack.clear();
-                            _redoStack.clear();
-                            _stepCounter = _activeCapture != null
-                                ? _findMaxStepNumber(_annotations) + 1
-                                : 1;
-                            // Gene - Nov, 20, 2026: Reset zoom state when active capture is deleted.
-                            _zoomScale = 1.0;
-                            _maxZoomScale = 4.0;
-                          }
-                        });
-                        if (_activeCapture != null) {
-                          unawaited(
-                            DatabaseService.setSetting(
-                              'active_capture_id',
-                              _activeCapture!.id,
-                            ),
-                          );
-                        }
-                        // Deleting the active capture *promotes* the next one, which
-                        // is a selection change by any other name — so it owes the
-                        // same conversion onSelectItem schedules. Without this the
-                        // promoted capture spends the session with viewport numbers
-                        // treated as image pixels (markup at the wrong scale), and
-                        // because the save guard correctly refuses to persist it,
-                        // nothing the user draws on it is ever written.
-                        //
-                        // Gated on [wasActive] so deleting a *background* capture
-                        // does not schedule a redundant second conversion for the
-                        // unchanged active one — two in-flight runs could both pass
-                        // the flag check across the decode await and double-scale.
-                        if (wasActive &&
-                            (_activeCapture?.annotationsNeedConversion ??
-                                false)) {
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (!mounted) return;
-                            _convertActiveCaptureAnnotations();
-                          });
-                        }
-                        try {
-                          // Gene - Nov, 24, 2026: Release open Windows Media Foundation player file handles before deleting MP4 captures.
-                          if (Platform.isWindows && item.isVideo) {
-                            await _captureService.releaseVideoPlayersForPath(
-                              item.filePath,
-                            );
-                          }
-                          final file = File(item.filePath);
-                          if (file.existsSync()) {
-                            await file.delete();
-                          }
-                          if (item.thumbnailPath != null) {
-                            final thumb = File(item.thumbnailPath!);
-                            if (thumb.existsSync()) {
-                              await thumb.delete();
-                            }
-                          }
-                          // Gene - Nov, 13, 2026: Only clean up .originals backup and video undo files when deleting a video capture so image deletes never await extra directory lookups before DB cleanup.
-                          // Old implementation:
-                          // final backupPath = await _captureService
-                          //     .getOriginalBackupPath(item.id);
-                          // final backupFile = File(backupPath);
-                          // if (backupFile.existsSync()) {
-                          //   await backupFile.delete();
-                          // }
-                          // final undoEntries =
-                          //     _videoEditUndoStacks.remove(item.id) ?? const [];
-                          // for (final entry in undoEntries) {
-                          //   final f = File(entry.filePath);
-                          //   if (f.existsSync()) {
-                          //     await f.delete();
-                          //   }
-                          // }
-                          if (item.isVideo) {
-                            final backupPath = await _captureService
-                                .getOriginalBackupPath(item.id);
-                            final backupFile = File(backupPath);
-                            if (backupFile.existsSync()) {
-                              await backupFile.delete();
-                            }
-                            final undoEntries =
-                                _videoEditUndoStacks.remove(item.id) ??
-                                const [];
-                            for (final entry in undoEntries) {
-                              final f = File(entry.filePath);
-                              if (f.existsSync()) {
-                                await f.delete();
-                              }
-                            }
-                          }
-                        } catch (_) {}
-                        // The row and its annotations, not just the file.
-                        // `saveHistory` below only rewrites the captures still in
-                        // the list; it never deletes, so without this the deleted
-                        // capture's rows lived on forever — and if the file delete
-                        // above failed (it is deliberately swallowed) the whole
-                        // capture reappeared, annotations and all, on next launch.
-                        //
-                        // Let the sync above finish first: its write is two
-                        // steps, and the delete landing between them left the
-                        // annotation rows behind without their capture.
+                        await _removeCaptureFromStateAndDisk(item);
                         await _flushPersist();
                         await StorageService.deleteCaptureItem(item.id);
-                        // Gene - Nov, 13, 2026: Removed redundant whole-library saveHistory rewrite after deleteCaptureItem; deleting one item does not modify remaining captures and rewriting all items raced rapid consecutive deletes.
-                        // unawaited(StorageService.saveHistory(_captures));
                       },
                       onRenameItem: _handleRenameCaptureItem,
-                      onOpenLibraryLocation: () async {
-                        final opened = await StorageService.openLibraryFolder();
-                        if (!opened) {
-                          _showToast('Could not open screenshots folder');
-                        }
-                      },
-                      onRevealItemInFolder: (item) async {
-                        final revealed =
-                            await StorageService.revealFileInFolder(
-                              item.filePath,
-                            );
-                        if (!revealed) {
-                          _showToast('Could not reveal file in folder');
-                        }
-                      },
+                      onOpenLibraryLocation: _openLibraryLocation,
+                      onRevealItemInFolder: _revealCaptureInFolder,
                       onClose: () => setState(() => _isSidebarOpen = false),
                     ),
                   ],
@@ -4659,6 +4788,22 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _openHistoryArchiveDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => CaptureHistoryDialog(
+        recentCutoff: _recentHistoryCutoff,
+        olderCount: _olderCapturesCount,
+        activeItem: _activeCapture,
+        imageRevision: _imageRevision,
+        onSelectItem: _selectCaptureItem,
+        onDeleteItem: _deleteCaptureItem,
+        onOpenLibraryLocation: _openLibraryLocation,
+        onRevealItemInFolder: _revealCaptureInFolder,
       ),
     );
   }

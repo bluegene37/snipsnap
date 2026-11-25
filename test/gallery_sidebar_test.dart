@@ -20,13 +20,15 @@ CaptureItem _item(
   int height = 0,
   // Gene - Nov, 22, 2026: Added mediaType parameter so tests can cover Videos/Images filter pagination.
   CaptureMediaType mediaType = CaptureMediaType.image,
+  // Gene - Nov, 25, 2026: Added optional createdAt parameter for date-grouping tests.
+  DateTime? createdAt,
 }) => CaptureItem(
   id: id,
   filePath: mediaType == CaptureMediaType.video
       ? '/nonexistent/$id.mp4'
       : '/nonexistent/$id.png',
   title: 'Capture $id',
-  createdAt: DateTime(2026, 1, 1),
+  createdAt: createdAt ?? DateTime(2026, 1, 1),
   width: width,
   height: height,
   mediaType: mediaType,
@@ -98,6 +100,21 @@ CaptureItem _item(
 //     ),
 //   );
 // }
+// Gene - Nov, 25, 2026: Added olderCount, onBrowseArchive, onOpenLibraryLocation, and nowOverride parameters to _pump for date-group and archive tests.
+// Old implementation:
+// Future<void> _pump(
+//   WidgetTester tester, {
+//   required SnipThemeMode mode,
+//   required List<CaptureItem> items,
+//   CaptureItem? activeItem,
+//   ValueChanged<CaptureItem>? onSelectItem,
+//   ValueChanged<CaptureItem>? onDeleteItem,
+//   double zoomScale = 1.0,
+//   ValueChanged<double>? onZoomScaleChanged,
+//   bool isOpen = true,
+//   VoidCallback? onToggleCollapse,
+//   VoidCallback? onLoadMore,
+// }) { ... }
 Future<void> _pump(
   WidgetTester tester, {
   required SnipThemeMode mode,
@@ -110,6 +127,10 @@ Future<void> _pump(
   bool isOpen = true,
   VoidCallback? onToggleCollapse,
   VoidCallback? onLoadMore,
+  int olderCount = 0,
+  VoidCallback? onBrowseArchive,
+  VoidCallback? onOpenLibraryLocation,
+  DateTime? nowOverride,
 }) {
   return tester.pumpWidget(
     SnipThemeScope(
@@ -127,6 +148,10 @@ Future<void> _pump(
             isOpen: isOpen,
             onToggleCollapse: onToggleCollapse,
             onLoadMore: onLoadMore,
+            olderCount: olderCount,
+            onBrowseArchive: onBrowseArchive,
+            onOpenLibraryLocation: onOpenLibraryLocation,
+            nowOverride: nowOverride,
           ),
         ),
       ),
@@ -459,7 +484,10 @@ void _runStateTests(SnipThemeMode mode) {
       final items = List.generate(50, (i) => _item('item_$i'));
       await _pump(tester, mode: mode, items: items, activeItem: items.first);
 
-      expect(listChildCount(tester), kGalleryInitialBatchSize);
+      // Gene - Nov, 25, 2026: Account for the single shared date group header rail prepended to the 20 visible items.
+      // Old implementation:
+      // expect(listChildCount(tester), kGalleryInitialBatchSize);
+      expect(listChildCount(tester), kGalleryInitialBatchSize + 1);
       expect(find.text('Capture item_0'), findsOneWidget);
       expect(find.text('Capture item_20'), findsNothing);
     },
@@ -478,7 +506,10 @@ void _runStateTests(SnipThemeMode mode) {
         onLoadMore: () => loadMoreCalls++,
       );
 
-      expect(listChildCount(tester), kGalleryInitialBatchSize);
+      // Gene - Nov, 25, 2026: Account for the 1 date group header rail in listChildCount and jumpTo offset.
+      // Old implementation:
+      // expect(listChildCount(tester), kGalleryInitialBatchSize);
+      expect(listChildCount(tester), kGalleryInitialBatchSize + 1);
       expect(loadMoreCalls, 0);
 
       final listView = tester.widget<ListView>(find.byType(ListView));
@@ -488,26 +519,36 @@ void _runStateTests(SnipThemeMode mode) {
       controller.jumpTo(controller.position.maxScrollExtent - 50);
       await tester.pump();
 
+      // expect(
+      //   listChildCount(tester),
+      //   kGalleryInitialBatchSize + kGalleryBatchIncrement,
+      // );
       expect(
         listChildCount(tester),
-        kGalleryInitialBatchSize + kGalleryBatchIncrement,
+        kGalleryInitialBatchSize + kGalleryBatchIncrement + 1,
       );
       expect(loadMoreCalls, 0);
 
       // Item 20 is now in the list and reachable before the next scroll threshold.
-      controller.jumpTo(20 * 158.0);
+      // controller.jumpTo(20 * 158.0);
+      controller.jumpTo(76 + 20 * 158.0);
       await tester.pump();
       expect(find.text('Capture item_20'), findsOneWidget);
+      // expect(
+      //   listChildCount(tester),
+      //   kGalleryInitialBatchSize + kGalleryBatchIncrement,
+      // );
       expect(
         listChildCount(tester),
-        kGalleryInitialBatchSize + kGalleryBatchIncrement,
+        kGalleryInitialBatchSize + kGalleryBatchIncrement + 1,
       );
 
       // Second scroll near right edge of the 40 items -> loads remaining 10 and calls onLoadMore.
       controller.jumpTo(controller.position.maxScrollExtent - 50);
       await tester.pump();
 
-      expect(listChildCount(tester), 50);
+      // expect(listChildCount(tester), 50);
+      expect(listChildCount(tester), 51);
       expect(loadMoreCalls, 1);
 
       controller.jumpTo(controller.position.maxScrollExtent);
@@ -522,11 +563,17 @@ void _runStateTests(SnipThemeMode mode) {
       final items = List.generate(50, (i) => _item('item_$i'));
       await _pump(tester, mode: mode, items: items, activeItem: items[35]);
 
-      expect(listChildCount(tester), 36);
+      // Gene - Nov, 25, 2026: Account for the 1 date group header rail in listChildCount.
+      // Old implementation:
+      // expect(listChildCount(tester), 36);
+      expect(listChildCount(tester), 37);
 
       final listView = tester.widget<ListView>(find.byType(ListView));
       final controller = listView.controller!;
       controller.jumpTo(controller.position.maxScrollExtent);
+      await tester.pump();
+      // Gene - Nov, 25, 2026: After initial ListView extent estimate settles across mixed-width header + cards, jump to item 35's scroll offset.
+      controller.jumpTo(76 + 35 * 158.0 - 400);
       await tester.pump();
 
       expect(find.text('Capture item_35'), findsOneWidget);
@@ -559,6 +606,98 @@ void _runStateTests(SnipThemeMode mode) {
       expect(find.text('Capture vid_0'), findsOneWidget);
       expect(find.text('Capture img_0'), findsNothing);
       expect(loadMoreCalls, 1);
+    },
+  );
+
+  // Gene - Nov, 25, 2026: Tests for date group header rails, end-of-list Older Captures / Open Folder card, and 7-day empty state.
+  testWidgets(
+    '[$label] renders date group headers across multiple days with count pills',
+    (tester) async {
+      final now = DateTime(2026, 11, 25, 14, 0);
+      final items = [
+        _item('t1', createdAt: DateTime(2026, 11, 25, 12, 0)),
+        _item('t2', createdAt: DateTime(2026, 11, 25, 9, 0)),
+        _item('y1', createdAt: DateTime(2026, 11, 24, 17, 0)),
+      ];
+      await _pump(
+        tester,
+        mode: mode,
+        items: items,
+        activeItem: items.first,
+        nowOverride: now,
+      );
+
+      expect(
+        find.byKey(const ValueKey('gallery-date-group-2026-11-25')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('gallery-date-group-2026-11-24')),
+        findsOneWidget,
+      );
+      expect(find.text('Today'), findsOneWidget);
+      expect(find.text('Yesterday'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+      expect(find.text('1'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    '[$label] renders end-of-list Older Captures card and wires browse archive and open folder actions',
+    (tester) async {
+      final now = DateTime(2026, 11, 25, 14, 0);
+      final items = [_item('t1', createdAt: DateTime(2026, 11, 25, 12, 0))];
+      var browseCalls = 0;
+      var folderCalls = 0;
+      await _pump(
+        tester,
+        mode: mode,
+        items: items,
+        activeItem: items.first,
+        olderCount: 4,
+        onBrowseArchive: () => browseCalls++,
+        onOpenLibraryLocation: () => folderCalls++,
+        nowOverride: now,
+      );
+
+      expect(
+        find.byKey(const ValueKey('gallery-older-history-card')),
+        findsOneWidget,
+      );
+      expect(find.text('Older Captures'), findsOneWidget);
+      expect(find.text('4 more by date'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('gallery-older-open-folder')));
+      await tester.pump();
+      expect(folderCalls, 1);
+      expect(browseCalls, 0);
+
+      await tester.tap(find.text('Older Captures'));
+      await tester.pump();
+      expect(browseCalls, 1);
+    },
+  );
+
+  testWidgets(
+    '[$label] empty 7-day tray with older captures offers Browse older by date action',
+    (tester) async {
+      var browseCalls = 0;
+      await _pump(
+        tester,
+        mode: mode,
+        items: const [],
+        olderCount: 5,
+        onBrowseArchive: () => browseCalls++,
+      );
+
+      expect(find.text('No captures in the last 7 days.'), findsOneWidget);
+      expect(find.text('Browse 5 older by date'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('gallery-empty-browse-older')),
+      );
+      await tester.pump();
+      expect(browseCalls, 1);
     },
   );
 }

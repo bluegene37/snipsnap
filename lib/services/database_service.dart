@@ -146,6 +146,48 @@ class DatabaseService {
     return _captureItemFromRow(row, {row.id: annRows});
   }
 
+  // Gene - Nov, 25, 2026: Added date-scoped capture queries (loadCapturesSinceFromDb, loadCapturesBeforeFromDb, countCapturesBeforeFromDb) for 7-day tray loading and archive browsing.
+  static Future<List<CaptureItem>> _loadCaptureItemsForRows(
+    List<Capture> rows,
+  ) async {
+    if (rows.isEmpty) return <CaptureItem>[];
+    final allAnnRows = await db.getAnnotationsForCaptureIds(
+      rows.map((r) => r.id).toList(),
+    );
+    final annsByCaptureId = <String, List<DbAnnotation>>{};
+    for (final ann in allAnnRows) {
+      annsByCaptureId
+          .putIfAbsent(ann.captureId, () => <DbAnnotation>[])
+          .add(ann);
+    }
+    return [for (final row in rows) _captureItemFromRow(row, annsByCaptureId)];
+  }
+
+  static Future<List<CaptureItem>> loadCapturesSinceFromDb(
+    DateTime since, {
+    int? limit,
+    int offset = 0,
+  }) async {
+    final rows = await db.getCapturesSince(since, limit: limit, offset: offset);
+    return _loadCaptureItemsForRows(rows);
+  }
+
+  static Future<List<CaptureItem>> loadCapturesBeforeFromDb(
+    DateTime before, {
+    int? limit,
+    int offset = 0,
+  }) async {
+    final rows = await db.getCapturesBefore(
+      before,
+      limit: limit,
+      offset: offset,
+    );
+    return _loadCaptureItemsForRows(rows);
+  }
+
+  static Future<int> countCapturesBeforeFromDb(DateTime before) =>
+      db.countCapturesBefore(before);
+
   // Gene - Nov, 20, 2026: Lightweight filePath/thumbnailPath query so background orphan file adoption never reads annotation rows or patchBytes BLOBs.
   static Future<({Set<String> filePaths, Set<String> thumbnailPaths})>
   loadKnownCapturePaths() async {

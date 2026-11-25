@@ -204,6 +204,48 @@ class AppDatabase extends _$AppDatabase {
             ..limit(limit, offset: offset))
           .get();
 
+  // Gene - Nov, 25, 2026: Added date-scoped capture queries (getCapturesSince, getCapturesBefore, countCapturesBefore) for 7-day tray loading and date-grouped archive browsing.
+  Future<List<Capture>> getCapturesSince(
+    DateTime since, {
+    int? limit,
+    int offset = 0,
+  }) {
+    final query = select(captures)
+      ..where((t) => t.createdAt.isBiggerOrEqualValue(since))
+      ..orderBy([
+        (t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc),
+      ]);
+    if (limit != null) {
+      query.limit(limit, offset: offset);
+    }
+    return query.get();
+  }
+
+  Future<List<Capture>> getCapturesBefore(
+    DateTime before, {
+    int? limit,
+    int offset = 0,
+  }) {
+    final query = select(captures)
+      ..where((t) => t.createdAt.isSmallerThanValue(before))
+      ..orderBy([
+        (t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc),
+      ]);
+    if (limit != null) {
+      query.limit(limit, offset: offset);
+    }
+    return query.get();
+  }
+
+  Future<int> countCapturesBefore(DateTime before) async {
+    final countExp = captures.id.count();
+    final query = selectOnly(captures)
+      ..addColumns([countExp])
+      ..where(captures.createdAt.isSmallerThanValue(before));
+    final row = await query.getSingle();
+    return row.read(countExp) ?? 0;
+  }
+
   // Gene - Nov, 20, 2026: Added getCaptureById so startup can fetch a saved active_capture_id outside page 1, and getAllCapturePathsAndThumbnails to avoid fetching annotation BLOBs during background orphan scan.
   Future<Capture?> getCaptureById(String id) =>
       (select(captures)..where((t) => t.id.equals(id))).getSingleOrNull();

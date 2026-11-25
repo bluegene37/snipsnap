@@ -296,6 +296,37 @@ class StorageService {
   }
 
   // Gene - Nov, 20, 2026: Added paginated loadHistoryPage and adoptOrphanedFilesInDirectory for fast non-blocking startup; refactored loadHistory to reuse adoptOrphanedFilesInDirectory.
+  // Gene - Nov, 25, 2026: Extracted _filterExistingCaptures helper and added loadRecentHistoryPage and loadArchiveHistoryPage.
+  // Old implementation:
+  // static Future<({List<CaptureItem> items, int dbCount, bool hasMore})>
+  // loadHistoryPage({int limit = 30, int offset = 0}) async {
+  //   final items = <CaptureItem>[];
+  //   try {
+  //     final dbItems = await DatabaseService.loadCapturesFromDb(
+  //       limit: limit,
+  //       offset: offset,
+  //     );
+  //     if (dbItems.isEmpty) {
+  //       return (items: items, dbCount: 0, hasMore: false);
+  //     }
+  //     final existsList = await Future.wait(
+  //       dbItems.map((item) => File(item.filePath).exists()),
+  //     );
+  //     for (var i = 0; i < dbItems.length; i++) {
+  //       if (existsList[i]) {
+  //         items.add(dbItems[i]);
+  //       }
+  //     }
+  //     return (
+  //       items: items,
+  //       dbCount: dbItems.length,
+  //       hasMore: dbItems.length >= limit,
+  //     );
+  //   } catch (e) {
+  //     debugPrint('SnipSnap loadHistoryPage error: $e');
+  //     return (items: items, dbCount: 0, hasMore: false);
+  //   }
+  // }
   static Future<({List<CaptureItem> items, int dbCount, bool hasMore})>
   loadHistoryPage({int limit = 30, int offset = 0}) async {
     final items = <CaptureItem>[];
@@ -307,22 +338,96 @@ class StorageService {
       if (dbItems.isEmpty) {
         return (items: items, dbCount: 0, hasMore: false);
       }
-      final existsList = await Future.wait(
-        dbItems.map((item) => File(item.filePath).exists()),
-      );
-      for (var i = 0; i < dbItems.length; i++) {
-        if (existsList[i]) {
-          items.add(dbItems[i]);
-        }
-      }
+      final existing = await _filterExistingCaptures(dbItems);
       return (
-        items: items,
+        items: existing,
         dbCount: dbItems.length,
         hasMore: dbItems.length >= limit,
       );
     } catch (e) {
       debugPrint('SnipSnap loadHistoryPage error: $e');
       return (items: items, dbCount: 0, hasMore: false);
+    }
+  }
+
+  // Gene - Nov, 25, 2026: Added 7-day recent history and older-date archive paginated loaders plus shared existence filter helper.
+  static Future<List<CaptureItem>> _filterExistingCaptures(
+    List<CaptureItem> dbItems,
+  ) async {
+    if (dbItems.isEmpty) return <CaptureItem>[];
+    final existsList = await Future.wait(
+      dbItems.map((item) => File(item.filePath).exists()),
+    );
+    return [
+      for (var i = 0; i < dbItems.length; i++)
+        if (existsList[i]) dbItems[i],
+    ];
+  }
+
+  static Future<
+    ({List<CaptureItem> items, int dbCount, bool hasMore, int olderCount})
+  >
+  loadRecentHistoryPage({
+    required DateTime since,
+    int limit = 30,
+    int offset = 0,
+    bool includeOlderCount = true,
+  }) async {
+    try {
+      final dbItemsFuture = DatabaseService.loadCapturesSinceFromDb(
+        since,
+        limit: limit,
+        offset: offset,
+      );
+      final olderCountFuture = includeOlderCount
+          ? DatabaseService.countCapturesBeforeFromDb(since)
+          : Future<int>.value(0);
+      final dbItems = await dbItemsFuture;
+      final olderCount = await olderCountFuture;
+      final existing = await _filterExistingCaptures(dbItems);
+      return (
+        items: existing,
+        dbCount: dbItems.length,
+        hasMore: dbItems.length >= limit,
+        olderCount: olderCount,
+      );
+    } catch (e) {
+      debugPrint('SnipSnap loadRecentHistoryPage error: $e');
+      return (
+        items: <CaptureItem>[],
+        dbCount: 0,
+        hasMore: false,
+        olderCount: 0,
+      );
+    }
+  }
+
+  static Future<({List<CaptureItem> items, int dbCount, bool hasMore})>
+  loadArchiveHistoryPage({
+    DateTime? before,
+    int limit = 60,
+    int offset = 0,
+  }) async {
+    try {
+      final dbItems = before != null
+          ? await DatabaseService.loadCapturesBeforeFromDb(
+              before,
+              limit: limit,
+              offset: offset,
+            )
+          : await DatabaseService.loadCapturesFromDb(
+              limit: limit,
+              offset: offset,
+            );
+      final existing = await _filterExistingCaptures(dbItems);
+      return (
+        items: existing,
+        dbCount: dbItems.length,
+        hasMore: dbItems.length >= limit,
+      );
+    } catch (e) {
+      debugPrint('SnipSnap loadArchiveHistoryPage error: $e');
+      return (items: <CaptureItem>[], dbCount: 0, hasMore: false);
     }
   }
 
