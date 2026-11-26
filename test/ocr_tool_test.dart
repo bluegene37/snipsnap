@@ -29,6 +29,13 @@ String _bodyOf(String source, String signature) {
   return source.substring(start, end);
 }
 
+// Gene - Nov, 27, 2026: Strip // comment lines so archived old code does not trigger source-level invariants.
+String _stripComments(String source) => source
+    .replaceAll('\r\n', '\n')
+    .split('\n')
+    .where((l) => !l.trimLeft().startsWith('//'))
+    .join('\n');
+
 void main() {
   test('handlerFor returns the OCR handler', () {
     expect(
@@ -286,7 +293,11 @@ void main() {
     late String source;
 
     setUpAll(() {
-      source = File('lib/views/main_screen.dart').readAsStringSync();
+      // Gene - Nov, 27, 2026: Strip comment lines from main_screen.dart before checking source invariants.
+      // source = File('lib/views/main_screen.dart').readAsStringSync();
+      source = _stripComments(
+        File('lib/views/main_screen.dart').readAsStringSync(),
+      );
     });
 
     test('the cache key tracks the bitmap, not just the capture', () {
@@ -337,13 +348,25 @@ void main() {
 
     test('switching captures drops the cache and closes the panel', () {
       expect(_bodyOf(source, 'void _resetOcr('), contains('clearCache()'));
-      // The gallery's selection callback is where the active capture actually
-      // changes.
-      final selection = source.indexOf('onSelectItem: (item) {');
-      expect(selection, isNot(-1));
-      final reset = source.indexOf('_resetOcr();', selection);
-      final assigned = source.indexOf('_activeCapture = item;', selection);
+      // Gene - Nov, 27, 2026: GallerySidebar and CaptureHistoryDialog both delegate selection to _selectCaptureItem.
+      // // The gallery's selection callback is where the active capture actually
+      // // changes.
+      // final selection = source.indexOf('onSelectItem: (item) {');
+      // expect(selection, isNot(-1));
+      // final reset = source.indexOf('_resetOcr();', selection);
+      // final assigned = source.indexOf('_activeCapture = item;', selection);
+      // expect(reset, isNot(-1));
+      // expect(
+      //   reset,
+      //   lessThan(assigned),
+      //   reason: 'stale results must not survive the switch',
+      // );
+      expect(source, contains('onSelectItem: _selectCaptureItem'));
+      final body = _bodyOf(source, 'void _selectCaptureItem(');
+      final reset = body.indexOf('_resetOcr();');
+      final assigned = body.indexOf('_activeCapture = item;');
       expect(reset, isNot(-1));
+      expect(assigned, isNot(-1));
       expect(
         reset,
         lessThan(assigned),

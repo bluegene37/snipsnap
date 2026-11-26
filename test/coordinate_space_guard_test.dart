@@ -21,6 +21,13 @@ String _regionBetween(String source, String from, String to) {
   return source.substring(start, end);
 }
 
+// Gene - Nov, 27, 2026: Strip // comment lines so archived old code does not trigger source-level invariants.
+String _stripComments(String source) => source
+    .replaceAll('\r\n', '\n')
+    .split('\n')
+    .where((l) => !l.trimLeft().startsWith('//'))
+    .join('\n');
+
 void main() {
   // ---------------------------------------------------------------------------
   // The invariant: everything persisted is IMAGE PIXELS, top-left origin. A
@@ -98,7 +105,11 @@ void main() {
       late String source;
 
       setUpAll(() {
-        source = File('lib/views/main_screen.dart').readAsStringSync();
+        // Gene - Nov, 27, 2026: Strip comment lines from main_screen.dart before checking source invariants.
+        // source = File('lib/views/main_screen.dart').readAsStringSync();
+        source = _stripComments(
+          File('lib/views/main_screen.dart').readAsStringSync(),
+        );
       });
 
       // Findings 4: crop, flatten and export burn markup into the bitmap. Flatten
@@ -158,17 +169,43 @@ void main() {
             'onDeleteItem: (item) async {',
             'onOpenLibraryLocation:',
           );
+          // Gene - Nov, 27, 2026: Verify both gallery and archive deletion paths delegate to _removeCaptureFromStateAndDisk where conversion is scheduled.
+          // expect(
+          //   region,
+          //   contains('_convertActiveCaptureAnnotations()'),
+          //   reason:
+          //       'without this the promoted capture spends the session with '
+          //       'viewport numbers treated as image pixels, and the save guard '
+          //       'means nothing drawn on it is ever persisted',
+          // );
+          // expect(region, contains('annotationsNeedConversion'));
+          // expect(
+          //   region,
+          //   contains('addPostFrameCallback'),
+          //   reason:
+          //       'the canvas has to be laid out before the projection exists, '
+          //       'same as onSelectItem',
+          // );
+          expect(region, contains('_removeCaptureFromStateAndDisk(item)'));
           expect(
-            region,
+            _bodyOf(source, 'Future<void> _deleteCaptureItem('),
+            contains('_removeCaptureFromStateAndDisk(item)'),
+          );
+          final removeBody = _bodyOf(
+            source,
+            'Future<void> _removeCaptureFromStateAndDisk(',
+          );
+          expect(
+            removeBody,
             contains('_convertActiveCaptureAnnotations()'),
             reason:
                 'without this the promoted capture spends the session with '
                 'viewport numbers treated as image pixels, and the save guard '
                 'means nothing drawn on it is ever persisted',
           );
-          expect(region, contains('annotationsNeedConversion'));
+          expect(removeBody, contains('annotationsNeedConversion'));
           expect(
-            region,
+            removeBody,
             contains('addPostFrameCallback'),
             reason:
                 'the canvas has to be laid out before the projection exists, '

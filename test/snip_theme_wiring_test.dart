@@ -72,12 +72,21 @@ void main() {
             'showDialog must take _dialogContext (the navigator\'s own '
             'context), never this State\'s context',
       );
+      // Gene - Nov, 27, 2026: Updated expected _dialogContext showDialog count from 3 to 4 to include Capture History Archive.
+      // expect(
+      //   RegExp(r'context: _dialogContext!,').allMatches(source).length,
+      //   3,
+      //   reason:
+      //       'all three showDialog call sites (About, Keyboard Shortcuts, '
+      //       'Save As) must route through the navigator context',
+      // );
       expect(
         RegExp(r'context: _dialogContext!,').allMatches(source).length,
-        3,
+        4,
         reason:
-            'all three showDialog call sites (About, Keyboard Shortcuts, '
-            'Save As) must route through the navigator context',
+            'all four showDialog call sites (About, Keyboard Shortcuts, '
+            'Save As, Capture History Archive) must route through the '
+            'navigator context',
       );
     },
   );

@@ -4793,8 +4793,11 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _openHistoryArchiveDialog() async {
+    // Gene - Nov, 27, 2026: Route archive dialog through _dialogContext inside MainScreen's MaterialApp and SnipThemeScope.
+    if (_dialogContext == null) return;
     await showDialog<void>(
-      context: context,
+      // context: context,
+      context: _dialogContext!,
       builder: (_) => CaptureHistoryDialog(
         recentCutoff: _recentHistoryCutoff,
         olderCount: _olderCapturesCount,
