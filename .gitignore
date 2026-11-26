@@ -53,6 +53,8 @@ app.*.map.json
 # Certificates, keystores & signing keys
 *.pfx
 *.p12
+# Gene - Nov, 26, 2026: Ensure Apple API private key (.p8) files are gitignored alongside .p12 certificates.
+*.p8
 *.cer
 *.crt
 *.der
