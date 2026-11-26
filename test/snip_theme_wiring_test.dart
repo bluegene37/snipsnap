@@ -54,42 +54,39 @@ void main() {
     expect(source, contains('runApp(const MainScreen())'));
   });
 
-  test(
-    'main_screen opens dialogs from a context inside its own MaterialApp',
-    () {
-      // The other half of the same fix. `_MainScreenState.context` sits above
-      // the MaterialApp that its own build() mounts, so once main.dart stopped
-      // supplying an outer app there was no Navigator and no
-      // MaterialLocalizations above it at all — showDialog asserts
-      // `No MaterialLocalizations found` before it even reaches the navigator.
-      // Every showDialog call here must therefore go through the navigatorKey.
-      final source = _code('lib/views/main_screen.dart');
-      expect(source, contains('navigatorKey: _navigatorKey'));
-      expect(
-        source,
-        isNot(contains('context: context,')),
-        reason:
-            'showDialog must take _dialogContext (the navigator\'s own '
-            'context), never this State\'s context',
-      );
-      // Gene - Nov, 27, 2026: Updated expected _dialogContext showDialog count from 3 to 4 to include Capture History Archive.
-      // expect(
-      //   RegExp(r'context: _dialogContext!,').allMatches(source).length,
-      //   3,
-      //   reason:
-      //       'all three showDialog call sites (About, Keyboard Shortcuts, '
-      //       'Save As) must route through the navigator context',
-      // );
-      expect(
-        RegExp(r'context: _dialogContext!,').allMatches(source).length,
-        4,
-        reason:
-            'all four showDialog call sites (About, Keyboard Shortcuts, '
-            'Save As, Capture History Archive) must route through the '
-            'navigator context',
-      );
-    },
-  );
+  test('main_screen opens dialogs from a context inside its own MaterialApp', () {
+    // The other half of the same fix. `_MainScreenState.context` sits above
+    // the MaterialApp that its own build() mounts, so once main.dart stopped
+    // supplying an outer app there was no Navigator and no
+    // MaterialLocalizations above it at all — showDialog asserts
+    // `No MaterialLocalizations found` before it even reaches the navigator.
+    // Every showDialog call here must therefore go through the navigatorKey.
+    final source = _code('lib/views/main_screen.dart');
+    expect(source, contains('navigatorKey: _navigatorKey'));
+    expect(
+      source,
+      isNot(contains('context: context,')),
+      reason:
+          'showDialog must take _dialogContext (the navigator\'s own '
+          'context), never this State\'s context',
+    );
+    // Gene - Nov, 27, 2026: Updated expected _dialogContext showDialog count from 3 to 4 to include Capture History Archive.
+    // expect(
+    //   RegExp(r'context: _dialogContext!,').allMatches(source).length,
+    //   3,
+    //   reason:
+    //       'all three showDialog call sites (About, Keyboard Shortcuts, '
+    //       'Save As) must route through the navigator context',
+    // );
+    expect(
+      RegExp(r'context: _dialogContext!,').allMatches(source).length,
+      4,
+      reason:
+          'all four showDialog call sites (About, Keyboard Shortcuts, '
+          'Save As, Capture History Archive) must route through the '
+          'navigator context',
+    );
+  });
 
   test('main_screen no longer hardcodes the violet accent', () {
     final source = _src('lib/views/main_screen.dart');

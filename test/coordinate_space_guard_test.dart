@@ -99,133 +99,130 @@ void main() {
     });
   });
 
-  group(
-    'main_screen guards every path that reads annotations as image pixels',
-    () {
-      late String source;
+  group('main_screen guards every path that reads annotations as image pixels', () {
+    late String source;
 
-      setUpAll(() {
-        // Gene - Nov, 27, 2026: Strip comment lines from main_screen.dart before checking source invariants.
-        // source = File('lib/views/main_screen.dart').readAsStringSync();
-        source = _stripComments(
-          File('lib/views/main_screen.dart').readAsStringSync(),
+    setUpAll(() {
+      // Gene - Nov, 27, 2026: Strip comment lines from main_screen.dart before checking source invariants.
+      // source = File('lib/views/main_screen.dart').readAsStringSync();
+      source = _stripComments(
+        File('lib/views/main_screen.dart').readAsStringSync(),
+      );
+    });
+
+    // Findings 4: crop, flatten and export burn markup into the bitmap. Flatten
+    // and crop rewrite the capture file, so placing viewport numbers as image
+    // pixels there is not recoverable.
+    for (final signature in const [
+      'Future<Uint8List?> _renderAnnotatedBytes(',
+      'Future<void> _handleFlattenCanvas(',
+      'Future<void> _handleApplyCrop(',
+    ]) {
+      test('$signature refuses while a conversion is still owed', () {
+        expect(
+          _bodyOf(source, signature),
+          contains('_blockedByPendingConversion('),
+          reason:
+              'this path treats _annotations as image pixels and would '
+              'bake still-viewport markup in at the wrong coordinates',
         );
       });
+    }
 
-      // Findings 4: crop, flatten and export burn markup into the bitmap. Flatten
-      // and crop rewrite the capture file, so placing viewport numbers as image
-      // pixels there is not recoverable.
+    test('the refusal is user-visible, not a silent no-op', () {
+      expect(
+        _bodyOf(source, 'bool _blockedByPendingConversion('),
+        contains('_showToast('),
+        reason:
+            'a button that does nothing reads as broken; this branch '
+            'follows the same loud-failure contract as the "editor is not '
+            'ready" cases beside it',
+      );
+    });
+
+    test('flatten and crop check before they touch the undo stack', () {
       for (final signature in const [
-        'Future<Uint8List?> _renderAnnotatedBytes(',
         'Future<void> _handleFlattenCanvas(',
         'Future<void> _handleApplyCrop(',
       ]) {
-        test('$signature refuses while a conversion is still owed', () {
-          expect(
-            _bodyOf(source, signature),
-            contains('_blockedByPendingConversion('),
-            reason:
-                'this path treats _annotations as image pixels and would '
-                'bake still-viewport markup in at the wrong coordinates',
-          );
-        });
+        final body = _bodyOf(source, signature);
+        final guard = body.indexOf('_blockedByPendingConversion(');
+        final undo = body.indexOf('_pushUndoState(');
+        expect(undo, isNot(-1), reason: '$signature should push undo state');
+        expect(
+          guard,
+          lessThan(undo),
+          reason: 'an aborted $signature must not leave an orphan undo entry',
+        );
       }
+    });
 
-      test('the refusal is user-visible, not a silent no-op', () {
-        expect(
-          _bodyOf(source, 'bool _blockedByPendingConversion('),
-          contains('_showToast('),
-          reason:
-              'a button that does nothing reads as broken; this branch '
-              'follows the same loud-failure contract as the "editor is not '
-              'ready" cases beside it',
+    // Finding 2: deleting the active capture promotes the next one, which is a
+    // selection change and owes the same conversion onSelectItem schedules.
+    test(
+      'deleting the active capture schedules the promoted one\'s conversion',
+      () {
+        final region = _regionBetween(
+          source,
+          'onDeleteItem: (item) async {',
+          'onOpenLibraryLocation:',
         );
-      });
+        // Gene - Nov, 27, 2026: Verify both gallery and archive deletion paths delegate to _removeCaptureFromStateAndDisk where conversion is scheduled.
+        // expect(
+        //   region,
+        //   contains('_convertActiveCaptureAnnotations()'),
+        //   reason:
+        //       'without this the promoted capture spends the session with '
+        //       'viewport numbers treated as image pixels, and the save guard '
+        //       'means nothing drawn on it is ever persisted',
+        // );
+        // expect(region, contains('annotationsNeedConversion'));
+        // expect(
+        //   region,
+        //   contains('addPostFrameCallback'),
+        //   reason:
+        //       'the canvas has to be laid out before the projection exists, '
+        //       'same as onSelectItem',
+        // );
+        expect(region, contains('_removeCaptureFromStateAndDisk(item)'));
+        expect(
+          _bodyOf(source, 'Future<void> _deleteCaptureItem('),
+          contains('_removeCaptureFromStateAndDisk(item)'),
+        );
+        final removeBody = _bodyOf(
+          source,
+          'Future<void> _removeCaptureFromStateAndDisk(',
+        );
+        expect(
+          removeBody,
+          contains('_convertActiveCaptureAnnotations()'),
+          reason:
+              'without this the promoted capture spends the session with '
+              'viewport numbers treated as image pixels, and the save guard '
+              'means nothing drawn on it is ever persisted',
+        );
+        expect(removeBody, contains('annotationsNeedConversion'));
+        expect(
+          removeBody,
+          contains('addPostFrameCallback'),
+          reason:
+              'the canvas has to be laid out before the projection exists, '
+              'same as onSelectItem',
+        );
+      },
+    );
 
-      test('flatten and crop check before they touch the undo stack', () {
-        for (final signature in const [
-          'Future<void> _handleFlattenCanvas(',
-          'Future<void> _handleApplyCrop(',
-        ]) {
-          final body = _bodyOf(source, signature);
-          final guard = body.indexOf('_blockedByPendingConversion(');
-          final undo = body.indexOf('_pushUndoState(');
-          expect(undo, isNot(-1), reason: '$signature should push undo state');
-          expect(
-            guard,
-            lessThan(undo),
-            reason: 'an aborted $signature must not leave an orphan undo entry',
-          );
-        }
-      });
-
-      // Finding 2: deleting the active capture promotes the next one, which is a
-      // selection change and owes the same conversion onSelectItem schedules.
-      test(
-        'deleting the active capture schedules the promoted one\'s conversion',
-        () {
-          final region = _regionBetween(
-            source,
-            'onDeleteItem: (item) async {',
-            'onOpenLibraryLocation:',
-          );
-          // Gene - Nov, 27, 2026: Verify both gallery and archive deletion paths delegate to _removeCaptureFromStateAndDisk where conversion is scheduled.
-          // expect(
-          //   region,
-          //   contains('_convertActiveCaptureAnnotations()'),
-          //   reason:
-          //       'without this the promoted capture spends the session with '
-          //       'viewport numbers treated as image pixels, and the save guard '
-          //       'means nothing drawn on it is ever persisted',
-          // );
-          // expect(region, contains('annotationsNeedConversion'));
-          // expect(
-          //   region,
-          //   contains('addPostFrameCallback'),
-          //   reason:
-          //       'the canvas has to be laid out before the projection exists, '
-          //       'same as onSelectItem',
-          // );
-          expect(region, contains('_removeCaptureFromStateAndDisk(item)'));
-          expect(
-            _bodyOf(source, 'Future<void> _deleteCaptureItem('),
-            contains('_removeCaptureFromStateAndDisk(item)'),
-          );
-          final removeBody = _bodyOf(
-            source,
-            'Future<void> _removeCaptureFromStateAndDisk(',
-          );
-          expect(
-            removeBody,
-            contains('_convertActiveCaptureAnnotations()'),
-            reason:
-                'without this the promoted capture spends the session with '
-                'viewport numbers treated as image pixels, and the save guard '
-                'means nothing drawn on it is ever persisted',
-          );
-          expect(removeBody, contains('annotationsNeedConversion'));
-          expect(
-            removeBody,
-            contains('addPostFrameCallback'),
-            reason:
-                'the canvas has to be laid out before the projection exists, '
-                'same as onSelectItem',
-          );
-        },
+    test('every conversion entry point posts a post-frame callback', () {
+      // Load, select, delete-and-promote. A fourth entry point appearing
+      // without a post-frame callback would convert against a canvas that has
+      // not been laid out, get converted:false, and quietly do nothing.
+      expect(
+        '_convertActiveCaptureAnnotations()'.allMatches(source).length,
+        4,
+        reason:
+            'three schedulers plus the method declaration; add an entry '
+            'point and this needs re-checking on purpose',
       );
-
-      test('every conversion entry point posts a post-frame callback', () {
-        // Load, select, delete-and-promote. A fourth entry point appearing
-        // without a post-frame callback would convert against a canvas that has
-        // not been laid out, get converted:false, and quietly do nothing.
-        expect(
-          '_convertActiveCaptureAnnotations()'.allMatches(source).length,
-          4,
-          reason:
-              'three schedulers plus the method declaration; add an entry '
-              'point and this needs re-checking on purpose',
-        );
-      });
-    },
-  );
+    });
+  });
 }
