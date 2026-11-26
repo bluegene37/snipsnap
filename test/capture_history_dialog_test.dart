@@ -70,15 +70,21 @@ void _runTests(SnipThemeMode mode) {
                         onDeleteItem: onDeleteItem ?? (_) async {},
                         onOpenLibraryLocation: onOpenLibraryLocation,
                         onRevealItemInFolder: onRevealItemInFolder,
-                        loadPage: ({before, required limit, required offset}) async {
-                          final pool = before != null ? olderItems : allItems;
-                          final slice = pool.skip(offset).take(limit).toList();
-                          return (
-                            items: slice,
-                            dbCount: slice.length,
-                            hasMore: offset + slice.length < pool.length,
-                          );
-                        },
+                        loadPage:
+                            ({before, required limit, required offset}) async {
+                              final pool = before != null
+                                  ? olderItems
+                                  : allItems;
+                              final slice = pool
+                                  .skip(offset)
+                                  .take(limit)
+                                  .toList();
+                              return (
+                                items: slice,
+                                dbCount: slice.length,
+                                hasMore: offset + slice.length < pool.length,
+                              );
+                            },
                       ),
                     );
                   },
@@ -94,74 +100,94 @@ void _runTests(SnipThemeMode mode) {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('[$label] renders date groups, toggles collapse, and switches Older/All and media filters', (
-    tester,
-  ) async {
-    await pumpDialog(tester);
+  testWidgets(
+    '[$label] renders date groups, toggles collapse, and switches Older/All and media filters',
+    (tester) async {
+      await pumpDialog(tester);
 
-    expect(find.byKey(const ValueKey('history-dialog-group-2026-11-18')), findsOneWidget);
-    expect(find.byKey(const ValueKey('history-dialog-group-2026-11-10')), findsOneWidget);
-    expect(find.text('Capture old_1'), findsOneWidget);
-    expect(find.text('Capture old_vid'), findsOneWidget);
-    expect(find.text('Capture recent_1'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('history-dialog-group-2026-11-18')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('history-dialog-group-2026-11-10')),
+        findsOneWidget,
+      );
+      expect(find.text('Capture old_1'), findsOneWidget);
+      expect(find.text('Capture old_vid'), findsOneWidget);
+      expect(find.text('Capture recent_1'), findsNothing);
 
-    // Collapse Nov 18 date group
-    await tester.tap(find.byKey(const ValueKey('history-dialog-group-2026-11-18')));
-    await tester.pumpAndSettle();
-    expect(find.text('Capture old_1'), findsNothing);
-    expect(find.text('Capture old_vid'), findsOneWidget);
+      // Collapse Nov 18 date group
+      await tester.tap(
+        find.byKey(const ValueKey('history-dialog-group-2026-11-18')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Capture old_1'), findsNothing);
+      expect(find.text('Capture old_vid'), findsOneWidget);
 
-    // Expand back
-    await tester.tap(find.byKey(const ValueKey('history-dialog-group-2026-11-18')));
-    await tester.pumpAndSettle();
-    expect(find.text('Capture old_1'), findsOneWidget);
+      // Expand back
+      await tester.tap(
+        find.byKey(const ValueKey('history-dialog-group-2026-11-18')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Capture old_1'), findsOneWidget);
 
-    // Switch to All Dates
-    await tester.tap(find.byKey(const ValueKey('history-scope-all')));
-    await tester.pumpAndSettle();
-    expect(find.text('Capture recent_1'), findsOneWidget);
+      // Switch to All Dates
+      await tester.tap(find.byKey(const ValueKey('history-scope-all')));
+      await tester.pumpAndSettle();
+      expect(find.text('Capture recent_1'), findsOneWidget);
 
-    // Filter to Videos only
-    await tester.tap(find.byKey(const ValueKey('history-dialog-filter-videos')));
-    await tester.pumpAndSettle();
-    expect(find.text('Capture old_vid'), findsOneWidget);
-    expect(find.text('Capture old_1'), findsNothing);
-  });
+      // Filter to Videos only
+      await tester.tap(
+        find.byKey(const ValueKey('history-dialog-filter-videos')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Capture old_vid'), findsOneWidget);
+      expect(find.text('Capture old_1'), findsNothing);
+    },
+  );
 
-  testWidgets('[$label] handles select, reveal, open folder, and delete callbacks', (
-    tester,
-  ) async {
-    CaptureItem? selected;
-    CaptureItem? revealed;
-    CaptureItem? deleted;
-    var openedFolder = 0;
+  testWidgets(
+    '[$label] handles select, reveal, open folder, and delete callbacks',
+    (tester) async {
+      CaptureItem? selected;
+      CaptureItem? revealed;
+      CaptureItem? deleted;
+      var openedFolder = 0;
 
-    await pumpDialog(
-      tester,
-      onSelectItem: (item) => selected = item,
-      onRevealItemInFolder: (item) => revealed = item,
-      onOpenLibraryLocation: () => openedFolder++,
-      onDeleteItem: (item) async => deleted = item,
-    );
+      await pumpDialog(
+        tester,
+        onSelectItem: (item) => selected = item,
+        onRevealItemInFolder: (item) => revealed = item,
+        onOpenLibraryLocation: () => openedFolder++,
+        onDeleteItem: (item) async => deleted = item,
+      );
 
-    await tester.tap(find.byKey(const ValueKey('history-dialog-open-folder')));
-    await tester.pump();
-    expect(openedFolder, 1);
+      await tester.tap(
+        find.byKey(const ValueKey('history-dialog-open-folder')),
+      );
+      await tester.pump();
+      expect(openedFolder, 1);
 
-    await tester.tap(find.byKey(const ValueKey('history-dialog-reveal-old_1')));
-    await tester.pump();
-    expect(revealed?.id, 'old_1');
+      await tester.tap(
+        find.byKey(const ValueKey('history-dialog-reveal-old_1')),
+      );
+      await tester.pump();
+      expect(revealed?.id, 'old_1');
 
-    await tester.tap(find.byKey(const ValueKey('history-dialog-delete-old_2')));
-    await tester.pumpAndSettle();
-    expect(deleted?.id, 'old_2');
-    expect(find.text('Capture old_2'), findsNothing);
+      await tester.tap(
+        find.byKey(const ValueKey('history-dialog-delete-old_2')),
+      );
+      await tester.pumpAndSettle();
+      expect(deleted?.id, 'old_2');
+      expect(find.text('Capture old_2'), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('history-dialog-card-old_1')));
-    await tester.pumpAndSettle();
-    expect(selected?.id, 'old_1');
-    expect(find.byType(CaptureHistoryDialog), findsNothing);
-  });
+      await tester.tap(find.byKey(const ValueKey('history-dialog-card-old_1')));
+      await tester.pumpAndSettle();
+      expect(selected?.id, 'old_1');
+      expect(find.byType(CaptureHistoryDialog), findsNothing);
+    },
+  );
 }
 
 void main() {
